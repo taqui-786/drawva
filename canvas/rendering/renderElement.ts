@@ -1,6 +1,6 @@
 import { DEFAULT_CANVAS_BACKGROUND } from "@canvas/constants/defaults";
 import type { Arrowhead, Camera, CanvasElement } from "@/canvas/model/types";
-import { hachureFillForPolygon, sketchPolyline, sketchRect } from "./sketch";
+import { hachureFillForPolygon, sketchEllipse, sketchPolyline, sketchRect } from "./sketch";
 import type { Rect } from "@canvas/geometry/rectangle";
 import { rectsIntersect } from "@canvas/geometry/rectangle";
 import { elementAABB } from "@canvas/geometry/elementGeometry";
@@ -135,6 +135,7 @@ export function renderElement(rc: RenderContext, el: CanvasElement): void {
       if (rough > 0) {
         for (const pass of sketchRect(el.x, el.y, w, h, sketchOpts)) {
           sketchClosedPath(ctx, pass);
+          ctx.stroke();
         }
       } else {
         strokeRectPath(ctx, el);
@@ -143,9 +144,17 @@ export function renderElement(rc: RenderContext, el: CanvasElement): void {
     }
     case "ellipse": {
       fillEllipse(ctx, el);
-      ctx.beginPath();
-      ctx.ellipse(el.x + w / 2, el.y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
-      ctx.stroke();
+      if (rough > 0) {
+        const passes = sketchEllipse(el.x + w / 2, el.y + h / 2, Math.abs(w / 2), Math.abs(h / 2), sketchOpts);
+        for (const pass of passes) {
+          sketchClosedPath(ctx, pass);
+          ctx.stroke();
+        }
+      } else {
+        ctx.beginPath();
+        ctx.ellipse(el.x + w / 2, el.y + h / 2, Math.abs(w / 2), Math.abs(h / 2), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
       break;
     }
     case "diamond": {
@@ -158,11 +167,20 @@ export function renderElement(rc: RenderContext, el: CanvasElement): void {
         [el.x, cyD],
       ];
       fillShape(ctx, el, pts);
-      ctx.beginPath();
-      ctx.moveTo(pts[0][0], pts[0][1]);
-      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-      ctx.closePath();
-      ctx.stroke();
+      if (rough > 0) {
+        const closedPts: [number, number][] = [...pts, pts[0]];
+        const passes = sketchPolyline(closedPts, sketchOpts);
+        for (const pass of passes) {
+          sketchClosedPath(ctx, pass);
+          ctx.stroke();
+        }
+      } else {
+        ctx.beginPath();
+        ctx.moveTo(pts[0][0], pts[0][1]);
+        for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+        ctx.closePath();
+        ctx.stroke();
+      }
       break;
     }
     case "line": {

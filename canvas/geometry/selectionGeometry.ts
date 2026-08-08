@@ -1,6 +1,7 @@
 import {
   HANDLE_SIZE_SCREEN_PX,
   ROTATION_HANDLE_OFFSET_SCREEN_PX,
+  SELECTION_ELEMENT_PADDING_PX,
 } from "@canvas/constants/defaults";
 import type { Camera, CanvasElement, Point } from "@/canvas/model/types";
 import { elementCenter } from "./elementGeometry";
@@ -61,13 +62,14 @@ export function resizeHandlePositions(el: CanvasElement, camera: Camera): Select
 }
 
 export function elementCornersScreen(el: CanvasElement, camera: Camera): [Point, Point, Point, Point] {
+  const pad = SELECTION_ELEMENT_PADDING_PX / camera.zoom;
   const cx = el.x + el.width / 2;
   const cy = el.y + el.height / 2;
   const local: Point[] = [
-    [el.x, el.y],
-    [el.x + el.width, el.y],
-    [el.x + el.width, el.y + el.height],
-    [el.x, el.y + el.height],
+    [el.x - pad, el.y - pad],
+    [el.x + el.width + pad, el.y - pad],
+    [el.x + el.width + pad, el.y + el.height + pad],
+    [el.x - pad, el.y + el.height + pad],
   ];
   const rotated = local.map((p) =>
     el.angle === 0 ? p : rotatePoint(p, [cx, cy], el.angle),

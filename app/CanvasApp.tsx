@@ -12,10 +12,12 @@ import {
   GridIcon,
   HandIcon,
   Maximize04Icon,
+  EraserIcon,
   MinusSignIcon,
   PencilEdit01Icon,
   PlusSignIcon,
   Redo02Icon,
+  Txt01Icon,
   Undo02Icon,
 } from "@hugeicons/core-free-icons";
 import { HugeiconsIcon, type IconSvgElement } from "@hugeicons/react";
@@ -35,6 +37,8 @@ const TOOL_LABEL: Partial<Record<ToolType, string>> = {
   line: "L",
   arrow: "A",
   freedraw: "P",
+  text: "T",
+  eraser: "E",
 };
 
 export default function CanvasApp() {
@@ -91,6 +95,8 @@ export default function CanvasApp() {
     { type: "arrow", label: "Arrow (A)", icon: ArrowUpRight01Icon },
     { type: "line", label: "Line (L)" },
     { type: "freedraw", label: "Draw (P)", icon: PencilEdit01Icon },
+    { type: "text", label: "Text (T)", icon: Txt01Icon },
+    { type: "eraser", label: "Eraser (E)", icon: EraserIcon },
   ];
 
   return (

@@ -16,6 +16,8 @@ export const ROTATION_HANDLE_OFFSET_SCREEN_PX = 24;
 export const DEFAULT_CANVAS_BACKGROUND = "#ffffff";
 
 export const SELECTION_COLOR = "#4c6fff";
+/** Gap between element border and selection outline, in screen px. */
+export const SELECTION_ELEMENT_PADDING_PX = 4;
 export const CANVA_FILE_VERSION = 1;
 export const CANVA_FILE_TYPE = "drawva";
 

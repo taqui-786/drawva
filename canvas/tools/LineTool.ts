@@ -82,22 +82,19 @@ export class LineTool implements ToolHandler {
   }
 
   onPointerUp(editor: Editor, e: ToolPointerEvent): void {
-    if (!this.elementId || (this.activePointerId !== null && e.pointerId !== this.activePointerId)) {
-      return;
-    }
-    const el = editor.scene.getElement(this.elementId) as LineElement | undefined;
-    if (!el) return;
+    if (!this.elementId) return;
 
-    // Check if initial drag was significant
+    // If we're not yet in multi-point mode, check drag distance
     if (!this.isMultiPoint && this.startScene) {
       const dist = Math.hypot(e.scene[0] - this.startScene[0], e.scene[1] - this.startScene[1]);
-      if (dist * editor.camera.get().zoom > 10) {
-        // Simple drag finished!
+      if (dist * editor.camera.get().zoom > 8) {
+        // Drag-to-draw complete!
         this.finish(editor);
         return;
       }
-      // Turned into multi-point click mode
+      // Click detected -> switch to multi-point mode and release pointer capture so cursor moves freely
       this.isMultiPoint = true;
+      editor.releasePointer();
     }
   }
 
@@ -148,6 +145,12 @@ export class LineTool implements ToolHandler {
 
   cancel(editor: Editor): void {
     if (this.elementId && !this.committed) {
+      const el = editor.scene.getElement(this.elementId) as LineElement | undefined;
+      // If we are in multi-point mode with at least 2 finalized points, finish instead of discarding
+      if (el && this.isMultiPoint && el.points.length > 2) {
+        this.finish(editor);
+        return;
+      }
       editor.scene.removeElement(this.elementId);
       editor.history.discardTransaction();
       editor.markDocumentDirty();

@@ -93,10 +93,7 @@ export class FreedrawTool implements ToolHandler {
       normalizeElementGeometry(el);
       editor.commitHistory();
       this.committed = true;
-      editor.selectOnly(el.id);
-      if (!editor.isToolLocked()) {
-        editor.setActiveTool("select");
-      }
+      // Do not auto-select or switch tool — pencil tool stays active for continuous drawing
     } else if (el) {
       editor.scene.removeElement(el.id);
       editor.history.discardTransaction();

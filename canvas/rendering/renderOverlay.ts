@@ -68,13 +68,28 @@ function drawSelection(rc: RenderContext, el: CanvasElement): void {
     ctx.fillStyle = "#ffffff";
     ctx.strokeStyle = SELECTION_COLOR;
     ctx.lineWidth = 1.5;
+
+    const half = HANDLE_SIZE_SCREEN_PX / 2;
     for (const h of handles) {
       ctx.beginPath();
-      ctx.arc(h[0], h[1], HANDLE_SIZE_SCREEN_PX / 2, 0, Math.PI * 2);
+      ctx.roundRect(h[0] - half, h[1] - half, HANDLE_SIZE_SCREEN_PX, HANDLE_SIZE_SCREEN_PX, 2);
       ctx.fill();
       ctx.stroke();
     }
+
     if (rotationHandle) {
+      // Connector line from top-center edge to rotation handle
+      const topMid: [number, number] = [
+        (pts[0][0] + pts[1][0]) / 2,
+        (pts[0][1] + pts[1][1]) / 2,
+      ];
+      ctx.beginPath();
+      ctx.moveTo(topMid[0], topMid[1]);
+      ctx.lineTo(rotationHandle[0], rotationHandle[1]);
+      ctx.strokeStyle = SELECTION_COLOR;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
       ctx.beginPath();
       ctx.arc(rotationHandle[0], rotationHandle[1], HANDLE_SIZE_SCREEN_PX / 2, 0, Math.PI * 2);
       ctx.fill();

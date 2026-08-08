@@ -16,6 +16,10 @@ export interface ToolHandler {
   onPointerMove?(editor: Editor, e: ToolPointerEvent): void;
   onPointerUp?(editor: Editor, e: ToolPointerEvent): void;
   onDoubleClick?(editor: Editor, e: ToolPointerEvent): void;
+  /** Explicitly finish the current in-progress operation (e.g. Enter key or double-click). */
+  finish?(editor: Editor): void;
+  /** Cancel/abort the current in-progress operation (e.g. Escape key). */
+  cancel?(editor: Editor): void;
 }
 
 export interface ToolPointerEvent {

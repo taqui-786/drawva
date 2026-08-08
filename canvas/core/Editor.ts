@@ -25,6 +25,8 @@ import { ShapeTool } from "@canvas/tools/ShapeTool";
 import { LineTool } from "@canvas/tools/LineTool";
 import { ArrowTool } from "@canvas/tools/ArrowTool";
 import { FreedrawTool } from "@canvas/tools/FreedrawTool";
+import { EraserTool } from "@canvas/tools/EraserTool";
+import { TextTool } from "@canvas/tools/TextTool";
 import type { ToolHandler } from "@canvas/tools/Tool";
 import { LocalPersistence } from "@canvas/persistence/localPersistence";
 import { documentToJson, DRAWVA_EXTENSION, serializeDocument } from "@canvas/persistence/serializer";
@@ -73,6 +75,8 @@ export class Editor {
     this.tools.set("line", new LineTool());
     this.tools.set("arrow", new ArrowTool());
     this.tools.set("freedraw", new FreedrawTool());
+    this.tools.set("eraser", new EraserTool());
+    this.tools.set("text", new TextTool());
 
     this.pointer = new PointerManager(this, options.overlayCanvas);
     this.keyboard = new KeyboardManager(this);

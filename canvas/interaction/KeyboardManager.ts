@@ -95,9 +95,22 @@ export class KeyboardManager {
     }
 
     if (e.key === "Escape") {
+      const tool = editor.getActiveTool();
+      if (tool.cancel) {
+        tool.cancel(editor);
+      }
       editor.setActiveTool("select");
       editor.clearSelection();
       return;
+    }
+
+    if (e.key === "Enter") {
+      const tool = editor.getActiveTool();
+      if (tool.finish) {
+        e.preventDefault();
+        tool.finish(editor);
+        return;
+      }
     }
 
     if (e.key === "q") {
