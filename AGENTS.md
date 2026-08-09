@@ -29,14 +29,13 @@ Add shadcn components with `pnpm dlx shadcn add <component>` — never hand-writ
 
 ## Repo shape
 
-Early-stage single Next.js App Router app with a **framework-agnostic canvas engine** in `canvas/` (spec: `PLAN.md`).
+Next.js App Router app with a tile-based infinite canvas engine in `lib/canvas/`.
 
-- React owns only the shell: `app/CanvasApp.tsx` (toolbars, stacked canvases, editor lifecycle) and `app/page.tsx`. UI communicates with the engine **exclusively** through the `Editor` API (`canvas/core/Editor.ts`, factory `createCanvasEditor`) — never reach into `Scene`/`History`/`renderer` internals from React.
-- Engine modules (browser-only, no React imports): `canvas/core` (Editor, Scene, History, events, CanvasEngine), `canvas/*model|geometry|viewport|rendering|tools|interaction|persistence|constants|utils`. Path alias `@canvas/* → ./canvas/*`.
-- **Two-canvas rendering** (§21): `CanvasEngine` owns static + overlay canvases, DPR, rAF loop, and dirty flags. Static = scene/grid; overlay = selection handles, marquee, ghosts. Never redraw static for handle moves.
-- **Transactions, not per-move history** (§54): geometry gestures `beginTransaction → mutate live → commitHistory` so one drag = one undo entry. Soft-delete (`isDeleted`) keeps undo cheap. `normalizeElementGeometry` runs on resize-up for negative dims.
-- **Deterministic sketch rendering** (§12): element `seed` + seeded PRNG (`sketch.ts`) key sketch jitter + hachure fill; same seed ⇒ same output across refresh/save/load.
-- **Single geometry source of truth** (§74): `canvas/geometry` (elementAABB, hitTest, rotatedRectCorners, resizeRectFromPointer) feeds renderer, hit-test, selection, handles — don't re-implement shape math elsewhere.
-- Tools follow a lifecycle interface (`canvas/tools/Tool.ts`): `onEnter/onPointerDown/onPointerMove/onPointerUp/onExit`; all receive **scene-space** points (screen→scene conversion lives in `PointerManager`). Handles-on-selection take priority over element hits.
-- Only `rectangle`/`ellipse`/`diamond`/`line`/`arrow`/`freedraw`/`text` element types exist so far; `createElement` throws for unregistered types. Add new types in `canvas/model/elementFactory.ts` + type union before wiring a tool.
-- Persistence is versioned (`{type:"drawva", version:1}`), safely deserialized via `persistence/deserializer` (never trusts imported JSON), autosaved debounced to `localStorage`.
+- React owns only the UI shell: `app/canvas/CanvasApp.tsx` (toolbars, viewport), `app/canvas/CanvasShell.tsx`, `app/canvas/page.tsx`, and `app/page.tsx`. UI communicates with the engine via `CanvasProvider` (`components/canvas/CanvasProvider.tsx`) delegating to `CanvasEngine` (`lib/canvas/engine.ts`).
+- Engine modules (browser-only, standard canvas API): `lib/canvas/` (`engine.ts`, `camera.ts`, `tiles.ts`, `layers.ts`, `strokes.ts`, `eraser.ts`, `shapes.ts`, `selection.ts`, `textTool.ts`, `images.ts`, `undo.ts`, `persistence.ts`, `exportPng.ts`, `commands.ts`, `types.ts`). Path aliases `@/* → ./*` and `@canvas/* → ./canvas/*`.
+- **Tile-based rendering**: `CanvasEngine` owns multi-layer stacked canvases (grid, tiles, objects, overlay/marquee), DPR scaling, rAF rendering loop, and dirty state flags.
+- **Camera coordinate transforms**: `Camera` (`lib/canvas/camera.ts`) owns all screen-to-world and world-to-screen coordinate math with scale bounds (0.03x..4.0x) and pan offsets.
+- **Undo / Redo snapshot stack**: `UndoStack` (`lib/canvas/undo.ts`) manages dual past/future stacks of item and tile state snapshots with a 50-record and 64MB memory cap.
+- **Supported tools**: `pen`, `highlighter`, `eraser`, `hand`, `select`, `text`, `rect`, `ellipse`, `arrow`, `line`, `image`.
+- **Persistence**: IndexedDB database (`canvas-db` v1) storing `documents`, `tiles`, and `items` object stores with debounced autosave.
+

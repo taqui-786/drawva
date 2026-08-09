@@ -175,27 +175,3 @@ export class CommandExecutor {
   }
 }
 
-// ── Canned "simulate AI reply" payload for debug panel ────
-
-export const DEBUG_AI_COMMANDS: CanvasCommand[] = [
-  {
-    tool: "write_text",
-    x: 500,
-    y: 300,
-    text: "Hello from the AI pipeline! ✨",
-    fontSize: 32,
-  },
-  {
-    tool: "html_widget",
-    x: 500,
-    y: 400,
-    w: 400,
-    h: 200,
-    title: "Demo Widget",
-    html: `<div style="padding:16px;font-family:sans-serif;background:#f9fafb;border-radius:8px">
-      <h2 style="margin:0 0 8px">AI-Generated Widget</h2>
-      <p>This widget was placed by the command pipeline.<br>
-         Accept it to commit to the canvas.</p>
-    </div>`,
-  },
-];
