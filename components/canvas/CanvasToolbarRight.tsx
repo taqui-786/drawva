@@ -143,7 +143,7 @@ export function CanvasToolbarRight() {
 
       <button
         id="btn-fit"
-        title="Fit Screen (0) — Auto-zoom to fit content"
+        title="Fit Screen (0) - Auto-zoom to fit content"
         aria-label="Fit Screen"
         onClick={api.fitContent}
         className="flex h-9 w-9 items-center justify-center rounded-xl hover:bg-muted/80 active:scale-95 text-muted-foreground hover:text-foreground transition-all"

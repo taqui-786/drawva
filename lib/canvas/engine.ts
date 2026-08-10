@@ -477,6 +477,7 @@ export class CanvasEngine {
       if (!this.destroyed) {
         try {
           this.render();
+          this.emitter.emit("cameraChanged", this.camera.toState());
         } catch (err) {
           console.error("[CanvasEngine] Render error:", err);
         }
@@ -848,6 +849,14 @@ export class CanvasEngine {
     this.emitter.emit("sizeChanged", size);
   }
 
+  getItems(): CanvasItem[] {
+    return this.items;
+  }
+
+  getItem(id: string): CanvasItem | undefined {
+    return this.items.find((it) => it.id === id);
+  }
+
   addItem(item: CanvasItem): void {
     const itemsBefore = [...this.items];
     this.items = [...this.items, item];
@@ -856,6 +865,47 @@ export class CanvasEngine {
     this.onCommit();
     this.emitter.emit("canUndoChanged", this.undoStack.canUndo);
     this.emitter.emit("canRedoChanged", this.undoStack.canRedo);
+    this.emitter.emit("itemsChanged", this.items);
+  }
+
+  deleteItem(id: string): void {
+    const itemsBefore = [...this.items];
+    this.items = this.items.filter((item) => item.id !== id);
+    if (this.items.length !== itemsBefore.length) {
+      this.undoStack.pushItemsChange(itemsBefore, this.items);
+      this.requestRender();
+      this.onCommit();
+      this.emitter.emit("canUndoChanged", this.undoStack.canUndo);
+      this.emitter.emit("canRedoChanged", this.undoStack.canRedo);
+      this.emitter.emit("itemsChanged", this.items);
+    }
+  }
+
+  updateItem(id: string, updates: Partial<CanvasItem>): void {
+    const itemsBefore = [...this.items];
+    let updated = false;
+    this.items = this.items.map((item) => {
+      if (item.id === id) {
+        updated = true;
+        return { ...item, ...updates } as CanvasItem;
+      }
+      return item;
+    });
+    if (updated) {
+      this.undoStack.pushItemsChange(itemsBefore, this.items);
+      this.requestRender();
+      this.onCommit();
+      this.emitter.emit("canUndoChanged", this.undoStack.canUndo);
+      this.emitter.emit("canRedoChanged", this.undoStack.canRedo);
+      this.emitter.emit("itemsChanged", this.items);
+    }
+  }
+
+  processWheelAtPoint(screenX: number, screenY: number, deltaY: number): void {
+    const factor = deltaY < 0 ? 1.1 : 0.9;
+    this.camera.zoomAtPoint(screenX, screenY, factor);
+    this.requestRender();
+    this.emitter.emit("zoomChanged", this.camera.scale);
   }
 
   undo(): void {
@@ -868,8 +918,10 @@ export class CanvasEngine {
     this.items = record.itemsBefore;
 
     this.requestRender();
+    this.onCommit();
     this.emitter.emit("canUndoChanged", this.undoStack.canUndo);
     this.emitter.emit("canRedoChanged", this.undoStack.canRedo);
+    this.emitter.emit("itemsChanged", this.items);
   }
 
   redo(): void {
@@ -882,8 +934,10 @@ export class CanvasEngine {
     this.items = record.itemsAfter;
 
     this.requestRender();
+    this.onCommit();
     this.emitter.emit("canUndoChanged", this.undoStack.canUndo);
     this.emitter.emit("canRedoChanged", this.undoStack.canRedo);
+    this.emitter.emit("itemsChanged", this.items);
   }
 
   async clearAll(): Promise<void> {
@@ -910,6 +964,7 @@ export class CanvasEngine {
     this.requestRender();
     this.emitter.emit("canUndoChanged", this.undoStack.canUndo);
     this.emitter.emit("canRedoChanged", this.undoStack.canRedo);
+    this.emitter.emit("itemsChanged", this.items);
   }
 
   fitContent(): void {

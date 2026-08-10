@@ -91,6 +91,15 @@ export interface WidgetItem {
   widgetKind: "html" | "diagram";
   payload: string;
   title?: string;
+  widgetType?: "diagram_source" | "html_widget";
+  pluginId?: string;
+  diagramKind?: string;
+  sourceFormat?: string;
+  source?: string;
+  copyText?: string;
+  copyLabel?: string;
+  frameworkVersion?: string;
+  dirtyMarks?: string[];
 }
 
 export type CanvasItem = TextItem | ShapeItem | ImageItem | WidgetItem;
@@ -129,8 +138,36 @@ export type CanvasCommand =
   | { tool: "plot_function"; x: number; y: number; w: number; h: number; expression: string }
   | { tool: "draw"; origin: Point; types: string[]; items: unknown[] }
   | { tool: "erase"; mode: "rect"; x: number; y: number; w: number; h: number }
-  | { tool: "html_widget"; x: number; y: number; w: number; h: number; title: string; html: string }
-  | { tool: "diagram_source"; x: number; y: number; w: number; h: number; sourceFormat: string; source: string; title: string };
+  | {
+      tool: "html_widget";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      title: string;
+      html: string;
+      pluginId?: string;
+      diagramKind?: string;
+      sourceFormat?: string;
+      copyText?: string;
+      copyLabel?: string;
+      frameworkVersion?: string;
+    }
+  | {
+      tool: "diagram_source";
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      sourceFormat: string;
+      source: string;
+      title: string;
+      pluginId?: string;
+      diagramKind?: string;
+      copyText?: string;
+      copyLabel?: string;
+      frameworkVersion?: string;
+    };
 
 // ── Undo snapshot ──────────────────────────────────────────
 
@@ -171,6 +208,8 @@ export interface EngineEventMap {
   zoomChanged: number;
   canUndoChanged: boolean;
   canRedoChanged: boolean;
+  itemsChanged: CanvasItem[];
+  cameraChanged: CameraState;
   saved: void;
   error: Error;
 }

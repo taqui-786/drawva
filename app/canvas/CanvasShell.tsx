@@ -12,7 +12,7 @@ const CanvasApp = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="flex h-screen w-screen items-center justify-center bg-background">
+      <div className="flex h-dvh w-screen items-center justify-center bg-background">
         <div className="flex flex-col items-center gap-4">
           <div className="size-12 rounded-2xl bg-foreground flex items-center justify-center">
             <span className="text-background font-black text-xl">D</span>

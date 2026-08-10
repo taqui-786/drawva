@@ -10,6 +10,7 @@
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-heading);
+  --font-serif: var(--font-serif);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -73,6 +74,7 @@
   --chart-4: oklch(0.367 0.016 35.7);
   --chart-5: oklch(0.268 0.011 36.5);
   --radius: 0.625rem;
+  --font-serif: var(--font-serif-newsreader);
   --sidebar: oklch(0.986 0.002 67.8);
   --sidebar-foreground: oklch(0.147 0.004 49.3);
   --sidebar-primary: oklch(0.648 0.2 131.684);
@@ -129,5 +131,64 @@
   }
   html {
     @apply font-sans;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
+  /* ── Landing page keystroke key ────────────────────────── */
+  .kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.5rem;
+    height: 1.5rem;
+    padding: 0 0.35rem;
+    border: 1px solid var(--border);
+    border-bottom-width: 2px;
+    border-radius: var(--radius-sm);
+    background: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--muted-foreground);
+  }
+
+  /* ── Landing scroll-reveal (IntersectionObserver) ──────── */
+  [data-reveal] {
+    opacity: 0;
+    transform: translateY(16px);
+    transition:
+      opacity 600ms cubic-bezier(0.16, 1, 0.3, 1),
+      transform 600ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: opacity, transform;
+  }
+  [data-reveal].is-visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    [data-reveal] {
+      opacity: 1;
+      transform: none;
+      transition: none;
+    }
+  }
+
+  /* Ultra-subtle card lift on hover — flat, no heavy shadow */
+  .card-lift {
+    transition:
+      border-color 200ms ease,
+      box-shadow 200ms ease,
+      transform 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .card-lift:hover {
+    border-color: color-mix(in oklch, var(--foreground) 20%, var(--border));
+    box-shadow: 0 2px 8px color-mix(in oklch, var(--foreground) 4%, transparent);
+    transform: translateY(-2px);
   }
 }

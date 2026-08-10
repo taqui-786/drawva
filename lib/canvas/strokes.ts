@@ -35,6 +35,34 @@ function decimatePoints(pts: StrokePoint[]): StrokePoint[] {
   return out;
 }
 
+/** Calculate distance from a world point to a widget bounding box (0 inside box) */
+export function pointDistanceToWidget(
+  point: { x: number; y: number },
+  widget: { x: number; y: number; w: number; h: number }
+): number {
+  const dx = point.x < widget.x ? widget.x - point.x : point.x > widget.x + widget.w ? point.x - widget.x - widget.w : 0;
+  const dy = point.y < widget.y ? widget.y - point.y : point.y > widget.y + widget.h ? point.y - widget.y - widget.h : 0;
+  return Math.hypot(dx, dy);
+}
+
+/** Spatial mark proximity check: test if stroke points fall within thresholdPx of a widget */
+export function strokeWidgetProximity(
+  widget: { x: number; y: number; w: number; h: number },
+  points: { x: number; y: number }[],
+  cameraScale: number,
+  thresholdPx = 72
+): { distance: number; hits: number } | null {
+  if (!points || points.length === 0) return null;
+  let distance = Infinity;
+  let hits = 0;
+  for (const p of points) {
+    const next = pointDistanceToWidget(p, widget) * cameraScale;
+    distance = Math.min(distance, next);
+    if (next <= thresholdPx) hits++;
+  }
+  return distance <= thresholdPx ? { distance, hits } : null;
+}
+
 export class StrokeTool {
   private drawing = false;
   private points: StrokePoint[] = [];
@@ -81,6 +109,13 @@ export class StrokeTool {
 
   // ── Pointer event handlers ─────────────────────────────
 
+  private getEffectivePressure(e: PointerEvent): number {
+    if (e.pointerType === "mouse" || e.pressure === 0 || e.pressure === 0.5) {
+      return 1.0;
+    }
+    return Math.min(1.0, Math.max(0.2, e.pressure));
+  }
+
   onPointerDown(e: PointerEvent): void {
     if (this.drawing || e.button !== 0) return;
 
@@ -95,7 +130,7 @@ export class StrokeTool {
     }
 
     const world = this.camera.screenToWorld({ x: e.offsetX, y: e.offsetY });
-    this.points.push({ ...world, pressure: e.pressure > 0 ? e.pressure : 0.5 });
+    this.points.push({ ...world, pressure: this.getEffectivePressure(e) });
 
     this.drawLiveStroke();
   }
@@ -107,11 +142,11 @@ export class StrokeTool {
     if (coalesced.length > 0) {
       for (const ce of coalesced) {
         const cworld = this.camera.screenToWorld({ x: ce.offsetX, y: ce.offsetY });
-        this.points.push({ ...cworld, pressure: ce.pressure > 0 ? ce.pressure : 0.5 });
+        this.points.push({ ...cworld, pressure: this.getEffectivePressure(ce) });
       }
     } else {
       const world = this.camera.screenToWorld({ x: e.offsetX, y: e.offsetY });
-      this.points.push({ ...world, pressure: e.pressure > 0 ? e.pressure : 0.5 });
+      this.points.push({ ...world, pressure: this.getEffectivePressure(e) });
     }
 
     if (this.points.length > MAX_POINTS) {
@@ -156,7 +191,7 @@ export class StrokeTool {
     ctx.clearRect(0, 0, w, h);
 
     this.applyStrokeStyle(ctx);
-    this.drawPoints(ctx, this.points);
+    this.drawPoints(ctx, decimatePoints(this.points));
 
     ctx.restore();
   }
@@ -180,48 +215,33 @@ export class StrokeTool {
       return { x: s.x, y: s.y, width };
     };
 
-    if (pts.length === 1) {
-      const s = toScreen(pts[0]);
+    const screenPts = pts.map(toScreen);
+
+    if (screenPts.length === 1) {
+      const s = screenPts[0];
       ctx.beginPath();
       ctx.arc(s.x, s.y, Math.max(1, s.width / 2), 0, Math.PI * 2);
       ctx.fill();
       return;
     }
 
-    const screenPts = pts.map(toScreen);
+    const avgWidth = screenPts.reduce((acc, p) => acc + p.width, 0) / screenPts.length;
+    ctx.lineWidth = Math.max(1, avgWidth);
+
+    ctx.beginPath();
+    ctx.moveTo(screenPts[0].x, screenPts[0].y);
 
     for (let i = 0; i < screenPts.length - 1; i++) {
       const a = screenPts[i];
       const b = screenPts[i + 1];
       const midX = (a.x + b.x) / 2;
       const midY = (a.y + b.y) / 2;
-
-      ctx.lineWidth = Math.max(1, (a.width + b.width) / 2);
-      ctx.beginPath();
-      if (i === 0) {
-        ctx.moveTo(a.x, a.y);
-      } else {
-        const prevMidX = (screenPts[i - 1].x + a.x) / 2;
-        const prevMidY = (screenPts[i - 1].y + a.y) / 2;
-        ctx.moveTo(prevMidX, prevMidY);
-      }
       ctx.quadraticCurveTo(a.x, a.y, midX, midY);
-      ctx.stroke();
     }
 
-    // Connect last midpoint to end
-    if (screenPts.length > 1) {
-      const last = screenPts[screenPts.length - 1];
-      const prev = screenPts[screenPts.length - 2];
-      const prevMidX = (prev.x + last.x) / 2;
-      const prevMidY = (prev.y + last.y) / 2;
-
-      ctx.lineWidth = Math.max(1, last.width);
-      ctx.beginPath();
-      ctx.moveTo(prevMidX, prevMidY);
-      ctx.lineTo(last.x, last.y);
-      ctx.stroke();
-    }
+    const last = screenPts[screenPts.length - 1];
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
   }
 
   // ── Commit to tiles ────────────────────────────────────
@@ -291,6 +311,8 @@ export class StrokeTool {
   }
 
   private drawPointsOnTile(ctx: CanvasRenderingContext2D, pts: StrokePoint[]): void {
+    if (pts.length === 0) return;
+
     if (pts.length === 1) {
       const width = this.baseSize * (0.4 + pts[0].pressure * 0.6);
       ctx.beginPath();
@@ -299,39 +321,23 @@ export class StrokeTool {
       return;
     }
 
+    const avgWidth = pts.reduce((acc, p) => acc + this.baseSize * (0.4 + p.pressure * 0.6), 0) / pts.length;
+    ctx.lineWidth = Math.max(1, avgWidth);
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0].x, pts[0].y);
+
     for (let i = 0; i < pts.length - 1; i++) {
       const a = pts[i];
       const b = pts[i + 1];
       const midX = (a.x + b.x) / 2;
       const midY = (a.y + b.y) / 2;
-      const width = this.baseSize * (0.4 + ((a.pressure + b.pressure) / 2) * 0.6);
-
-      ctx.lineWidth = Math.max(1, width);
-      ctx.beginPath();
-      if (i === 0) {
-        ctx.moveTo(a.x, a.y);
-      } else {
-        const prevMidX = (pts[i - 1].x + a.x) / 2;
-        const prevMidY = (pts[i - 1].y + a.y) / 2;
-        ctx.moveTo(prevMidX, prevMidY);
-      }
       ctx.quadraticCurveTo(a.x, a.y, midX, midY);
-      ctx.stroke();
     }
 
-    if (pts.length > 1) {
-      const last = pts[pts.length - 1];
-      const prev = pts[pts.length - 2];
-      const prevMidX = (prev.x + last.x) / 2;
-      const prevMidY = (prev.y + last.y) / 2;
-      const width = this.baseSize * (0.4 + last.pressure * 0.6);
-
-      ctx.lineWidth = Math.max(1, width);
-      ctx.beginPath();
-      ctx.moveTo(prevMidX, prevMidY);
-      ctx.lineTo(last.x, last.y);
-      ctx.stroke();
-    }
+    const last = pts[pts.length - 1];
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
   }
 
   private strokeBounds(pts: StrokePoint[]): Rect {

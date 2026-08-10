@@ -151,7 +151,16 @@ export class Persistence {
         }
       }
 
-      // Save items
+      // Save items and clean up removed items for this doc
+      const existingItems = await idbGetAll<{ id: string }>(db, "items", `${this.docId}:`);
+      const currentKeys = new Set(payload.items.map((it) => `${this.docId}:${it.id}`));
+      for (const oldRow of existingItems) {
+        if (!currentKeys.has(oldRow.id)) {
+          const tx = db.transaction("items", "readwrite");
+          tx.objectStore("items").delete(oldRow.id);
+        }
+      }
+
       for (const item of payload.items) {
         await idbPut(db, "items", {
           id: `${this.docId}:${item.id}`,

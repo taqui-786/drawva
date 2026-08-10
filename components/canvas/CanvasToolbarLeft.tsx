@@ -96,8 +96,8 @@ export function CanvasToolbarLeft() {
       <ToolBtn tool="text" icon={Cursor01Icon} label="Text (T)" active={state.activeTool === "text"} onSelect={handleTool} />
       <ToolBtn tool="rect" icon={Square01Icon} label="Rectangle (R)" active={state.activeTool === "rect"} onSelect={handleTool} />
       <ToolBtn tool="ellipse" icon={OvalIcon} label="Ellipse (O)" active={state.activeTool === "ellipse"} onSelect={handleTool} />
-      <ToolBtn tool="arrow" icon={ArrowRight01Icon} label="Arrow Shape (A) — Directional arrow" active={state.activeTool === "arrow"} onSelect={handleTool} />
-      <ToolBtn tool="line" icon={StrokeRightIcon} label="Line (L) — Straight line" active={state.activeTool === "line"} onSelect={handleTool} />
+      <ToolBtn tool="arrow" icon={ArrowRight01Icon} label="Arrow Shape (A) - Directional arrow" active={state.activeTool === "arrow"} onSelect={handleTool} />
+      <ToolBtn tool="line" icon={StrokeRightIcon} label="Line (L) - Straight line" active={state.activeTool === "line"} onSelect={handleTool} />
       <ToolBtn tool="image" icon={ImageUploadIcon} label="Import Image (I)" active={state.activeTool === "image"} onSelect={handleTool} />
     </aside>
   );
