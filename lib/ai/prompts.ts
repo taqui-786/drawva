@@ -4,12 +4,13 @@
 
 import type { AiRequest } from "./types";
 
-export const WIDGET_RENDERING_POLICY = `CRITICAL TRANSPARENCY & BOUNDS RULES FOR html_widget:
+export const WIDGET_RENDERING_POLICY = `CRITICAL TRANSPARENCY & FLUID CONTAINER RESPONSIVENESS RULES FOR html_widget:
 1. DO NOT output outer page wrappers or full-screen background containers (NO bg-gray-100, NO min-h-screen, NO bg-slate-50, NO full-width outer page wrapper).
-2. Return ONLY the standalone component card itself (e.g. <div class="w-[420px] bg-white rounded-2xl shadow-xl p-6 border border-slate-200">...</div>).
-3. The surrounding page area MUST be 100% transparent so the canvas grid displays behind it.
-4. Declare tight, accurate bounds (w, h) matching the actual component card size (e.g., w: 440, h: 360 for a login form). Do not return oversized 900x700 bounds for a small card.
-5. Primary content should be prominent without crowding the layout; body text and labels must remain comfortably readable at normal canvas scale (body text >= 14px, headings >= 20px). Keep user-facing text natively selectable.`;
+2. Root element MUST use fluid container-dependent layout ("w-full h-full flex flex-col items-center justify-center p-4") so the UI component scales fluidly when the user or AI resizes the parent iframe container.
+3. NEVER hardcode fixed-pixel width wrappers like "w-[420px]" or "w-80" on the root container. Use fluid, responsive containers (e.g. <div class="w-full h-full flex items-center justify-center"><div class="w-full max-w-lg bg-white rounded-2xl shadow-xl p-6 border border-slate-200 flex flex-col justify-between">...</div></div>).
+4. The surrounding page area MUST be 100% transparent so the canvas grid displays behind it.
+5. Declare balanced, accurate initial bounds (w, h) matching the aspect ratio of the component (e.g., w: 440, h: 360 for a card/form).
+6. Body text, headings, buttons, and input fields must be fluid and scale comfortably with container dimensions. Keep user-facing text natively selectable.`;
 
 export const TWO_FAMILY_ROUTING_RULE = `TWO-FAMILY GENERATION RULES:
 1. FAMILY 1 (Native Canvas Draw): Small sketches, simple annotations, quick 1-equation answers ("3+2=" -> write "5"), and diagrams with 10 or FEWER total primitives. Use write_text, draw_formula, plot_function, or native draw commands.
@@ -89,6 +90,11 @@ export function buildHumanMessage(req: AiRequest): string {
   if (req.userPrompt) {
     parts.push(`User prompt: "${req.userPrompt}"`);
   }
+  if (req.observation) {
+    parts.push(
+      `[Auto Observation] The user just finished drawing strokes with a pen/highlighter in the snapshot region — there is NO typed prompt. Interpret the drawn marks (text, formula, diagram, question, annotation) and respond with appropriate canvas commands: render legible answers/text, extract diagrams into proper shape sources, or complete what was sketched. Act on the drawing; never ask for clarification.`
+    );
+  }
   parts.push(`Canvas size: ${req.canvasSize.w}x${req.canvasSize.h}`);
   if (req.latestInput) {
     parts.push(`Typed input: "${req.latestInput.text}"`);
@@ -113,4 +119,56 @@ export function buildHumanMessage(req: AiRequest): string {
 
   return parts.join("\n");
 }
+
+export const PROMPT_EVAL_SYSTEM_PROMPT = `You are the Prompt Evaluator & Design Architect for Drawva AI Canvas.
+Your task is to evaluate and refine raw user prompts, handwritten whiteboards/sketches, and visual recognition notes into a rich, structured, visually compelling specification for final canvas generation.
+
+Objectives:
+1. INTERPRET INTENT: Analyze what the user wants to build or visualize (flowchart, interactive card/widget, mathematical formula, diagram, clock, game, data chart, chemical structure, architecture).
+2. DETECT REFINEMENTS / EDITS (CRITICAL):
+   - Whenever req.widgetEditContext is provided, OR whenever handwritten text/arrows (e.g., "change color blue", "make theme dark", "add reset button", "fix layout") target or point to an existing widget:
+   - YOU MUST ROUTE AS A WIDGET REFINEMENT!
+   - Explicitly specify in your evaluation:
+     "ACTION: REFINE WIDGET
+     MODIFICATION: Apply '[user's requested change]' to the existing widget source code while preserving all existing layout, functionality, and unedited elements."
+3. ENRICH SPECIFICATION:
+   - If user request is brief or vague (e.g., "make login", "auth flowchart", "calculator"), expand it into a comprehensive, state-of-the-art UI/diagram spec with explicit steps, inputs, buttons, styling, and color themes.
+   - For flowcharts/diagrams: detail all decision nodes, process steps, start/end nodes, connectivity, and whether Mermaid LR/TD or DOT or html_widget is best.
+   - For widgets/apps: specify responsive layout, transparent background, fluid bounds, and zero outer page wrappers.
+4. CONSOLIDATE VISUAL NOTES: Incorporate handwritten canvas text, arrows, and visual snapshot notes into the refined prompt so no user detail is lost.
+5. OUTPUT FORMAT:
+   Return ONLY the refined, highly detailed evaluation text (under 400 words). Do NOT output JSON commands or code fences in this stage.`;
+
+export function buildPromptEvalHumanMessage(
+  req: AiRequest,
+  visualNotes?: string
+): string {
+  const parts: string[] = [];
+  parts.push(`User action: ${req.userAction}`);
+  if (req.userPrompt) {
+    parts.push(`User prompt: "${req.userPrompt}"`);
+  }
+  if (req.latestInput) {
+    parts.push(`Typed input: "${req.latestInput.text}"`);
+  }
+  if (visualNotes) {
+    parts.push(`Visual snapshot recognition:\n${visualNotes}`);
+  }
+  if (req.observation) {
+    parts.push(
+      `Observation: The user drew marks on the canvas snapshot without typing a text prompt.`
+    );
+  }
+  if (req.widgetEditContext) {
+    parts.push("\n[Refinement Context - Target Widget to Edit]:");
+    parts.push(JSON.stringify(req.widgetEditContext, null, 2));
+    parts.push(
+      "Instruction: The user drew handwritten marks or wrote instructions (e.g., 'change color blue', 'make background red', 'add button') near/over this existing widget. ROUTE AS A WIDGET REFINEMENT! Detail the exact modifications to apply to the existing widget HTML/CSS/JS source code."
+    );
+  }
+  parts.push(`Canvas bounds: ${req.canvasSize.w}x${req.canvasSize.h}`);
+  parts.push(`Scene items count: ${req.scene?.items?.length ?? 0}`);
+  return parts.join("\n");
+}
+
 

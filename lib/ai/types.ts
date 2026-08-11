@@ -65,6 +65,8 @@ export interface AiRequest {
   latestInput?: { text: string; box?: Rect };
   userAction: AiUserAction;
   userPrompt?: string;
+  /** True when triggered automatically after a pen/highlighter stroke (no typed prompt) */
+  observation?: boolean;
   enabledPlugins?: string[];
   canvasSize: { w: number; h: number };
   reasoningEffort?: "none" | "low" | "medium" | "high" | "max";

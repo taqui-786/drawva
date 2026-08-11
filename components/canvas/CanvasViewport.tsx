@@ -16,9 +16,13 @@ import type {
 } from "@/lib/canvas/types";
 import { WidgetRenderer } from "./WidgetRenderer";
 import { AiPromptBar } from "./AiPromptBar";
+import { SnapshotDebug } from "./SnapshotDebug";
 import { useAiCanvas } from "@/hooks/useAiCanvas";
+import { findRefineCandidateWidget } from "@/lib/canvas/proximity";
 
-export function CanvasViewport() {
+const AUTO_OBSERVE_DELAY_MS = 2500;
+
+export function CanvasViewport({ aiMode }: { aiMode: "auto" | "manual" }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const { engineRef, setState } = useCanvasContext();
   const [engineInstance, setEngineInstance] = useState<CanvasEngine | null>(
@@ -32,7 +36,89 @@ export function CanvasViewport() {
     panY: 0,
   });
 
+  const [refineCandidateId, setRefineCandidateId] = useState<string | null>(null);
+
   const ai = useAiCanvas(engineInstance);
+
+  // ── Auto-observation & Stroke Proximity Refinement ──
+  const autoObserveRef = useRef({
+    timer: null as ReturnType<typeof setTimeout> | null,
+    thinking: false,
+    hasDraft: false,
+  });
+  const aiModeRef = useRef(aiMode);
+  const observeRef = useRef(ai.triggerAi);
+
+  useEffect(() => {
+    aiModeRef.current = aiMode;
+  }, [aiMode]);
+
+  useEffect(() => {
+    observeRef.current = ai.triggerAi;
+  }, [ai.triggerAi]);
+
+  useEffect(() => {
+    autoObserveRef.current.thinking = ai.isThinking;
+    autoObserveRef.current.hasDraft = ai.hasDraft;
+  }, [ai.isThinking, ai.hasDraft]);
+
+  const refineCandidateIdRef = useRef(refineCandidateId);
+  useEffect(() => {
+    refineCandidateIdRef.current = refineCandidateId;
+  }, [refineCandidateId]);
+
+  const triggerRefinementRef = useRef(ai.triggerRefinement);
+  useEffect(() => {
+    triggerRefinementRef.current = ai.triggerRefinement;
+  }, [ai.triggerRefinement]);
+
+  useEffect(() => {
+    if (!engineInstance) return;
+
+    const s = autoObserveRef.current;
+
+    const unsubStroke = engineInstance.on("strokeEnd", (evt) => {
+      // Find if stroke was drawn over/near an existing widget
+      const currentWidgets = engineInstance.getItems().filter(
+        (it): it is WidgetItem => it.kind === "widget"
+      );
+      let candId: string | null = null;
+      if (evt && evt.points && evt.points.length > 0) {
+        const candidate = findRefineCandidateWidget(currentWidgets, evt.points);
+        if (candidate) {
+          candId = candidate.id;
+          setRefineCandidateId(candidate.id);
+        }
+      }
+
+      if (aiModeRef.current !== "auto") return;
+      if (s.timer) clearTimeout(s.timer);
+      s.timer = setTimeout(() => {
+        s.timer = null;
+        if (s.thinking || s.hasDraft) return;
+
+        // If stroke was drawn on a widget, trigger refinement of that widget
+        const targetId = candId || refineCandidateIdRef.current;
+        if (targetId) {
+          const target = currentWidgets.find((w) => w.id === targetId);
+          if (target) {
+            triggerRefinementRef.current(target);
+            setRefineCandidateId(null);
+            return;
+          }
+        }
+        observeRef.current("", "auto", "medium");
+      }, AUTO_OBSERVE_DELAY_MS);
+    });
+
+    return () => {
+      unsubStroke();
+      if (s.timer) {
+        clearTimeout(s.timer);
+        s.timer = null;
+      }
+    };
+  }, [engineInstance]);
 
   useEffect(() => {
     if (typeof window === "undefined" || !containerRef.current) return;
@@ -46,6 +132,7 @@ export function CanvasViewport() {
     const unsubs = [
       engine.on("toolChanged", (tool: ToolName) => {
         setState((s) => ({ ...s, activeTool: tool }));
+        setRefineCandidateId(null);
       }),
       engine.on("colorChanged", (color: string) => {
         setState((s) => ({ ...s, color }));
@@ -122,21 +209,50 @@ export function CanvasViewport() {
     [engineInstance],
   );
 
-  const handleMoveWidget = useCallback(
-    (id: string, x: number, y: number) => {
-      engineInstance?.updateItem(id, { x, y });
+  const handleUpdateWidget = useCallback(
+    (id: string, updates: { x?: number; y?: number; w?: number; h?: number }) => {
+      if (id.startsWith("draft_")) {
+        ai.updateDraftItem(id, updates);
+      } else {
+        engineInstance?.updateItem(id, updates);
+      }
     },
-    [engineInstance],
+    [engineInstance, ai],
   );
 
-  // Combine committed widget items and draft widget items
+  const handleMoveWidget = useCallback(
+    (id: string, x: number, y: number) => {
+      handleUpdateWidget(id, { x, y });
+    },
+    [handleUpdateWidget],
+  );
+
+  const handleResizeWidget = useCallback(
+    (id: string, w: number, h: number) => {
+      handleUpdateWidget(id, { w, h });
+    },
+    [handleUpdateWidget],
+  );
+
+  // Combine committed widget items and draft widget items.
+  // Only hide original widget if a draft replacement is active and ready for preview.
   const committedWidgets = items.filter(
-    (it): it is WidgetItem => it.kind === "widget",
+    (it): it is WidgetItem => it.kind === "widget" && (!ai.hasDraft || it.id !== ai.refiningTargetId),
   );
   const draftWidgets = ai.draftItems.filter(
     (it): it is WidgetItem => it.kind === "widget",
   );
   const allWidgets = [...committedWidgets, ...draftWidgets];
+
+  const handleViewportPointerDown = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const target = e.target as HTMLElement | null;
+      if (target && !target.closest("[data-widget-card]")) {
+        setRefineCandidateId(null);
+      }
+    },
+    []
+  );
 
   return (
     <div
@@ -144,18 +260,27 @@ export function CanvasViewport() {
       id="canvas-viewport"
       className="flex-1 relative overflow-hidden"
       style={{ touchAction: "none" }}
+      onPointerDown={handleViewportPointerDown}
       aria-label="Infinite canvas whiteboard"
     >
-      {/* HTML / Mermaid diagram widgets */}
+      {/* HTML / Mermaid diagram widgets. Engine layers use explicit
+          z-indexes (see lib/canvas/layers.ts) so strokes paint on top
+          of the iframes (PenEcho-style). Widget controls keep z-index:30
+          so they remain above the engine's interaction layer. */}
       <WidgetRenderer
         items={allWidgets}
         camera={cameraState}
         onDeleteWidget={handleDeleteWidget}
         onMoveWidget={handleMoveWidget}
+        onResizeWidget={handleResizeWidget}
+        onUpdateWidget={handleUpdateWidget}
         onRefineWidget={ai.triggerRefinement}
         onAcceptDraft={ai.acceptDraft}
         onDiscardDraft={ai.discardDraft}
         onWheel={(x, y, deltaY) => engineInstance?.processWheelAtPoint(x, y, deltaY)}
+        refineCandidateId={refineCandidateId}
+        isThinking={ai.isThinking}
+        refiningTargetId={ai.refiningTargetId}
       />
 
       {/* Floating AI Prompt Bar & Draft Controls */}
@@ -170,6 +295,9 @@ export function CanvasViewport() {
         onDiscardDraft={ai.discardDraft}
         onClearError={ai.clearError}
       />
+
+      {/* Snapshot debug viewer (testing tool): shows the atlas sent to the AI */}
+      <SnapshotDebug snapshots={ai.snapshots} onClear={ai.clearSnapshots} />
     </div>
   );
 }

@@ -7,7 +7,7 @@ export interface Layers {
   /** Static background + grid */
   paperLayer: HTMLCanvasElement;
   paperCtx: CanvasRenderingContext2D;
-  /** Confirmed ink from tile system */
+  /** Confirmed ink from tile system (mirrored on inkLayer for display above widgets) */
   tileLayer: HTMLCanvasElement;
   tileCtx: CanvasRenderingContext2D;
   /** DOM objects: text boxes, images, widgets */
@@ -15,9 +15,12 @@ export interface Layers {
   /** AI drafts (uncommitted pending items) */
   draftLayer: HTMLCanvasElement;
   draftCtx: CanvasRenderingContext2D;
-  /** Live pen stroke preview while drawing */
+  /** Confirmed ink displayed above widgets (PenEcho ink-above-widget layering) */
   inkLayer: HTMLCanvasElement;
   inkCtx: CanvasRenderingContext2D;
+  /** Live pen stroke preview (transient during stroke) */
+  liveInkLayer: HTMLCanvasElement;
+  liveInkCtx: CanvasRenderingContext2D;
   /** Lasso path, selection handles, hover outlines */
   interactionLayer: HTMLCanvasElement;
   interactionCtx: CanvasRenderingContext2D;
@@ -35,23 +38,27 @@ const CANVAS_LAYERS = [
   "tileLayer",
   "draftLayer",
   "inkLayer",
+  "liveInkLayer",
   "interactionLayer",
 ] as const;
 
-function makeCanvas(container: HTMLElement): HTMLCanvasElement {
+function makeCanvas(container: HTMLElement, zIndex: number): HTMLCanvasElement {
   const c = document.createElement("canvas");
   c.style.position = "absolute";
   c.style.inset = "0";
   c.style.pointerEvents = "none";
+  c.style.zIndex = String(zIndex);
   container.appendChild(c);
   return c;
 }
 
-function makeDiv(container: HTMLElement): HTMLDivElement {
+function makeDiv(container: HTMLElement, zIndex: number): HTMLDivElement {
   const d = document.createElement("div");
   d.style.position = "absolute";
   d.style.inset = "0";
   d.style.pointerEvents = "none";
+  d.style.overflow = "hidden";
+  d.style.zIndex = String(zIndex);
   container.appendChild(d);
   return d;
 }
@@ -81,12 +88,13 @@ export function createLayers(container: HTMLElement): Layers {
   const cssW = container.clientWidth || 800;
   const cssH = container.clientHeight || 600;
 
-  const paperLayer = makeCanvas(container);
-  const tileLayer = makeCanvas(container);
-  const objectLayer = makeDiv(container);
-  const draftLayer = makeCanvas(container);
-  const inkLayer = makeCanvas(container);
-  const interactionLayer = makeCanvas(container);
+  const paperLayer = makeCanvas(container, 1);
+  const tileLayer = makeCanvas(container, 2);
+  const objectLayer = makeDiv(container, 3);
+  const draftLayer = makeCanvas(container, 4);
+  const inkLayer = makeCanvas(container, 5);
+  const liveInkLayer = makeCanvas(container, 6);
+  const interactionLayer = makeCanvas(container, 7);
 
   // Only interactionLayer captures pointer events (top-most canvas)
   interactionLayer.style.pointerEvents = "auto";
@@ -102,6 +110,7 @@ export function createLayers(container: HTMLElement): Layers {
     objectLayer.style.height = `${h}px`;
     fitCanvas(draftLayer, w, h, d);
     fitCanvas(inkLayer, w, h, d);
+    fitCanvas(liveInkLayer, w, h, d);
     fitCanvas(interactionLayer, w, h, d);
   }
 
@@ -140,6 +149,8 @@ export function createLayers(container: HTMLElement): Layers {
     draftCtx: getCtx(draftLayer),
     inkLayer,
     inkCtx: getCtx(inkLayer),
+    liveInkLayer,
+    liveInkCtx: getCtx(liveInkLayer),
     interactionLayer,
     interactionCtx: getCtx(interactionLayer),
     dpr,
@@ -153,6 +164,5 @@ export function createLayers(container: HTMLElement): Layers {
       try { container.removeChild(objectLayer); } catch { /* ok */ }
     },
   };
-
   return layers;
 }

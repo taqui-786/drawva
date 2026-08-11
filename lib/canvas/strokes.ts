@@ -71,6 +71,9 @@ export class StrokeTool {
   private baseSize = 3;
   private opacity = 1;
   private tool: Extract<ToolName, "pen" | "highlighter"> = "pen";
+  private committedRect: Rect | null = null;
+  private committedPoints: { x: number; y: number; width: number }[] | null = null;
+  private recentStrokes: { bounds: Rect; time: number }[] = [];
 
   private camera: Camera;
   private tiles: TileMap;
@@ -95,6 +98,25 @@ export class StrokeTool {
     this.onCommit = onCommit;
   }
 
+  getRecentStrokesBounds(withinMs = 120000): Rect | null {
+    const now = Date.now();
+    const active = this.recentStrokes.filter((s) => now - s.time <= withinMs);
+    if (active.length === 0) return this.committedRect;
+    let u = active[0].bounds;
+    for (let i = 1; i < active.length; i++) {
+      const b = active[i].bounds;
+      const x = Math.min(u.x, b.x);
+      const y = Math.min(u.y, b.y);
+      u = {
+        x,
+        y,
+        w: Math.max(u.x + u.w, b.x + b.w) - x,
+        h: Math.max(u.y + u.h, b.y + b.h) - y,
+      };
+    }
+    return u;
+  }
+
   setTool(tool: Extract<ToolName, "pen" | "highlighter">): void {
     this.tool = tool;
   }
@@ -105,6 +127,16 @@ export class StrokeTool {
 
   setSize(size: number): void {
     this.baseSize = size;
+  }
+
+  /** World-space bounds of the last committed stroke (or null) */
+  get lastCommittedRect(): Rect | null {
+    return this.committedRect;
+  }
+
+  /** Decimated points (x, y, world-units width) of the last committed stroke (or null) */
+  get lastCommittedPoints(): { x: number; y: number; width: number }[] | null {
+    return this.committedPoints;
   }
 
   // ── Pointer event handlers ─────────────────────────────
@@ -122,6 +154,7 @@ export class StrokeTool {
     this.drawing = true;
     this.activePointerId = e.pointerId;
     this.points = [];
+    this.committedRect = null;
 
     try {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -176,13 +209,15 @@ export class StrokeTool {
     this.drawing = false;
     this.activePointerId = null;
     this.points = [];
+    this.committedRect = null;
+    this.committedPoints = null;
     this.clearInkLayer();
   }
 
   // ── Drawing live preview ───────────────────────────────
 
   private drawLiveStroke(): void {
-    const ctx = this.layers.inkCtx;
+    const ctx = this.layers.liveInkCtx;
     const dpr = this.layers.dpr;
     const { cssWidth: w, cssHeight: h } = this.layers;
 
@@ -257,6 +292,14 @@ export class StrokeTool {
     }
 
     const strokeRect = this.strokeBounds(pts);
+    this.committedRect = strokeRect;
+    this.recentStrokes.push({ bounds: strokeRect, time: Date.now() });
+    if (this.recentStrokes.length > 30) this.recentStrokes.shift();
+    this.committedPoints = pts.map((p) => ({
+      x: p.x,
+      y: p.y,
+      width: this.baseSize * (0.4 + p.pressure * 0.6),
+    }));
     const tilesBefore = this.tiles.snapshotRect(strokeRect);
 
     // Commit stroke to tiles
@@ -358,7 +401,7 @@ export class StrokeTool {
   }
 
   private clearInkLayer(): void {
-    const ctx = this.layers.inkCtx;
+    const ctx = this.layers.liveInkCtx;
     const { cssWidth: w, cssHeight: h, dpr } = this.layers;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, w, h);

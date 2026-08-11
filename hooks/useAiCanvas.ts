@@ -11,27 +11,58 @@ import type { AiUserAction, AiRequest, AiReply, WidgetEditContext } from "@/lib/
 import { buildAtlasImage } from "@/lib/canvas/atlas";
 import { extractSceneJson } from "@/lib/canvas/sceneText";
 
+export interface AiSnapshot {
+  id: number;
+  dataUrl: string;
+  worldRect: { x: number; y: number; w: number; h: number };
+  scale: number;
+  outW: number;
+  outH: number;
+  prompt: string;
+  action: AiUserAction;
+  observation: boolean;
+  isRefine: boolean;
+  sentAt: number;
+}
+
 export interface UseAiCanvasReturn {
   isThinking: boolean;
   statusMessage: string | null;
   draftItems: CanvasItem[];
   hasDraft: boolean;
   error: string | null;
-  triggerAi: (userPrompt: string, action?: AiUserAction, reasoningEffort?: "none" | "low" | "medium" | "high" | "max") => Promise<void>;
+  /** Debug snapshots of the atlas image sent to the AI (newest first) */
+  snapshots: AiSnapshot[];
+  clearSnapshots: () => void;
+  triggerAi: (userPrompt: string, action?: AiUserAction, reasoningEffort?: "none" | "low" | "medium" | "high" | "max", widgetEditContext?: WidgetEditContext, widgetEditTargetId?: string) => Promise<void>;
   triggerRefinement: (widget: WidgetItem) => Promise<void>;
   acceptDraft: () => void;
   discardDraft: () => void;
+  updateDraftItem: (id: string, updates: Partial<CanvasItem>) => void;
   clearError: () => void;
+  /** Widget id currently being refined (hidden from canvas until accept/discard) */
+  refiningTargetId: string | null;
 }
+
+const MAX_SNAPSHOTS = 12;
 
 export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
   const [isThinking, setIsThinking] = useState(false);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [draftItems, setDraftItems] = useState<CanvasItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [snapshots, setSnapshots] = useState<AiSnapshot[]>([]);
+  /**
+   * ID of the widget currently being refined. While set, the original
+   * widget is hidden in the canvas (PenEcho-style in-place update) and
+   * only the draft preview is shown. Cleared on accept/discard.
+   */
+  const [refiningTargetId, setRefiningTargetId] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const clearError = useCallback(() => setError(null), []);
+
+  const clearSnapshots = useCallback(() => setSnapshots([]), []);
 
   const triggerAi = useCallback(
     async (
@@ -52,14 +83,48 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
       }
       abortControllerRef.current = new AbortController();
 
+      const isObservation = action === "auto" && !widgetEditContext;
+
       setIsThinking(true);
-      setStatusMessage(widgetEditContext ? "Refining widget in-place..." : "Capturing canvas vision...");
+      setStatusMessage(
+        widgetEditContext
+          ? "Refining widget in-place..."
+          : isObservation
+          ? "Observing canvas..."
+          : "Capturing canvas vision...",
+      );
       setError(null);
 
       try {
-        const engineWithItems = engine as unknown as { items: CanvasItem[] };
-        const activeItems = engineWithItems.items || [];
-        const atlas = buildAtlasImage(engine.tiles, activeItems);
+        const activeItems = engine.getItems() || [];
+        const recentStrokesBounds = engine.getRecentStrokesBounds();
+        const widgetBounds = widgetEditContext?.box;
+
+        // Focused atlas: captures the active pencil stroke cluster + target widget
+        // with generous padding at 1:1 crisp resolution.
+        const atlas = await buildAtlasImage(engine.tiles, activeItems, {
+          recentStrokesBounds,
+          widgetBounds,
+        });
+
+        // Debug: record the snapshot image + metadata that will be sent to AI
+        if (atlas) {
+          const snap: AiSnapshot = {
+            id: Date.now(),
+            dataUrl: atlas.dataUrl,
+            worldRect: atlas.worldRect,
+            scale: atlas.scale,
+            outW: atlas.outW,
+            outH: atlas.outH,
+            prompt: userPrompt,
+            action,
+            observation: isObservation,
+            isRefine: Boolean(widgetEditContext),
+            sentAt: Date.now(),
+          };
+          setSnapshots((prev) => [snap, ...prev].slice(0, MAX_SNAPSHOTS));
+        }
+
         const scene = extractSceneJson(activeItems);
 
         const canvasSize = {
@@ -73,13 +138,20 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
           scene,
           userAction: action,
           userPrompt,
+          observation: isObservation,
           canvasSize,
           reasoningEffort,
           widgetEditTargetId,
           widgetEditContext,
         };
 
-        setStatusMessage(widgetEditContext ? "Applying AI refinements..." : "Thinking & reasoning with MiMo...");
+        setStatusMessage(
+          widgetEditContext
+            ? "Applying AI refinements..."
+            : isObservation
+            ? "Reading what you drew..."
+            : "Thinking & reasoning with MiMo...",
+        );
 
         const response = await fetch("/api/canvas/ai", {
           method: "POST",
@@ -117,7 +189,14 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
         const baseTime = Date.now();
 
         data.commands.forEach((cmd, idx) => {
-          const id = widgetEditTargetId || `draft_${baseTime}_${idx}`;
+          // Refinement drafts use a "draft_widget_<id>" id so React
+          // renders both the original and the draft as separate cards
+          // (keyed uniquely). The original is hidden via the
+          // `refiningTargetId` filter in CanvasViewport; on accept,
+          // acceptDraft() replaces the original with the draft by id.
+          const id = widgetEditTargetId
+            ? `draft_${widgetEditTargetId}_${idx}`
+            : `draft_${baseTime}_${idx}`;
           
           const rawCmdX = typeof (cmd as { x?: number }).x === "number" ? (cmd as { x: number }).x : undefined;
           const rawCmdY = typeof (cmd as { y?: number }).y === "number" ? (cmd as { y: number }).y : undefined;
@@ -137,7 +216,7 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
           let itemH = widgetEditContext?.box?.h ?? rawCmdH ?? targetH;
 
           // Ensure generated size is comfortably readable at current zoom level (screen size >= 320x200px)
-          if (itemW * camScale < 320 || itemH * camScale < 200) {
+          if (!widgetEditContext && (itemW * camScale < 320 || itemH * camScale < 200)) {
             const sizeRatio = Math.max(320 / (itemW * camScale), 200 / (itemH * camScale));
             itemW = Math.round(itemW * sizeRatio);
             itemH = Math.round(itemH * sizeRatio);
@@ -228,11 +307,13 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
       } catch (err) {
         if (err instanceof Error && err.name === "AbortError") {
           console.info("[AI Hook] Request aborted by newer call");
+          setRefiningTargetId(null);
           return;
         }
         console.error("[AI Hook Error]", err);
         const msg = err instanceof Error ? err.message : String(err);
         setError(msg || "Failed to communicate with AI endpoint");
+        setRefiningTargetId(null);
       } finally {
         setIsThinking(false);
       }
@@ -257,7 +338,18 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
         copyLabel: widget.copyLabel,
       };
 
-      await triggerAi("", "refine", "medium", editContext, widget.id);
+      // Hide the original widget while the refined draft is being
+      // generated (PenEcho-style in-place update UX).
+      setRefiningTargetId(widget.id);
+      setStatusMessage("Refining widget in-place...");
+      try {
+        await triggerAi("", "refine", "medium", editContext, widget.id);
+      } finally {
+        if (!abortControllerRef.current?.signal.aborted) {
+          // On normal completion keep refiningTargetId set until
+          // accept/discard clears the draft.
+        }
+      }
     },
     [triggerAi]
   );
@@ -265,24 +357,54 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
   const acceptDraft = useCallback(() => {
     if (!engine || draftItems.length === 0) return;
     draftItems.forEach((item) => {
-      const committedId = item.id.startsWith("draft_")
-        ? item.id.replace(/^draft_/, "widget_")
-        : item.id;
-      const committedItem = { ...item, id: committedId };
-      const existing = engine.getItem(item.id) || engine.getItem(committedId);
+      // Refinement drafts have id `draft_<originalId>_<idx>` (e.g.
+      // `draft_widget_123_0`). We update the ORIGINAL widget in place
+      // so the user sees an in-place replacement (PenEcho-style).
+      let targetId: string | null = null;
+      if (item.id.startsWith("draft_")) {
+        const tail = item.id.slice("draft_".length);
+        const lastUnderscore = tail.lastIndexOf("_");
+        const originalCandidate =
+          lastUnderscore > 0 ? tail.slice(0, lastUnderscore) : tail;
+        if (engine.getItem(originalCandidate)) {
+          targetId = originalCandidate;
+        } else {
+          targetId = "widget_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+        }
+      } else {
+        targetId = item.id;
+      }
+      const committedItem = { ...item, id: targetId };
+      const existing = engine.getItem(targetId);
       if (existing) {
-        engine.updateItem(existing.id, committedItem);
+        engine.updateItem(targetId, committedItem);
       } else {
         engine.addItem(committedItem);
       }
     });
     setDraftItems([]);
-    setStatusMessage("Draft applied to canvas!");
-  }, [engine, draftItems]);
+    setRefiningTargetId(null);
+    setStatusMessage(
+      refiningTargetId
+        ? "Widget refined in place!"
+        : "Draft applied to canvas!",
+    );
+  }, [engine, draftItems, refiningTargetId]);
 
   const discardDraft = useCallback(() => {
     setDraftItems([]);
-    setStatusMessage("Draft discarded.");
+    setRefiningTargetId(null);
+    setStatusMessage(
+      refiningTargetId
+        ? "Refinement discarded — original kept."
+        : "Draft discarded.",
+    );
+  }, [refiningTargetId]);
+
+  const updateDraftItem = useCallback((id: string, updates: Partial<CanvasItem>) => {
+    setDraftItems((prev) =>
+      prev.map((item) => (item.id === id ? ({ ...item, ...updates } as CanvasItem) : item))
+    );
   }, []);
 
   return {
@@ -291,10 +413,14 @@ export function useAiCanvas(engine: CanvasEngine | null): UseAiCanvasReturn {
     draftItems,
     hasDraft: draftItems.length > 0,
     error,
+    snapshots,
+    clearSnapshots,
     triggerAi,
     triggerRefinement,
     acceptDraft,
     discardDraft,
+    updateDraftItem,
     clearError,
+    refiningTargetId,
   };
 }

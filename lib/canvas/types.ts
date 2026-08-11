@@ -212,4 +212,11 @@ export interface EngineEventMap {
   cameraChanged: CameraState;
   saved: void;
   error: Error;
+  /** Fired when a pen/highlighter stroke commits to tiles (world-space bounds) */
+  strokeEnd: {
+    tool: "pen" | "highlighter";
+    worldRect: Rect;
+    /** Decimated stroke points with per-point stroke width (world units) */
+    points: { x: number; y: number; width: number }[];
+  };
 }

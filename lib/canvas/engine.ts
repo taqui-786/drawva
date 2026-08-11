@@ -17,7 +17,7 @@ import { ImageImporter } from "./images";
 import { Persistence } from "./persistence";
 import { exportPng, copyToClipboard } from "./exportPng";
 import { CommandExecutor, type CommandExecutorCallbacks } from "./commands";
-import type { CanvasItem, EngineEventMap, ShapeItem, TextItem, ImageItem, ToolName } from "./types";
+import type { CanvasItem, EngineEventMap, ShapeItem, TextItem, ImageItem, ToolName, Rect } from "./types";
 
 // ── Simple typed event emitter ─────────────────────────────
 
@@ -99,8 +99,6 @@ function drawGrid(
 
 // ── Item rendering ─────────────────────────────────────────
 
-// ── Item rendering ─────────────────────────────────────────
-
 const globalImageCache = new Map<string, HTMLImageElement>();
 
 function getOrLoadImage(src: string, requestRender: () => void): HTMLImageElement | null {
@@ -115,20 +113,33 @@ function getOrLoadImage(src: string, requestRender: () => void): HTMLImageElemen
   return img.complete && img.naturalWidth > 0 ? img : null;
 }
 
-function renderItems(
+/**
+ * Projection used by item rendering. `toScreen` maps a world point to the
+ * current canvas's coordinate system. `scale` is the world-to-canvas scale.
+ * Items live in world space; this indirection lets us reuse the same drawing
+ * code for both the live engine canvas and the offline atlas canvas.
+ */
+export interface ItemProjection {
+  toScreen(p: { x: number; y: number }): { x: number; y: number };
+  scale: number;
+}
+
+function projectFromCamera(camera: Camera): ItemProjection {
+  return {
+    toScreen: (p) => camera.worldToScreen(p),
+    scale: camera.scale,
+  };
+}
+
+/** Draw items (text / shape / image) onto `ctx` using a world→canvas projection. */
+export function drawItems(
   ctx: CanvasRenderingContext2D,
   items: CanvasItem[],
-  camera: Camera,
-  cssW: number,
-  cssH: number,
-  dpr: number,
+  proj: ItemProjection,
   requestRender: () => void
 ): void {
-  ctx.save();
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-
   for (const item of items) {
-    const tl = camera.worldToScreen({ x: item.x, y: item.y });
+    const tl = proj.toScreen({ x: item.x, y: item.y });
 
     if (item.kind === "text") {
       const ti = item as TextItem;
@@ -137,8 +148,8 @@ function renderItems(
       if (ti.imageDataUrl) {
         const img = getOrLoadImage(ti.imageDataUrl, requestRender);
         if (img) {
-          const sw = ti.width * camera.scale;
-          const sh = ti.height * camera.scale;
+          const sw = ti.width * proj.scale;
+          const sh = ti.height * proj.scale;
           ctx.drawImage(img, tl.x, tl.y, sw, sh);
           drawn = true;
         }
@@ -147,11 +158,11 @@ function renderItems(
       if (!drawn) {
         // Direct text rendering fallback
         ctx.save();
-        ctx.font = `${Math.max(10, ti.fontSize * camera.scale)}px sans-serif`;
+        ctx.font = `${Math.max(10, ti.fontSize * proj.scale)}px sans-serif`;
         ctx.fillStyle = ti.color;
         ctx.textBaseline = "top";
         const lines = ti.text.split("\n");
-        const lh = ti.fontSize * camera.scale * 1.4;
+        const lh = ti.fontSize * proj.scale * 1.4;
         lines.forEach((line, i) => {
           ctx.fillText(line, tl.x, tl.y + i * lh);
         });
@@ -161,32 +172,32 @@ function renderItems(
       const si = item as ShapeItem;
       ctx.save();
       ctx.strokeStyle = si.color;
-      ctx.lineWidth = Math.max(1, si.strokeWidth * camera.scale);
+      ctx.lineWidth = Math.max(1, si.strokeWidth * proj.scale);
       ctx.fillStyle = si.fill ?? "transparent";
       ctx.lineCap = "round";
       ctx.lineJoin = "round";
 
       if (si.type === "rect") {
-        const sw = si.w * camera.scale;
-        const sh = si.h * camera.scale;
+        const sw = si.w * proj.scale;
+        const sh = si.h * proj.scale;
         ctx.beginPath();
         ctx.rect(tl.x, tl.y, sw, sh);
         if (si.fill && si.fill !== "transparent") ctx.fill();
         ctx.stroke();
       } else if (si.type === "ellipse") {
-        const sw = si.w * camera.scale;
-        const sh = si.h * camera.scale;
+        const sw = si.w * proj.scale;
+        const sh = si.h * proj.scale;
         ctx.beginPath();
         ctx.ellipse(tl.x + sw / 2, tl.y + sh / 2, Math.abs(sw / 2), Math.abs(sh / 2), 0, 0, Math.PI * 2);
         if (si.fill && si.fill !== "transparent") ctx.fill();
         ctx.stroke();
       } else if (si.type === "arrow" || si.type === "line") {
         const p1 = si.x1 !== undefined && si.y1 !== undefined
-          ? camera.worldToScreen({ x: si.x1, y: si.y1 })
+          ? proj.toScreen({ x: si.x1, y: si.y1 })
           : tl;
         const p2 = si.x2 !== undefined && si.y2 !== undefined
-          ? camera.worldToScreen({ x: si.x2, y: si.y2 })
-          : camera.worldToScreen({ x: si.x + si.w, y: si.y + si.h });
+          ? proj.toScreen({ x: si.x2, y: si.y2 })
+          : proj.toScreen({ x: si.x + si.w, y: si.y + si.h });
 
         ctx.beginPath();
         ctx.moveTo(p1.x, p1.y);
@@ -195,7 +206,7 @@ function renderItems(
 
         if (si.type === "arrow") {
           const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
-          const aSize = Math.max(8, si.strokeWidth * camera.scale * 4);
+          const aSize = Math.max(8, si.strokeWidth * proj.scale * 4);
           ctx.beginPath();
           ctx.moveTo(p2.x, p2.y);
           ctx.lineTo(
@@ -214,8 +225,8 @@ function renderItems(
       ctx.restore();
     } else if (item.kind === "image") {
       const ii = item as ImageItem;
-      const sw = ii.w * camera.scale;
-      const sh = ii.h * camera.scale;
+      const sw = ii.w * proj.scale;
+      const sh = ii.h * proj.scale;
       const img = getOrLoadImage(ii.src, requestRender);
       if (img) {
         ctx.drawImage(img, tl.x, tl.y, sw, sh);
@@ -228,9 +239,57 @@ function renderItems(
         ctx.strokeRect(tl.x, tl.y, sw, sh);
         ctx.restore();
       }
+    } else if (item.kind === "widget") {
+      const wi = item as unknown as {
+        x: number;
+        y: number;
+        w: number;
+        h: number;
+        payload?: string;
+        source?: string;
+        copyText?: string;
+        title?: string;
+        _preloadedImg?: HTMLImageElement;
+      };
+      const sw = Math.max(160, wi.w) * proj.scale;
+      const sh = Math.max(100, wi.h) * proj.scale;
+
+      if (wi._preloadedImg) {
+        ctx.drawImage(wi._preloadedImg, tl.x, tl.y, sw, sh);
+      } else {
+        const htmlContent = wi.payload || "";
+        if (htmlContent) {
+          // Render actual live HTML UI into snapshot canvas via SVG foreignObject
+          const svgString = `<svg xmlns="http://www.w3.org/2000/svg" width="${Math.round(sw)}" height="${Math.round(sh)}">
+            <foreignObject width="100%" height="100%">
+              <div xmlns="http://www.w3.org/1999/xhtml" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;box-sizing:border-box;">
+                ${htmlContent}
+              </div>
+            </foreignObject>
+          </svg>`;
+          const svgUrl = "data:image/svg+xml;charset=utf-8," + encodeURIComponent(svgString);
+          const img = getOrLoadImage(svgUrl, requestRender);
+          if (img) {
+            ctx.drawImage(img, tl.x, tl.y, sw, sh);
+          }
+        }
+      }
     }
   }
+}
 
+function renderItems(
+  ctx: CanvasRenderingContext2D,
+  items: CanvasItem[],
+  camera: Camera,
+  cssW: number,
+  cssH: number,
+  dpr: number,
+  requestRender: () => void
+): void {
+  ctx.save();
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawItems(ctx, items, projectFromCamera(camera), requestRender);
   ctx.restore();
 }
 
@@ -500,7 +559,8 @@ export class CanvasEngine {
       layers.paperCtx.restore();
     }
 
-    // 2. Tile layer — confirmed ink
+    // 2. Tile layer — confirmed ink (storage mirror; primary visible
+    //    surface is inkLayer so strokes paint on top of widgets).
     const tileCtx = layers.tileCtx;
     tileCtx.save();
     tileCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -514,10 +574,26 @@ export class CanvasEngine {
     });
     tileCtx.restore();
 
-    // 3. Object layer (items: text, shapes, images)
+    // 3. Object layer (items: text, shapes, images) — render to tileCtx
+    //    so they stay anchored to world space and below live ink.
     renderItems(layers.tileCtx, this.items, camera, w, h, dpr, () => this.requestRender());
 
-    // 4. Update text overlay position
+    // 4. Ink layer — confirmed ink painted here so committed strokes
+    //    appear on top of widgets (PenEcho-style: ink above widget-
+    //    layer). Live pen preview lives on liveInkLayer above this so
+    //    clearing the live preview doesn't erase committed ink.
+    const inkCtx = layers.inkCtx;
+    inkCtx.save();
+    inkCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    inkCtx.clearRect(0, 0, w, h);
+    inkCtx.translate(camera.panX, camera.panY);
+    inkCtx.scale(camera.scale, camera.scale);
+    this.tiles.forTilesInRect(visible, (tile, tx, ty) => {
+      inkCtx.drawImage(tile.canvas, 0, 0, tile.canvas.width, tile.canvas.height, tx * TILE, ty * TILE, TILE, TILE);
+    });
+    inkCtx.restore();
+
+    // 5. Update text overlay position
     if (this.textTool.isEditing) {
       this.textTool.updateCameraTransform();
     }
@@ -693,6 +769,16 @@ export class CanvasEngine {
       case "pen":
       case "highlighter":
         this.strokeTool.onPointerUp(e);
+        {
+          const strokeRect = this.strokeTool.lastCommittedRect;
+          if (strokeRect) {
+            this.emitter.emit("strokeEnd", {
+              tool: this.activeTool as "pen" | "highlighter",
+              worldRect: strokeRect,
+              points: this.strokeTool.lastCommittedPoints ?? [],
+            });
+          }
+        }
         this.emitter.emit("canUndoChanged", this.undoStack.canUndo);
         break;
       case "eraser":
@@ -847,6 +933,10 @@ export class CanvasEngine {
     this.eraserTool.setSize(size);
     this.shapeTool.setStrokeWidth(size);
     this.emitter.emit("sizeChanged", size);
+  }
+
+  getRecentStrokesBounds(): Rect | null {
+    return this.strokeTool.getRecentStrokesBounds();
   }
 
   getItems(): CanvasItem[] {

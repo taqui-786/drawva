@@ -55,9 +55,26 @@ export function CanvasApp() {
               </div>
 
               {/* Status Indicator Pill */}
-              <div className="hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-muted/60 text-[11px] text-muted-foreground font-medium">
-                <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span>Observing canvas...</span>
+              <div
+                className={`hidden md:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium ${
+                  aiMode === "auto"
+                    ? "bg-muted/60 text-muted-foreground"
+                    : "bg-muted/30 text-muted-foreground/50"
+                }`}
+                title={
+                  aiMode === "auto"
+                    ? "Auto AI: watching for pen strokes — observations run 2.5s after you stop drawing"
+                    : "Auto observation is off — use the prompt bar to trigger AI manually"
+                }
+              >
+                <span
+                  className={`size-2 rounded-full ${
+                    aiMode === "auto"
+                      ? "bg-emerald-500 animate-pulse"
+                      : "bg-muted-foreground/40"
+                  }`}
+                />
+                {aiMode === "auto" ? "Observing canvas..." : "Observation paused"}
               </div>
             </div>
 
@@ -74,7 +91,7 @@ export function CanvasApp() {
                 title="Toggle Auto AI background observation vs manual trigger"
               >
                 <Icon icon={AiBrain02Icon} size={14} />
-                {aiMode === "auto" ? "Auto (5s)" : "Manual AI"}
+                {aiMode === "auto" ? "Auto (2.5s)" : "Manual AI"}
               </button>
 
               {/* Reasoning Selector Dropdown */}
@@ -170,7 +187,7 @@ export function CanvasApp() {
           )}
 
           {/* Canvas viewport */}
-          <CanvasViewport />
+          <CanvasViewport aiMode={aiMode} />
         </main>
 
         {/* Playground controls & conditional options on right sidebar */}
