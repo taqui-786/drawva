@@ -1,13 +1,17 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Newsreader } from "next/font/google";
+import { Geist, Geist_Mono, Roboto, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
-const geistSans = Geist({ subsets: ["latin"], variable: "--font-sans" });
+const jetbrainsMonoHeading = JetBrains_Mono({subsets:['latin'],variable:'--font-heading'});
 
-const geistHeading = Geist({ subsets: ["latin"], variable: "--font-heading" });
+const roboto = Roboto({subsets:['latin'],variable:'--font-sans'});
 
-const newsreader = Newsreader({ subsets: ["latin"], variable: "--font-serif-newsreader" });
+const geistSans = Geist({
+  variable: "--font-geist-sans",
+  subsets: ["latin"],
+});
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -18,35 +22,37 @@ const metadataBase = new URL(process.env.APP_URL ?? "https://drawva.vercel.app")
 
 export const metadata: Metadata = {
   title: {
-    default: "Drawva - Offline-first infinite whiteboard",
-    template: "%s - Drawva",
+    default: "Drawva — AI-Powered Infinite Whiteboard & Visual Canvas",
+    template: "%s | Drawva",
   },
   description:
-    "A freeform whiteboard that lives in your browser. Sketch, type, arrange, and export on an infinite canvas with local autosave. No account required.",
+    "Drawva is an offline-first, AI-powered infinite canvas. Sketch, write, plot math, create Mermaid diagrams, and generate interactive widgets seamlessly.",
   metadataBase,
   openGraph: {
-    title: "Drawva - Offline-first infinite whiteboard",
+    title: "Drawva — AI-Powered Infinite Whiteboard & Visual Canvas",
     description:
-      "A freeform whiteboard that lives in your browser. Sketch, type, arrange, and export on an infinite canvas with local autosave. No account required.",
+      "Drawva is an offline-first, AI-powered infinite canvas. Sketch, write, plot math, create Mermaid diagrams, and generate interactive widgets seamlessly.",
     type: "website",
     url: "/",
     siteName: "Drawva",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Drawva - Offline-first infinite whiteboard",
+    title: "Drawva — AI-Powered Infinite Whiteboard & Visual Canvas",
     description:
-      "A freeform whiteboard that lives in your browser. Sketch, type, arrange, and export on an infinite canvas with local autosave.",
+      "Drawva is an offline-first, AI-powered infinite canvas. Sketch, write, plot math, create Mermaid diagrams, and generate interactive widgets seamlessly.",
   },
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
       lang="en"
-      className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, geistHeading.variable, newsreader.variable, "font-sans", "scroll-smooth")}
+      className={cn("h-full", "antialiased", geistSans.variable, geistMono.variable, "scroll-smooth", "font-sans", roboto.variable, jetbrainsMonoHeading.variable)}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col bg-background text-foreground selection:bg-primary selection:text-primary-foreground">
+        <TooltipProvider>{children}</TooltipProvider>
+      </body>
     </html>
   );
 }
