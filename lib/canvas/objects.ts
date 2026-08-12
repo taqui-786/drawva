@@ -92,11 +92,14 @@ export class ObjectManager {
       .drawva-object-shell {
         box-sizing: border-box;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        border: 2px solid transparent !important;
+        box-shadow: none !important;
+        background: transparent !important;
       }
       .drawva-object-shell:hover,
       .drawva-object-shell[data-selected="true"] {
         border-color: #7c3aed !important;
-        box-shadow: 0 8px 28px rgba(124,58,237,0.18) !important;
+        box-shadow: 0 4px 16px rgba(124,58,237,0.12) !important;
       }
       .drawva-object-shell:hover .drawva-object-chrome,
       .drawva-object-shell[data-selected="true"] .drawva-object-chrome {
@@ -245,7 +248,7 @@ export class ObjectManager {
     shell.dataset.hovered = "false";
     shell.className = "drawva-object-shell";
     shell.style.cssText =
-      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px dashed #7c3aed;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.10);padding:0;overflow:visible;display:flex;flex-direction:column;user-select:none;";
+      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:8px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;user-select:none;";
 
     const body = document.createElement("div");
     body.className = "drawva-object-body";

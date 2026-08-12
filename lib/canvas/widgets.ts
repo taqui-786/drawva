@@ -84,11 +84,14 @@ export class WidgetManager {
       .drawva-widget-shell {
         box-sizing: border-box;
         transition: border-color 0.15s ease, box-shadow 0.15s ease;
+        border: 2px solid transparent !important;
+        box-shadow: none !important;
+        background: transparent !important;
       }
       .drawva-widget-shell:hover,
       .drawva-widget-shell[data-selected="true"] {
         border-color: #3b82f6 !important;
-        box-shadow: 0 8px 28px rgba(37,99,235,0.18) !important;
+        box-shadow: 0 4px 16px rgba(37,99,235,0.12) !important;
       }
       .drawva-widget-shell:hover .drawva-widget-chrome,
       .drawva-widget-shell[data-selected="true"] .drawva-widget-chrome {
@@ -299,7 +302,7 @@ export class WidgetManager {
     shell.dataset.hovered = "false";
     shell.className = "drawva-widget-shell";
     shell.style.cssText =
-      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px dashed #3b82f6;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px;overflow:visible;display:flex;flex-direction:column;";
+      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;";
 
     // ---- Inner plugin body wrapper ----
     const body = document.createElement("div");

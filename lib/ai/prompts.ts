@@ -38,13 +38,14 @@ CONTRACT (additionalProperties allowed per command):
 }`;
 
 export const WIDGET_VISUAL_RULES = `WIDGET VISUAL RULES
-- For html_widget, create a rich, beautiful, self-contained interactive applet or domain SVG document with clear visible styling (background: #ffffff, border: 1px solid #e2e8f0, border-radius: 16px, box-shadow: 0 8px 30px rgba(0,0,0,0.12), padding: 20px, font-family: system-ui, color: #0f172a).
-- High Contrast & Typography: Ensure all clock faces, numbers, tick marks, dials, buttons, network nodes, database tables, circuit symbols, and labels are 100% readable with high contrast against the card background.
-- Multi-City Clocks: For city clock applets (e.g. Beijing, London, New York), render real-time ticking analog clock SVGs with digital time underneath. When refined with colors (e.g. blue, red, yellow) or Date requests, color-code the clock dials/hands and add a date display row underneath each clock!
+- STRICT TRANSPARENT BACKGROUND & NO SHADOWS: All generated widgets, html_widget, applets, and diagrams MUST use a 100% TRANSPARENT background (background: transparent !important;). STRICTLY NO card borders (border: none !important;) and NO box shadows (box-shadow: none !important;).
+- ONLY render the primary graphic elements (e.g. clock dial/hands, SVG paths, network nodes, text) directly over the transparent canvas. Do NOT wrap elements in white (#ffffff) card containers, solid boxes, or drop shadows.
+- High Contrast & Typography: Ensure all numbers, clock dials, tick marks, buttons, network nodes, database tables, circuit symbols, and text labels have high-contrast, clear, readable colors against the canvas.
+- Multi-City Clocks: For city clock applets (e.g. Beijing, London, New York), render real-time ticking analog clock SVGs with digital time underneath on a 100% TRANSPARENT background with NO card border, NO white box, and NO shadow.
 - Domain Source HTML Widgets (PlantUML, DBML, SPICE, TikZ, PGFPlots, CircuitTikZ):
   - Return pluginId:"flowchart", sourceFormat:"<format>", copyText:"<raw domain source code>", copyLabel:"Copy <Format>" (e.g. "Copy PlantUML", "Copy DBML", "Copy SPICE", "Copy TikZ", "Copy PGFPlots").
-  - Provide a clean rendered HTML/SVG visualization inside the "html" field matching the domain source.
-- Interactive 3D Physics WebGL Applets: Render self-contained HTML5 Canvas / Three.js WebGL visualizers (e.g. Hydrogen 1s orbital probability cloud with rotation and zoom controls).`;
+  - Provide a clean rendered HTML/SVG visualization inside the "html" field matching the domain source on a transparent background with zero card borders or shadows.
+- Interactive 3D Physics WebGL Applets: Render self-contained HTML5 Canvas / Three.js WebGL visualizers with transparent background clear color (gl.clearColor(0,0,0,0)).`;
 
 export const FLOWCHART_RULES = `PROFESSIONAL DIAGRAM RULES (diagram_source)
 - Use diagram_source when one of the built-in local renderers fits:
