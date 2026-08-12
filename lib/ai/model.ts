@@ -15,6 +15,162 @@ export interface ModelOptions {
   hasImage?: boolean;
 }
 
+export interface CodeProviderMeta {
+  /** Stable id used to reference this provider across the UI + API. */
+  id: string;
+  /** Provider + model label shown to the user. */
+  provider: string;
+  /** Raw model id sent to the provider API. */
+  modelName: string;
+}
+
+export interface CodeModelEntry extends Omit<CodeProviderMeta, "modelName"> {
+  modelName: CodeProviderMeta["modelName"];
+  model: ChatOpenAI;
+}
+
+interface CodeProviderDef extends CodeProviderMeta {
+  enabled: () => boolean;
+  create: () => ChatOpenAI;
+}
+
+/** Single source of truth for the code-generation fallback chain (order = priority). */
+function codeProviderDefs(): CodeProviderDef[] {
+  const defs: CodeProviderDef[] = [];
+  const deepinfraKey = process.env.DEEPINFRA_API_KEY;
+  const opencodeKey = process.env.OPENCODE_API_KEY;
+  const nvidiaKey = process.env.NVIDIA_API_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY;
+
+  const deepInfraModel =
+    process.env.DEEPINFRA_CODE_MODEL ||
+    process.env.DEEPINFRA_MODEL ||
+    "deepseek-ai/DeepSeek-V4-flash";
+  if (deepinfraKey) {
+    defs.push({
+      id: "deepinfra",
+      provider: `DeepInfra/Baseten (${deepInfraModel})`,
+      modelName: deepInfraModel,
+      enabled: () => Boolean(process.env.DEEPINFRA_API_KEY),
+      create: () =>
+        new ChatOpenAI({
+          model: deepInfraModel,
+          apiKey: deepinfraKey,
+          configuration: {
+            baseURL:
+              process.env.DEEPINFRA_BASE_URL ||
+              "https://api.deepinfra.com/v1/openai",
+          },
+          temperature: 0.2,
+          maxTokens: 8192,
+          timeout: 60000,
+          maxRetries: 1,
+        }),
+    });
+  }
+
+  const opencodeModel =
+    process.env.OPENCODE_CODE_MODEL || "deepseek-v4-flash-free";
+  if (opencodeKey) {
+    defs.push({
+      id: "opencode",
+      provider: `OpenCode (${opencodeModel})`,
+      modelName: opencodeModel,
+      enabled: () => Boolean(process.env.OPENCODE_API_KEY),
+      create: () =>
+        new ChatOpenAI({
+          model: opencodeModel,
+          apiKey: opencodeKey,
+          configuration: {
+            baseURL: process.env.OPENCODE_BASE_URL || "https://opencode.ai/zen/v1",
+          },
+          temperature: 0.2,
+          timeout: 60000,
+          maxRetries: 1,
+        }),
+    });
+  }
+
+  const nvidiaModel =
+    process.env.NVIDIA_CODE_MODEL ||
+    process.env.NVIDIA_MODEL ||
+    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning";
+  if (nvidiaKey) {
+    defs.push({
+      id: "nvidia",
+      provider: `NVIDIA (${nvidiaModel})`,
+      modelName: nvidiaModel,
+      enabled: () => Boolean(process.env.NVIDIA_API_KEY),
+      create: () =>
+        new ChatOpenAI({
+          model: nvidiaModel,
+          apiKey: nvidiaKey,
+          configuration: {
+            baseURL: process.env.NVIDIA_BASE_URL || "https://integrate.api.nvidia.com/v1",
+          },
+          temperature: 0.6,
+          topP: 0.95,
+          maxTokens: 65536,
+          modelKwargs: {
+            reasoning_budget: 16384,
+          },
+          timeout: 90000,
+          maxRetries: 1,
+        }),
+    });
+  }
+
+  if (openrouterKey) {
+    defs.push({
+      id: "openrouter",
+      provider: "OpenRouter (deepseek/deepseek-chat)",
+      modelName: "deepseek/deepseek-chat",
+      enabled: () => Boolean(process.env.OPENROUTER_API_KEY),
+      create: () =>
+        new ChatOpenAI({
+          model: "deepseek/deepseek-chat",
+          apiKey: openrouterKey,
+          configuration: { baseURL: "https://openrouter.ai/api/v1" },
+          temperature: 0.2,
+          timeout: 60000,
+          maxRetries: 1,
+        }),
+    });
+  }
+
+  return defs;
+}
+
+/** Metadata for every *available* code provider (used by the model picker UI). */
+export function listCodeModelProviders(): CodeProviderMeta[] {
+  return codeProviderDefs()
+    .filter((d) => d.enabled())
+    .map(({ id, provider, modelName }) => ({ id, provider, modelName }));
+}
+
+/**
+ * Instantiate every available code model in fallback priority order.
+ * Used by the AI agent to try providers sequentially.
+ */
+export function getAllCodeModels(): CodeModelEntry[] {
+  return codeProviderDefs()
+    .filter((d) => d.enabled())
+    .map((d) => ({ id: d.id, provider: d.provider, modelName: d.modelName, model: d.create() }));
+}
+
+export function getAiCodeModel(): ChatOpenAI | null {
+  const all = getAllCodeModels();
+  return all.length > 0 ? all[0].model : null;
+}
+
+export function getAiVisionModel(): ChatOpenAI | null {
+  return getAiModel({ task: "vision" });
+}
+
+export function getAiEvalModel(): ChatOpenAI | null {
+  return getAiModel({ task: "eval" });
+}
+
 export function getAiModel(
   options?: ModelOptions | ModelTask
 ): ChatOpenAI | null {
@@ -188,6 +344,7 @@ export function getAiModel(
         apiKey: deepinfraKey,
         configuration: { baseURL },
         temperature: 0.2,
+        maxTokens: 8192,
         timeout: 60000,
         maxRetries: 1,
       });
@@ -249,16 +406,3 @@ export function getAiModel(
   console.log(`[AI Model] ⚠️ No API key set. Falling back to dry-run mode.`);
   return null;
 }
-
-export function getAiVisionModel(): ChatOpenAI | null {
-  return getAiModel({ task: "vision" });
-}
-
-export function getAiEvalModel(): ChatOpenAI | null {
-  return getAiModel({ task: "eval" });
-}
-
-export function getAiCodeModel(): ChatOpenAI | null {
-  return getAiModel({ task: "code" });
-}
-

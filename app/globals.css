@@ -71,7 +71,7 @@
   --chart-3: oklch(0.466 0.025 107.3);
   --chart-4: oklch(0.394 0.023 107.4);
   --chart-5: oklch(0.286 0.016 107.4);
-  --radius: 0.625rem;
+  --radius: 0.45rem;
   --font-serif: var(--font-serif-newsreader);
   --sidebar: oklch(0.988 0.003 106.5);
   --sidebar-foreground: oklch(0.153 0.006 107.1);
@@ -81,6 +81,8 @@
   --sidebar-accent-foreground: oklch(0.228 0.013 107.4);
   --sidebar-border: oklch(0.93 0.007 106.5);
   --sidebar-ring: oklch(0.737 0.021 106.9);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.153 0.006 107.1);
 }
 
 .dark {

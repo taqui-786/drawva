@@ -42,7 +42,7 @@ Drawva Stack Architecture:
  │   ├── Grid Layer (gridCtx): infinite background grid pattern             │
  │   ├── Tile Layer (tileCtx): 512px offscreen tile cache & strokes         │
  │   ├── Object Layer (objectCtx): shapes, text, formulas, plots            │
- │   └── Interaction Layer (interactionCtx): live strokes, lasso, drafts   │
+ │   └── Interaction Layer (interactionCtx): live strokes, marquee, drafts   │
  ├──────────────────────────────────────────────────────────────────────────┤
  │  Widget Manager (lib/canvas/widgets.ts & diagram.ts):                    │
  │   └── Dynamic iframe host for 7 diagram formats & HTML applets           │
@@ -58,9 +58,9 @@ Drawva Stack Architecture:
 
 ### 1. Canvas Engine Modules (`lib/canvas/`)
 
-- `engine.ts`: Core `CanvasEngine` class managing stacked 2D contexts (`gridCtx`, `tileCtx`, `objectCtx`, `interactionCtx`), DPR scaling, rAF loop, real-time pen/highlighter preview rendering, and active lasso selection polygon overlay.
+- `engine.ts`: Core `CanvasEngine` class managing stacked 2D contexts (`gridCtx`, `tileCtx`, `objectCtx`, `interactionCtx`), DPR scaling, rAF loop, real-time pen/highlighter preview rendering, and active marquee selection rectangle overlay.
 - `camera.ts`: Screen-to-world and world-to-screen coordinate math, scale bounds ($0.03\times .. 4.0\times$), touchpad pinch zoom, and wheel pan offsets.
-- `selection.ts`: Bounding box calculations, point-in-box, ray-casting point-in-polygon (`isPointInPolygon`), and lasso loop selection (`findItemsInLasso`).
+- `selection.ts`: Rectangle (marquee) selection controller — click-to-select an ink cluster, drag a rect box for area selection, and lift/erase/paste translation drags on the raster tiles.
 - `widgets.ts`: `WidgetManager` class handling DOM lifecycle for mounted widgets and sandboxed diagram iframes (`/widget-host.html`). Supports draft vs. accepted state transitions, top action bars (`×`, `⤢`, `Copy Source`, `✓`), header drag handlers, and viewport scaling transforms.
 - `diagram.ts`: Dynamic multi-format diagram renderer generating HTML/JS for **7 diagram formats**:
   - **Mermaid**: Flowcharts, sequence diagrams (`mermaid.esm.min.mjs`).
@@ -81,8 +81,7 @@ Drawva Stack Architecture:
 
 | Tool | Keyboard Shortcut | Function |
 | :--- | :--- | :--- |
-| `select` | `V` | Single item selection & translation drag |
-| `lasso` | `L` | Freehand polygon lasso selection across strokes & objects |
+| `select` | `V` | Click-select + drag ink, drag rectangular marquee on empty ground, and move widgets/objects |
 | `hand` | `H` / Middle Mouse | Pan canvas viewport in 2D space |
 | `pen` | `P` | Real-time vector stroke drawing |
 | `highlighter` | `Shift+H` | Semi-transparent yellow stroke overlay ($40\%$ opacity) |
@@ -115,3 +114,7 @@ Drawva Stack Architecture:
   - Floating bottom zoom bar (`-`, `+`, percentage, `Reset`).
 - `CanvasProvider.tsx`: React 19 context state management with ref guards for effect dependencies, debounced autosave, and alert dialogs.
 - `CanvasApp.tsx`: Main inner shell syncing widget manager lifecycle, keyboard shortcuts, and draft accept/discard handlers.
+
+## Session preferences
+
+For coding tasks: work code-first, skip lengthy prose/explanations, and end with a 2–4 line summary of what changed + what's left. Re-read surrounding code before editing. Verify with `pnpm lint` + `npx tsc --noEmit` + `pnpm build`.

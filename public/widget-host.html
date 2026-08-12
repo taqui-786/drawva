@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Drawva widget host</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+    iframe { width: 100%; height: 100%; display: block; border: 0; background: transparent; touch-action: none; }
+  </style>
+</head>
+<body>
+<script>
+"use strict";
+// Drawva widget host. Runs inside a sandboxed outer iframe and renders untrusted
+// widget HTML inside a NO-SAME-ORIGIN inner iframe. Parent communicates via
+// postMessage; the parent origin is validated before any reply is sent.
+(() => {
+  const MAX_HTML_LENGTH = 200000;
+  const MAX_SNAPSHOT_DIMENSION = 2400;
+  const MAX_SNAPSHOT_PIXELS = 4800000;
+  const MAX_SNAPSHOT_DATA_URL = 28 * 1024 * 1024;
+
+  const requestedParentOrigin = new URL(location.href).searchParams.get("parent-origin");
+  let parentOrigin = null;
+  try {
+    const u = new URL(requestedParentOrigin);
+    if (u.origin === requestedParentOrigin) parentOrigin = u.origin;
+  } catch {}
+  if (!parentOrigin) parentOrigin = location.origin; // same-origin fallback (dev)
+
+  const inner = document.createElement("iframe");
+  inner.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
+  inner.setAttribute("title", "canvas widget");
+  inner.setAttribute("referrerpolicy", "no-referrer");
+  document.body.append(inner);
+
+  function writeInner(html) {
+    const autoResizeScript = `<script>
+      (function() {
+        let lastW = 0;
+        let lastH = 0;
+        function postSize() {
+          try {
+            const body = document.body;
+            if (!body) return;
+            let w = 0;
+            let h = 0;
+            const first = body.firstElementChild;
+            if (first) {
+              const rect = first.getBoundingClientRect();
+              w = Math.ceil(Math.max(first.offsetWidth || 0, rect.width || 0));
+              h = Math.ceil(Math.max(first.offsetHeight || 0, rect.height || 0));
+            }
+
+            const svg = document.querySelector('svg');
+            if (svg) {
+              try {
+                const g = svg.querySelector('g');
+                if (g && g.getBBox) {
+                  const gb = g.getBBox();
+                  if (gb && gb.width > 20 && gb.height > 20) {
+                    w = Math.max(w, Math.ceil(gb.width + 32));
+                    h = Math.max(h, Math.ceil(gb.height + 32));
+                  }
+                }
+              } catch(e) {}
+            }
+
+            if (w < 100) w = 320;
+            if (h < 80) h = 240;
+            w = Math.min(900, Math.max(220, w));
+            h = Math.min(700, Math.max(140, h));
+
+            if (Math.abs(w - lastW) > 6 || Math.abs(h - lastH) > 6) {
+              lastW = w;
+              lastH = h;
+              window.parent.postMessage({ type: 'drawva-widget-resize-content', width: w, height: h }, '*');
+            }
+          } catch(e) {}
+        }
+        window.addEventListener('DOMContentLoaded', postSize);
+        window.addEventListener('load', postSize);
+        if (typeof ResizeObserver !== 'undefined' && document.body) {
+          try {
+            const target = document.body.firstElementChild || document.body;
+            new ResizeObserver(postSize).observe(target);
+          } catch(e) {}
+        }
+        setTimeout(postSize, 60);
+        setTimeout(postSize, 300);
+      })();
+    <\/script>`;
+
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const source = /<\/head>/i.test(html)
+      ? html.replace(/<\/head>/i, transparentBase + '</head>')
+      : transparentBase + html;
+    inner.srcdoc = source;
+  }
+
+  function forward(msg) {
+    if (parentOrigin) parent.postMessage(msg, parentOrigin);
+  }
+  // Fallback for snapshots/wheel if origin not pinned. Never used for content.
+  const postAnywhere = (msg) => parent.postMessage(msg, "*");
+
+  addEventListener("message", (event) => {
+    const data = event.data;
+    if (!data || typeof data !== "object") return;
+    if (data.type === "penecho-widget-init") {
+      if (typeof data.html !== "string" || data.html.length > MAX_HTML_LENGTH) return;
+      writeInner(data.html);
+    } else if (data.type === "penecho-widget-state") {
+      inner.contentWindow && inner.contentWindow.postMessage({ type: "penecho-widget-state", selected: !!data.selected, active: !!data.active }, "*");
+    } else if (data.type === "drawva-widget-resize-content") {
+      forward({ type: "drawva-widget-resize-content", width: data.width, height: data.height });
+    }
+  });
+
+  // Forward wheel from inside the host so the parent canvas still pans/zooms.
+  addEventListener("wheel", (ev) => {
+    ev.preventDefault();
+    postAnywhere({ type: "drawva-widget-wheel", clientX: ev.clientX, clientY: ev.clientY, deltaY: ev.deltaY });
+  }, { passive: false });
+
+  forward({ type: "penecho-widget-host-ready" });
+})();
+</script>
+</body>
+</html>
