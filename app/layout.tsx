@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Outfit, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
 
 const jetbrainsMonoHeading = JetBrains_Mono({subsets:['latin'],variable:'--font-heading'});
@@ -32,6 +33,7 @@ export default function RootLayout({
     <html lang="en" className={cn(geistSans.variable, geistMono.variable, "font-sans", outfit.variable, jetbrainsMonoHeading.variable)}>
       <body className="min-h-full antialiased">
         <TooltipProvider>{children}</TooltipProvider>
+        <Toaster richColors position="bottom-right" />
       </body>
     </html>
   );

@@ -48,19 +48,11 @@ import {
 } from "@hugeicons/core-free-icons";
 import type { CanvasMode } from "@/lib/canvas/types";
 
-export interface ModelOption {
-  id: string;
-  provider: string;
-  modelName: string;
-}
-
 export interface AiRunState {
   phase: "idle" | "running" | "done" | "error";
-  /** Label of the provider currently generating (incl. fallbacks). */
+  /** Label of the model currently generating. */
   activeProvider: string | null;
-  /** Labels of providers that failed during the last request. */
-  failed: string[];
-  /** Label of the provider that produced the final result. */
+  /** Label of the model that produced the final result. */
   doneProvider: string | null;
 }
 
@@ -110,10 +102,6 @@ function ToolButton({
   );
 }
 
-function shortProvider(provider: string): string {
-  return provider.split(" (")[0];
-}
-
 export function CanvasHeader({
   mode,
   onMode,
@@ -140,8 +128,9 @@ export function CanvasHeader({
   onAutoChange,
   onAskAi,
   models,
-  preferredModel,
+  activeModel,
   onModelChange,
+  onOpenSettings,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
@@ -167,32 +156,28 @@ export function CanvasHeader({
   autoOn: boolean;
   onAutoChange: (v: boolean) => void;
   onAskAi: () => void;
-  models: ModelOption[];
-  preferredModel: string;
-  onModelChange: (id: string | null) => void;
+  models: string[];
+  activeModel: string | null;
+  onModelChange: (model: string | null) => void;
+  onOpenSettings: () => void;
 }) {
   const drawing = ["pen", "highlighter", "eraser", "rect", "ellipse", "arrow"].includes(mode);
 
-  // ---- AI status badge (live model / fallback) ----
+  // ---- AI status badge (live model / retry) ----
   let badgeNode: React.ReactNode;
   if (aiStatus === "thinking") {
     badgeNode = (
       <Badge variant="outline" className="gap-1 text-muted-foreground">
         <HugeiconsIcon icon={Loading02Icon} className="animate-spin" />
-        {aiRun.activeProvider ? (
-          <span className="max-w-32 truncate">
-            {aiRun.failed.length > 0 ? "Fallback: " : "Running: "}
-            {shortProvider(aiRun.activeProvider)}
-          </span>
-        ) : (
-          "Thinking…"
-        )}
+        <span className="max-w-40 truncate">
+          Generating… {aiRun.activeProvider || activeModel || ""}
+        </span>
       </Badge>
     );
   } else if (aiStatus === "done") {
     badgeNode = (
       <Badge variant="secondary">
-        {aiRun.doneProvider ? `Done · ${shortProvider(aiRun.doneProvider)}` : "Done"}
+        {aiRun.doneProvider ? `Done · ${aiRun.doneProvider}` : "Done"}
       </Badge>
     );
   } else if (aiStatus === "error") {
@@ -201,7 +186,8 @@ export function CanvasHeader({
     badgeNode = <Badge variant="secondary">Ready</Badge>;
   }
 
-  const settleValue = preferredModel || "auto";
+  const hasModels = models.length > 0;
+  const settleValue = activeModel && hasModels && models.includes(activeModel) ? activeModel : (models[0] ?? "");
 
   return (
     <header className="flex h-12 shrink-0 items-center gap-1.5 border-b bg-background px-2">
@@ -404,36 +390,61 @@ export function CanvasHeader({
       <div className="flex shrink-0 items-center gap-1.5">
         {badgeNode}
 
-        <Select
-          value={settleValue}
-          onValueChange={onModelChange}
-          items={[
-            { label: "Auto (fallback chain)", value: "auto" },
-            ...models.map((m) => ({ label: m.provider, value: m.id })),
-          ]}
-        >
-          <SelectTrigger size="sm" className="max-w-52">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="auto">Auto (fallback chain)</SelectItem>
-            {models.map((m) => (
-              <SelectItem key={m.id} value={m.id}>
-                {m.provider}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {aiStatus !== "thinking" && hasModels && (
+          <Select
+            value={settleValue}
+            onValueChange={onModelChange}
+            items={models.map((m) => ({ label: m, value: m }))}
+          >
+            <SelectTrigger size="sm" className="max-w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent align="end">
+              {models.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
 
-        <label className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground select-none">
-          <Switch size="sm" checked={autoOn} onCheckedChange={onAutoChange} />
-          Auto AI
-        </label>
+        {aiStatus !== "thinking" && (
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-xs text-muted-foreground select-none">
+            <Switch size="sm" checked={autoOn} onCheckedChange={onAutoChange} />
+            Auto AI
+          </label>
+        )}
 
-        <Button size="sm" onClick={onAskAi} className="gap-1.5">
-          <HugeiconsIcon icon={SparklesIcon} />
-          Ask AI
-        </Button>
+        {!autoOn && (
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={onAskAi}
+            disabled={aiStatus === "thinking"}
+            className="gap-1.5"
+          >
+            <HugeiconsIcon icon={SparklesIcon} />
+            Ask AI
+          </Button>
+        )}
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                onClick={onOpenSettings}
+                data-icon="true"
+                aria-label="AI settings"
+              >
+                <HugeiconsIcon icon={Settings01Icon} />
+              </Button>
+            }
+          />
+          <TooltipContent>AI settings</TooltipContent>
+        </Tooltip>
       </div>
     </header>
   );

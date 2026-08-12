@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useSnapshot } from "valtio";
 import {
   appState,
@@ -17,7 +18,8 @@ import { ToolManager, type ToolGestureEvent } from "@/lib/canvas/toolManager";
 import { DraftManager } from "@/lib/canvas/draftStore";
 import { rasterizeText, renderTextBlock } from "@/lib/canvas/textTool";
 import { placeImageAt } from "@/lib/canvas/images";
-import { CanvasHeader, type AiRunState, type ModelOption } from "./CanvasHeader";
+import { CanvasHeader, type AiRunState } from "./CanvasHeader";
+import { SettingsDialog } from "./SettingsDialog";
 import { CanvasFooter } from "./CanvasFooter";
 import { WidgetManager, type WidgetItem } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
@@ -32,6 +34,7 @@ import { BoardHistory } from "@/lib/canvas/history";
 import type { AiReply, AiRequest, AgentEvent } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
+import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel } from "@/lib/ai/provider";
 import { Textarea } from "@/components/ui/textarea";
 
 /** Parse the SSE stream from POST /api/canvas/ai. */
@@ -129,68 +132,30 @@ export function CanvasApp() {
   const refineFocusRef = useRef<{ rect: Rect; widgetId: string } | null>(null);
   const activeEditTargetRef = useRef<string | null>(null);
 
-function getModelSnapshot(): string {
-  try {
-    return typeof localStorage !== "undefined"
-      ? localStorage.getItem("drawva.aiModel") ?? "auto"
-      : "auto";
-  } catch {
-    return "auto";
-  }
-}
-
-function getServerModelSnapshot(): string {
-  return "auto";
-}
-
-function subscribeModelStore(callback: () => void): () => void {
-  if (typeof window === "undefined") return () => {};
-  window.addEventListener("storage", callback);
-  return () => window.removeEventListener("storage", callback);
-}
-
-function setStoredModel(val: string) {
-  try {
-    localStorage.setItem("drawva.aiModel", val);
-  } catch {}
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new Event("storage"));
-  }
-}
-
-// In component:
-  // ---- AI model picker (live provider metadata + user preference) ----
-  const [models, setModels] = useState<ModelOption[]>([]);
-  const preferredModel = useSyncExternalStore(subscribeModelStore, getModelSnapshot, getServerModelSnapshot);
-  const preferredModelRef = useRef(preferredModel);
+  // ---- AI provider config (localStorage-driven; dialog writes, we react) ----
+  const [models, setModels] = useState<string[]>([]);
+  const [activeModel, setActiveModelState] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useEffect(() => {
-    preferredModelRef.current = preferredModel;
-  }, [preferredModel]);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/canvas/ai")
-      .then((r) => (r.ok ? r.json() : { models: [] }))
-      .then((d) => {
-        if (!cancelled && Array.isArray(d?.models)) setModels(d.models);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
+    const refresh = () => {
+      setModels(getCachedModels());
+      setActiveModelState(getActiveModel());
     };
+    refresh();
+    window.addEventListener("storage", refresh);
+    return () => window.removeEventListener("storage", refresh);
   }, []);
 
-  const handleModelChange = (id: string | null) => {
-    const next = id ?? "auto";
-    setStoredModel(next);
+  const handleModelChange = (model: string | null) => {
+    setActiveModel(model);
+    setActiveModelState(model);
   };
 
-  // ---- live fallback state surfaced in the header badge ----
+  // ---- live state surfaced in the header badge ----
   const [aiRun, setAiRun] = useState<AiRunState>({
     phase: "idle",
     activeProvider: null,
-    failed: [],
     doneProvider: null,
   });
 
@@ -198,14 +163,9 @@ function setStoredModel(val: string) {
     setAiRun((prev) => {
       switch (ev.type) {
         case "provider_start":
-        case "provider_retry":
           return { ...prev, phase: "running", activeProvider: ev.provider };
         case "provider_failed":
-          return {
-            ...prev,
-            activeProvider: null,
-            failed: Array.from(new Set([...prev.failed, ev.provider])),
-          };
+          return { ...prev, activeProvider: null };
         case "provider_done":
           return { ...prev, activeProvider: null, doneProvider: ev.provider };
         default:
@@ -219,6 +179,31 @@ function setStoredModel(val: string) {
     const wm = widgets.current;
     const draft = drafts.current;
     if (!engineAtCall || !draft) return;
+
+    // Read the live provider config + active model at request time.
+    const config = getProviderConfig();
+    const model = getActiveModel() || models[0] || null;
+    if (!config) {
+      toast("Set up an AI provider", {
+        description: "Connect your provider to use Ask AI or Auto AI.",
+        action: {
+          label: "Open settings",
+          onClick: () => setSettingsOpen(true),
+        },
+      });
+      return;
+    }
+    if (!model) {
+      toast("Select a model", {
+        description: "Pick one of the models fetched from your provider.",
+        action: {
+          label: "Open settings",
+          onClick: () => setSettingsOpen(true),
+        },
+      });
+      return;
+    }
+
     setAiStatus("thinking");
     // Supersede any in-flight request.
     aiAbort.current?.abort();
@@ -304,9 +289,9 @@ function setStoredModel(val: string) {
       scene: JSON.stringify(scene),
       trigger: userPrompt ? "manual" : "user_paused",
       ...(widgetEditTarget ? { widgetEdit: widgetEditTarget } : {}),
-      ...(preferredModelRef.current !== "auto"
-        ? { preferredModel: preferredModelRef.current }
-        : {}),
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model,
     };
 
     const applyReply = async (data: AiReply & { rejected?: string[] }) => {
@@ -323,13 +308,12 @@ function setStoredModel(val: string) {
       setAiRun((prev) => ({
         phase: "done",
         activeProvider: null,
-        failed: prev.failed,
         doneProvider: prev.doneProvider,
       }));
     };
 
     setAiStatus("thinking");
-    setAiRun({ phase: "running", activeProvider: null, failed: [], doneProvider: null });
+    setAiRun({ phase: "running", activeProvider: null, doneProvider: null });
 
     try {
       const res = await fetch("/api/canvas/ai", {
@@ -360,6 +344,9 @@ function setStoredModel(val: string) {
       if (controller.signal.aborted) return; // superseded — clean drop
       setAiStatus("error");
       setAiRun((prev) => ({ ...prev, phase: "error" }));
+      toast.error("Generation failed after 3 attempts", {
+        description: err instanceof Error ? err.message : undefined,
+      });
       console.error("AI request failed:", err);
     } finally {
       if (aiAbort.current === controller) aiAbort.current = null;
@@ -1118,8 +1105,9 @@ if (e.shiftKey && k === "h") setMode("highlighter");
         onAutoChange={setAutoOn}
         onAskAi={askAi}
         models={models}
-        preferredModel={preferredModel}
+        activeModel={activeModel}
         onModelChange={handleModelChange}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       {/* Playground: engine root + one deterministic gesture target above it.
@@ -1195,6 +1183,8 @@ if (e.shiftKey && k === "h") setMode("highlighter");
         }}
         className="hidden"
       />
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

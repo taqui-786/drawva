@@ -42,8 +42,12 @@ export interface AiRequest {
   widgetEdit?: WidgetEditContext;
   /** Magnified 2x crop of recent handwriting for high-precision OCR/LaTeX. */
   focusInset?: string;
-  /** Provider id the user pinned (see lib/ai/model.ts). Falls back when absent/auto. */
-  preferredModel?: string;
+  /** Provider base URL (OpenAI-compatible), sent per request by the client. */
+  baseUrl?: string;
+  /** Provider API key, sent per request by the client. Never logged. */
+  apiKey?: string;
+  /** Model id the user picked (see lib/ai/provider.ts). */
+  model?: string;
 }
 
 export interface AiReply {
@@ -71,9 +75,8 @@ export interface SceneJson {
   count: number;
 }
 
-/** Progressive pipeline events streamed to the client for live fallback UI. */
+/** Result payload streamed to the client during generation. */
 export type AgentEvent =
-  | { type: "provider_start"; providerId: string; provider: string; attempt: number }
-  | { type: "provider_failed"; providerId: string; provider: string; error: string }
-  | { type: "provider_retry"; providerId: string; provider: string }
-  | { type: "provider_done"; providerId: string; provider: string };
+  | { type: "provider_start"; provider: string }
+  | { type: "provider_failed"; provider: string; error: string }
+  | { type: "provider_done"; provider: string };

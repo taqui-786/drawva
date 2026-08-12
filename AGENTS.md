@@ -93,24 +93,20 @@ Drawva Stack Architecture:
 
 ### 3. 3-Stage LangChain AI Agent (`lib/ai/`)
 
-- `model.ts`: Multi-tier model provider task routing (`getAiVisionModel`, `getAiEvalModel`, `getAiCodeModel`):
-  - **Vision Task**: Primary `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` *(NVIDIA)*, Secondary `mimo-v2.5-free` *(OpenCode)* / `Qwen2-VL-72B` *(DeepInfra)*.
-  - **Eval Task**: Primary `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning` *(NVIDIA)*, Secondary `DeepSeek-V4-flash` *(DeepInfra)*.
-  - **Code Task**: Primary `deepseek-ai/DeepSeek-V4-flash` *(DeepInfra)*, Secondary `deepseek-v4-flash-free` *(OpenCode)*.
-- `agent.ts`: 3-stage sequential LangChain execution pipeline (`processAiCanvasRequest`):
-  - **Stage 1 (Vision Model)**: Inspects viewport WebP snapshot image and describes drawings/equations.
-  - **Stage 2 (Eval Model)**: Synthesizes Stage 1 vision analysis, compact scene JSON, visible rect, user prompt, and user bounding box (`changedBox`) into an optimized execution instruction.
-  - **Stage 3 (Code Model)**: Emits strictly valid JSON commands matching `JSON_CONTRACT` schema.
-- `prompts.ts`: Core prompt contracts (`VISION_SYSTEM_PROMPT`, `EVAL_SYSTEM_PROMPT`, `CODE_SYSTEM_PROMPT`, `JSON_CONTRACT`, `MANDATORY_VISIBLE`, `FLOWCHART_RULES`). Enforces anchor placement math ($x = \text{changedBox.x} + \text{changedBox.w} + 40$).
+- `model.ts`: Single OpenAI-compatible model factory `createChatModel({ baseUrl, apiKey, model })` → `ChatOpenAI` (temp 0.2, timeout 60s). `MAX_RETRIES = 3` (total attempts). No env-based provider routing.
+- `agent.ts`: Single-model 3-stage pipeline (`runAgent(req, sceneText, model, opts)`): structured-output first, direct-JSON fallback within an attempt, up to `MAX_RETRIES` total attempts, then throws. No fallback chain (`getAllCodeModels`, `getFallbackReply` removed).
+- `provider.ts`: Safe-SSR localStorage helpers for the user's provider config (`drawva.aiProvider`), cached model list (`drawva.aiModels`), and active model (`drawva.aiModel`).
+- `prompts.ts`: Core prompt contracts (`SYSTEM_PROMPT`, `CODE_SYSTEM_PROMPT_EXTRA`, `MANDATORY_VISIBLE_RESPONSE`, `FLOWCHART_RULES`, `WIDGET_VISUAL_RULES`). Anchors answers below the user's latest ink (`x = changedBox.x, y = changedBox.y + changedBox.h + 24`).
+- `app/api/canvas/provider/route.ts`: POST verifies a user-supplied OpenAI-compatible base URL + API key by fetching `{base}/models` (falls back to `{base}/v1/models`); returns the model list. When the provider declares per-model capabilities (OpenRouter `input_modalities`), it returns only vision-capable models (`filteredByVision: true`); otherwise it returns all models. Key is never logged or persisted.
 
 ### 4. UI Shell & Control Dock (`components/canvas/`)
 
 - `CanvasHeader.tsx`: Floating header bar featuring:
-  - PenEcho-style top status indicator pill (**`Observing...`** with animated pulse, **`Review draft suggestion`**, or **`Ready`**).
-  - Tool buttons (`V`, `L`, `H`, `P`, `Shift+H`, `E`, `T`, `R`, `O`, `A`).
+  - PenEcho-style top status indicator pill (**`Generating…`** with spinner, **`Done · model`**, `Ready`).
+  - Tool buttons (`V`, `H`, `P`, `Shift+H`, `E`, `T`, `R`, `O`, `A`).
   - Color palette popover and stroke width selector.
   - Document File dropdown (Export PNG / Save JSON / Open JSON).
-  - AI Ask button and Auto AI toggle (**OFF** by default).
+  - AI controls: model select (names only), Auto AI toggle (**OFF** by default), Ask AI button, and a Settings button opening `SettingsDialog.tsx` (provider base URL + API key → verify → fetch models).
   - Floating bottom zoom bar (`-`, `+`, percentage, `Reset`).
 - `CanvasProvider.tsx`: React 19 context state management with ref guards for effect dependencies, debounced autosave, and alert dialogs.
 - `CanvasApp.tsx`: Main inner shell syncing widget manager lifecycle, keyboard shortcuts, and draft accept/discard handlers.

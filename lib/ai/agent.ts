@@ -1,6 +1,7 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import type { ChatOpenAI } from "@langchain/openai";
 import { z } from "zod";
-import { getAllCodeModels } from "./model";
+import { MAX_RETRIES } from "./model";
 import {
   AI_TIMEOUT_MS,
   CODE_SYSTEM_PROMPT_EXTRA,
@@ -25,22 +26,21 @@ export type AgentReply = z.infer<typeof AgentReplySchema>;
 
 export interface AgentOptions {
   timeoutMs?: number;
-  /** Provider id the user pinned; tried first, then the rest as fallback. */
-  preferredProviderId?: string;
-  /** Emitted as the pipeline moves between providers (for live fallback UI). */
+  /** Emitted as the single provider is invoked / retried / completes. */
   onEvent?: (event: AgentEvent) => void;
 }
 
 export async function runAgent(
   req: AiRequest,
   sceneText: string,
+  model: ChatOpenAI,
   opts: AgentOptions = {}
 ): Promise<AiReply> {
   const timeoutMs = opts.timeoutMs ?? AI_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await runPipeline(req, sceneText, controller, opts);
+    return await runModel(req, sceneText, model, controller, opts);
   } finally {
     clearTimeout(timer);
   }
@@ -204,151 +204,120 @@ export function parseJsonResponse(raw: string): AgentReply | null {
 }
 
 /**
- * AI Perception & Execution Pipeline (Single Stage):
- *   Single stage — CODE model receives image, canvas scene metadata, user prompt, and
- *   returns structured JSON commands directly.
+ * AI Perception & Execution Pipeline:
+ *   Single user-configured model receives the image, canvas scene metadata,
+ *   user prompt, and returns structured JSON commands directly. Structured
+ *   output is attempted first; on failure the attempt falls back to a raw
+ *   JSON-completable invocation. The whole request retries up to MAX_RETRIES
+ *   total attempts, then throws.
  */
-async function runPipeline(
+async function runModel(
   req: AiRequest,
   sceneText: string,
+  model: ChatOpenAI,
   controller: AbortController,
-  opts: AgentOptions = {}
+  opts: AgentOptions
 ): Promise<AiReply> {
-  const { preferredProviderId, onEvent } = opts;
+  const { onEvent } = opts;
+  const provider = req.model || "model";
 
-  // Provider order: user's pinned choice first, then the rest as fallback.
-  let providers = getAllCodeModels();
-  if (preferredProviderId) {
-    providers = [
-      ...providers.filter((p) => p.id === preferredProviderId),
-      ...providers.filter((p) => p.id !== preferredProviderId),
-    ];
-  }
-
-  if (providers.length === 0) {
-    return getFallbackReply(req, "No AI provider configured — dry-run.");
-  }
+  console.log(`[AI Pipeline] ⚡ Starting generation on "${provider}" (max ${MAX_RETRIES} attempts)...`);
+  onEvent?.({ type: "provider_start", provider });
 
   let lastError: unknown = null;
 
-  for (let idx = 0; idx < providers.length; idx++) {
-    const { id, provider, model } = providers[idx];
-    console.log(`[AI Pipeline] ⚡ Provider [${idx + 1}/${providers.length}]: "${provider}" starting...`);
-    onEvent?.({ type: "provider_start", providerId: id, provider, attempt: idx + 1 });
-    const base = model.withStructuredOutput(AgentReplySchema, { name: "canvas_reply" });
-
-    const attempt = async (retry: boolean): Promise<AiReply> => {
-      const system = retry
-        ? `${systemPromptText(req.uiTheme)}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${RETRY_INSTRUCTION}`
-        : `${systemPromptText(req.uiTheme)}\n\n${MANDATORY_VISIBLE_RESPONSE}`;
-
-      const textContent = userMessageText(req, sceneText);
-      const contentParts: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [
-        { type: "text", text: textContent },
-      ];
-      if (req.atlasImage) {
-        contentParts.push({ type: "image_url", image_url: { url: req.atlasImage, detail: "high" } });
-      }
-      if (req.focusInset) {
-        contentParts.push({ type: "image_url", image_url: { url: req.focusInset, detail: "high" } });
-      }
-      const userMsg = new HumanMessage({ content: contentParts });
-
-      const messages = [new SystemMessage(system), userMsg];
-
-      let response: AgentReply | null = null;
-
-      // Baseten endpoints (deepinfra) do not support OpenAI tools parameter in HTTP body;
-      // invoke direct text-text generation directly to get fast ~1s JSON generation.
-      if (id === "deepinfra") {
-        const rawRes = await model.invoke(messages, { signal: controller.signal });
-        const text = typeof rawRes.content === "string" ? rawRes.content : JSON.stringify(rawRes.content);
-        response = parseJsonResponse(text);
-        if (!response) {
-          throw new Error(`DeepInfra response could not be parsed as valid JSON: ${text.slice(0, 200)}`);
-        }
-      } else {
-        try {
-          const res = await base.invoke(messages, { signal: controller.signal });
-          response = {
-            intent: res.intent ?? "answer",
-            message: res.message,
-            observedText: res.observedText,
-            commands: Array.isArray(res.commands) ? res.commands : [],
-          };
-        } catch (structErr) {
-          console.warn(`[AI Pipeline] Structured output failed for "${provider}", falling back to direct JSON invocation:`, structErr instanceof Error ? structErr.message : structErr);
-          const rawRes = await model.invoke(messages, { signal: controller.signal });
-          const text = typeof rawRes.content === "string" ? rawRes.content : JSON.stringify(rawRes.content);
-          response = parseJsonResponse(text);
-          if (!response) {
-            throw structErr;
-          }
-        }
-      }
-
-      let commands = Array.isArray(response.commands) ? response.commands : [];
-      if (req.widgetEdit) {
-        const targetType = req.widgetEdit.widgetType;
-        const matched = commands.filter(
-          (c) => typeof c === "object" && c !== null && (c as { tool?: string }).tool === targetType
-        );
-        if (matched.length > 0) {
-          commands = [matched[0]];
-        }
-      }
-
-      const reply: AiReply = {
-        intent: response.intent ?? "answer",
-        message: response.message,
-        observedText: response.observedText,
-        commands,
-        attempts: retry ? 2 : 1,
-        requestId: req.requestId,
-        providerId: id,
-      };
-      return reply;
-    };
-
+  for (let attemptNo = 0; attemptNo < MAX_RETRIES; attemptNo++) {
+    const isRetry = attemptNo > 0;
     try {
-      const result = await attempt(false);
-      console.log(`[AI Pipeline] ✅ Generation complete using "${provider}" (${result.commands.length} commands).`);
-      onEvent?.({ type: "provider_done", providerId: id, provider });
-      return result;
+      const reply = await attemptReply(req, sceneText, model, controller, isRetry);
+      console.log(`[AI Pipeline] ✅ Generation complete on attempt ${attemptNo + 1}/${MAX_RETRIES} (${reply.commands.length} commands).`);
+      onEvent?.({ type: "provider_done", provider });
+      return {
+        ...reply,
+        requestId: req.requestId,
+        providerId: provider,
+        attempts: attemptNo + 1,
+      };
     } catch (err) {
       if (controller.signal.aborted) throw err;
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[AI Pipeline] ⚠️ Provider "${provider}" failed: ${msg}`);
       lastError = err;
-      onEvent?.({ type: "provider_failed", providerId: id, provider, error: msg });
-
-      // Retry once on same provider if not a 529/503 overload error
-      if (!msg.includes("529") && !msg.includes("503") && !msg.includes("prediction")) {
-        try {
-          console.log(`[AI Pipeline] 🔄 Retrying provider "${provider}"...`);
-          onEvent?.({ type: "provider_retry", providerId: id, provider });
-          const retryResult = await attempt(true);
-          onEvent?.({ type: "provider_done", providerId: id, provider });
-          return retryResult;
-        } catch (retryErr) {
-          console.warn(`[AI Pipeline] ⚠️ Retry failed for "${provider}":`, retryErr instanceof Error ? retryErr.message : retryErr);
-          lastError = retryErr;
-        }
+      const msg = err instanceof Error ? err.message : String(err);
+      console.warn(`[AI Pipeline] ⚠️ Attempt ${attemptNo + 1}/${MAX_RETRIES} failed: ${msg}`);
+      onEvent?.({ type: "provider_failed", provider, error: msg });
+      if (!isRetry) {
+        console.log(`[AI Pipeline] 🔄 Retrying...`);
       }
-      console.warn(`[AI Pipeline] 🔀 Escalating to next fallback provider...`);
     }
   }
 
-  console.error(`[AI Pipeline] ❌ All AI providers failed. Last error:`, lastError instanceof Error ? lastError.message : lastError);
-  throw lastError || new Error("All AI providers failed.");
+  console.error(`[AI Pipeline] ❌ All ${MAX_RETRIES} attempts failed. Last error:`, lastError instanceof Error ? lastError.message : lastError);
+  throw lastError instanceof Error ? lastError : new Error("AI generation failed.");
 }
 
-export function getFallbackReply(req: AiRequest, message: string): AiReply {
+async function attemptReply(
+  req: AiRequest,
+  sceneText: string,
+  model: ChatOpenAI,
+  controller: AbortController,
+  isRetry: boolean
+): Promise<AgentReply> {
+  const system = isRetry
+    ? `${systemPromptText(req.uiTheme)}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${RETRY_INSTRUCTION}`
+    : `${systemPromptText(req.uiTheme)}\n\n${MANDATORY_VISIBLE_RESPONSE}`;
+
+  const textContent = userMessageText(req, sceneText);
+  const contentParts: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [
+    { type: "text", text: textContent },
+  ];
+  if (req.atlasImage) {
+    contentParts.push({ type: "image_url", image_url: { url: req.atlasImage, detail: "high" } });
+  }
+  if (req.focusInset) {
+    contentParts.push({ type: "image_url", image_url: { url: req.focusInset, detail: "high" } });
+  }
+  const userMsg = new HumanMessage({ content: contentParts });
+
+  const messages = [new SystemMessage(system), userMsg];
+
+  let response: AgentReply | null = null;
+
+  try {
+    const base = model.withStructuredOutput(AgentReplySchema, { name: "canvas_reply" });
+    const res = await base.invoke(messages, { signal: controller.signal });
+    response = {
+      intent: res.intent ?? "answer",
+      message: res.message,
+      observedText: res.observedText,
+      commands: Array.isArray(res.commands) ? res.commands : [],
+    };
+  } catch (structErr) {
+    console.warn(
+      `[AI Pipeline] Structured output failed, falling back to direct JSON invocation:`,
+      structErr instanceof Error ? structErr.message : structErr
+    );
+    const rawRes = await model.invoke(messages, { signal: controller.signal });
+    const text = typeof rawRes.content === "string" ? rawRes.content : JSON.stringify(rawRes.content);
+    response = parseJsonResponse(text);
+    if (!response) {
+      throw structErr;
+    }
+  }
+
+  let commands = Array.isArray(response.commands) ? response.commands : [];
+  if (req.widgetEdit) {
+    const targetType = req.widgetEdit.widgetType;
+    const matched = commands.filter(
+      (c) => typeof c === "object" && c !== null && (c as { tool?: string }).tool === targetType
+    );
+    if (matched.length > 0) {
+      commands = [matched[0]];
+    }
+  }
+
   return {
-    intent: "answer",
-    message,
-    commands: [],
-    attempts: 0,
-    requestId: req.requestId,
+    intent: response.intent ?? "answer",
+    message: response.message,
+    observedText: response.observedText,
+    commands,
   };
 }

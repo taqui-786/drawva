@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
-import { runAgent, getFallbackReply } from "@/lib/ai/agent";
-import { getAiCodeModel, listCodeModelProviders } from "@/lib/ai/model";
-import {
-  MAX_BODY_BYTES,
-  MAX_COMMANDS,
-  MAX_DIAGRAM_BYTES,
-  MAX_HTML_BYTES,
-} from "@/lib/ai/prompts";
+import { runAgent } from "@/lib/ai/agent";
+import { createChatModel } from "@/lib/ai/model";
+import { MAX_BODY_BYTES, MAX_COMMANDS, MAX_DIAGRAM_BYTES, MAX_HTML_BYTES } from "@/lib/ai/prompts";
 import { validateCommands } from "@/lib/canvas/commands";
 import { SIZE } from "@/lib/canvas/constants";
 import type { AiRequest, AgentEvent } from "@/lib/ai/types";
@@ -65,14 +60,18 @@ export async function POST(req: Request) {
   if (!parsed.ok) return json(parsed, 400);
   const p = parsed.data as Partial<AiRequest> & { stream?: boolean };
 
+  const baseUrl = typeof p.baseUrl === "string" ? p.baseUrl.trim() : "";
+  const apiKey = typeof p.apiKey === "string" ? p.apiKey.trim() : "";
+  const modelId = typeof p.model === "string" ? p.model.trim() : "";
+
+  if (!baseUrl || !apiKey || !modelId) {
+    return json({ error: "Missing provider configuration (baseUrl, apiKey, and model are required). Configure a provider in Settings." }, 400);
+  }
+
   const visibleRect = clampBox(p.visibleRect);
   const changedBox = clampBox(p.changedBox);
   const sourceRect = clampBox(p.sourceRect);
   const requestId = String(p.requestId || `req-${Date.now()}`);
-  const preferredModel =
-    typeof p.preferredModel === "string" && p.preferredModel.trim()
-      ? p.preferredModel.trim()
-      : undefined;
 
   // Size / content caps on the image.
   const atlasImage = typeof p.atlasImage === "string" ? p.atlasImage : "";
@@ -94,28 +93,27 @@ export async function POST(req: Request) {
     userPrompt: typeof p.userPrompt === "string" ? p.userPrompt.slice(0, 2000) : "",
     scene: typeof p.scene === "string" ? p.scene.slice(0, 20000) : "",
     trigger: p.trigger === "manual" ? "manual" : "user_paused",
-    ...(preferredModel ? { preferredModel } : {}),
+    baseUrl,
+    apiKey,
+    model: modelId,
   };
 
-  if (!getAiCodeModel()) {
-    // Dry-run fallback when no provider key is set. Never crashes.
-    return json(getFallbackReply(aiRequest, "No AI provider configured."));
-  }
-
+  const model = createChatModel({ baseUrl, apiKey, model: modelId });
   const sceneText = aiRequest.scene || "";
 
   if (p.stream === true) {
-    return streamReply(aiRequest, sceneText, visibleRect, changedBox);
+    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox);
   }
 
-  const reply = await runAgent(aiRequest, sceneText, { preferredProviderId: preferredModel });
+  const reply = await runAgent(aiRequest, sceneText, model);
   return json(validateReply(reply, visibleRect, changedBox));
 }
 
-/** Server-Sent Events response that reports live provider/fallback progress. */
+/** Server-Sent Events response that reports live provider/retry progress. */
 function streamReply(
   aiRequest: AiRequest,
   sceneText: string,
+  model: ReturnType<typeof createChatModel>,
   visibleRect: { x: number; y: number; w: number; h: number },
   changedBox: { x: number; y: number; w: number; h: number }
 ): NextResponse {
@@ -137,10 +135,7 @@ function streamReply(
         send("event", event);
       };
       try {
-        const reply = await runAgent(aiRequest, sceneText, {
-          preferredProviderId: aiRequest.preferredModel,
-          onEvent,
-        });
+        const reply = await runAgent(aiRequest, sceneText, model, { onEvent });
         const payload = validateReply(reply, visibleRect, changedBox);
         send("result", payload);
       } catch (err) {
@@ -151,7 +146,7 @@ function streamReply(
         if (aborted) {
           userMsg = "AI request timed out";
         } else if (msg.includes("529") || msg.includes("prediction")) {
-          userMsg = "AI provider is currently overloaded (529 Error). Retrying automatically with fallback provider...";
+          userMsg = "AI provider is currently overloaded.";
         }
         send("error", { error: userMsg, detail: msg });
       } finally {
@@ -173,11 +168,6 @@ function streamReply(
       connection: "keep-alive",
     },
   });
-}
-
-/** Available code models for the model picker. */
-export async function GET() {
-  return json({ models: listCodeModelProviders() });
 }
 
 function json(body: unknown, status = 200): NextResponse {
