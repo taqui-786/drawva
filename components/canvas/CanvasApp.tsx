@@ -485,6 +485,10 @@ export function CanvasApp() {
     if (!h || !h.canUndo) return;
     await h.undo();
     syncHistoryButtons();
+    if (engine && syncManager.current) {
+      const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
+      syncManager.current.broadcast({ type: "SYNC_INIT_STATE", snapshot });
+    }
   }
 
   async function redo() {
@@ -494,6 +498,10 @@ export function CanvasApp() {
     if (!h || !h.canRedo) return;
     await h.redo();
     syncHistoryButtons();
+    if (engine && syncManager.current) {
+      const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
+      syncManager.current.broadcast({ type: "SYNC_INIT_STATE", snapshot });
+    }
   }
 
   useEffect(() => {
@@ -538,7 +546,7 @@ export function CanvasApp() {
   // ---- engine + tool lifecycle ----
   useEffect(() => {
     if (!engine) return;
-    const tm = new ToolManager(engine, () => ({ color: appState.color, pen: appState.pen, eraser }), "pen");
+    const tm = new ToolManager(engine, () => ({ color: appState.color, pen: appState.pen, eraser }), "hand");
     tools.current = tm;
 
     const wm = new WidgetManager({
@@ -871,7 +879,6 @@ export function CanvasApp() {
       onInitState: async (snapshot) => {
         if (!engine) return;
         await restoreSnapshot(engine, widgets.current, objects.current, snapshot);
-        history.current?.reset();
       },
       onRemoteStroke: (seg) => {
         if (!engine) return;
@@ -1301,16 +1308,25 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     // On commit of a drawing gesture, record the ink box, bump revision, and
     // schedule the auto-AI request.
     if (drawingRef.current) {
-      const isDrawing = ["pen", "highlighter", "eraser", "rect", "ellipse", "arrow"].includes(mode);
-      if (isDrawing) {
-        const box = { ...drawingRef.current };
+      if (mode === "eraser") {
+        if (aiTimer.current) {
+          clearTimeout(aiTimer.current);
+          aiTimer.current = null;
+        }
         drawingRef.current = null;
-        inkBoxRef.current = box;
-        aiRevision.current++;
         afterBoardChange();
-        if (appState.autoOn) scheduleAi(box);
       } else {
-        drawingRef.current = null;
+        const isDrawing = ["pen", "highlighter", "rect", "ellipse", "arrow"].includes(mode);
+        if (isDrawing) {
+          const box = { ...drawingRef.current };
+          drawingRef.current = null;
+          inkBoxRef.current = box;
+          aiRevision.current++;
+          afterBoardChange();
+          if (appState.autoOn) scheduleAi(box);
+        } else {
+          drawingRef.current = null;
+        }
       }
     }
   };

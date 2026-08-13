@@ -62,7 +62,7 @@ export class ToolManager {
   constructor(
     private engine: CanvasEngine,
     private getStyle: () => ToolStyle,
-    mode: CanvasMode = "pen"
+    mode: CanvasMode = "hand"
   ) {
     this.mode = mode;
     this.strokes = new StrokeController(engine, () => this.styleToStrokeOptions());

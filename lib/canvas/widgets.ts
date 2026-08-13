@@ -74,7 +74,7 @@ export class WidgetManager {
   >();
   private hostRoot: HTMLDivElement;
   private style: HTMLStyleElement;
-  private mode: CanvasMode = "pen";
+  private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
 
   constructor(private opts: WidgetMountOptions) {
@@ -233,11 +233,10 @@ export class WidgetManager {
     const hand = this.mode === "hand";
     const select = this.mode === "select";
     const isSelected = this.selectedId === id;
-    const isHovered = shell?.dataset.hovered === "true";
     const widget = this.widgets.get(id);
     const isDraft = widget?.status === "draft";
-    // Active ONLY when in draft state, hovered, or selected
-    const active = isDraft || isSelected || isHovered;
+    // Active ONLY when in draft state or explicitly selected via click
+    const active = isDraft || isSelected;
     const frame = shell?.querySelector("iframe") as HTMLIFrameElement | null;
 
     this.hostRoot.style.zIndex = active || hand || select ? "40" : "1";
@@ -488,15 +487,7 @@ export class WidgetManager {
 
     shell.append(body, chrome, resizeHandle);
 
-    // ---- Hover & Pointer selection listeners ----
-    shell.addEventListener("pointerenter", () => {
-      shell.dataset.hovered = "true";
-      this.applyMode(widget.id);
-    });
-    shell.addEventListener("pointerleave", () => {
-      shell.dataset.hovered = "false";
-      this.applyMode(widget.id);
-    });
+    // ---- Pointer selection listeners ----
     shell.addEventListener("pointerdown", (e) => {
       // Don't intercept if clicking action buttons or resize handle
       const target = e.target as HTMLElement | null;

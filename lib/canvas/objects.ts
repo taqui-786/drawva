@@ -81,7 +81,7 @@ export class ObjectManager {
   private toolbars = new Map<string, { chrome: HTMLElement; dragBar: HTMLElement; resizeHandle: HTMLElement }>();
   private hostRoot: HTMLDivElement;
   private style: HTMLStyleElement;
-  private mode: CanvasMode = "pen";
+  private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
 
   constructor(private opts: ObjectMountOptions) {

@@ -12,7 +12,7 @@ export type AiStatus = "idle" | "thinking" | "done" | "error";
  * bboxes, pressure) stays inside the engine to avoid per-frame re-renders.
  */
 export const appState = proxy({
-  mode: "pen" as CanvasMode,
+  mode: "hand" as CanvasMode,
   color: "#111111",
   pen: 3,
   zoom: 100,

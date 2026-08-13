@@ -1,5 +1,6 @@
 "use client";
 
+import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -33,7 +34,6 @@ import {
   HighlighterIcon,
   ImageAdd01Icon,
   Image01Icon,
-  Loading02Icon,
   MathIcon,
   Menu01Icon,
   MoreHorizontalIcon,
@@ -176,29 +176,6 @@ export function CanvasHeader({
 }) {
   const isShapeActive = ["rect", "ellipse", "arrow"].includes(mode);
   const activeShapeTool = SHAPE_TOOLS.find((s) => s.mode === mode) || SHAPE_TOOLS[0];
-
-  // ---- AI status badge (live model / retry) ----
-  let badgeNode: React.ReactNode;
-  if (aiStatus === "thinking") {
-    badgeNode = (
-      <Badge variant="outline" className="gap-1 text-muted-foreground">
-        <HugeiconsIcon icon={Loading02Icon} className="animate-spin" />
-        <span className="max-w-28 sm:max-w-40 truncate">
-          Generating… {aiRun.activeProvider || activeModel || ""}
-        </span>
-      </Badge>
-    );
-  } else if (aiStatus === "done") {
-    badgeNode = (
-      <Badge variant="secondary" className="hidden sm:inline-flex">
-        {aiRun.doneProvider ? `Done · ${aiRun.doneProvider}` : "Done"}
-      </Badge>
-    );
-  } else if (aiStatus === "error") {
-    badgeNode = <Badge variant="destructive">Failed</Badge>;
-  } else {
-    badgeNode = <Badge variant="secondary" className="hidden sm:inline-flex">Ready</Badge>;
-  }
 
   const hasModels = models.length > 0;
   const settleValue = activeModel && hasModels && models.includes(activeModel) ? activeModel : (models[0] ?? "");
@@ -468,65 +445,148 @@ export function CanvasHeader({
 
       {/* ── Right: AI Assistant & Settings ────────────────────────── */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
-        {badgeNode}
-
-        {aiStatus !== "thinking" && hasModels && (
-          <div className="hidden lg:block">
-            <Select
-              value={settleValue}
-              onValueChange={onModelChange}
-              items={models.map((m) => ({ label: m, value: m }))}
+        <AnimatePresence mode="wait">
+          {aiStatus === "thinking" ? (
+            <motion.div
+              key="sci-fi-loader"
+              initial={{ opacity: 0, scale: 0.92, width: 120 }}
+              animate={{ opacity: 1, scale: 1, width: "auto" }}
+              exit={{ opacity: 0, scale: 0.92 }}
+              transition={{ duration: 0.25, ease: "easeOut" }}
+              className="relative flex h-8 min-w-[220px] sm:min-w-[300px] max-w-sm items-center justify-between overflow-hidden rounded-full border border-cyan-500/50 bg-slate-950/95 px-3.5 shadow-[0_0_20px_rgba(6,182,212,0.4)] backdrop-blur-md"
             >
-              <SelectTrigger size="sm" className="max-w-44 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent align="end">
-                {models.map((m) => (
-                  <SelectItem key={m} value={m}>
-                    {m}
-                  </SelectItem>
+              {/* Laser scanner beam */}
+              <motion.div
+                className="absolute inset-y-0 w-28 bg-gradient-to-r from-transparent via-cyan-400/90 to-transparent blur-[2px]"
+                animate={{ x: ["-100%", "280%"] }}
+                transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut", repeatType: "mirror" }}
+              />
+              {/* Ambient background glow pulse */}
+              <motion.div
+                className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-purple-500/15 to-blue-500/10"
+                animate={{ opacity: [0.3, 0.85, 0.3] }}
+                transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+              />
+
+              {/* Left glowing quantum dots */}
+              <div className="relative z-10 flex items-center gap-1.5">
+                <motion.span
+                  className="size-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]"
+                  animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "easeInOut" }}
+                />
+                <motion.span
+                  className="size-1.5 rounded-full bg-indigo-400 shadow-[0_0_6px_#818cf8]"
+                  animate={{ scale: [1.4, 1, 1.4], opacity: [0.8, 0.4, 0.8] }}
+                  transition={{ repeat: Infinity, duration: 1, ease: "easeInOut", delay: 0.2 }}
+                />
+              </div>
+
+              {/* Center equalizer sci-fi wave */}
+              <div className="relative z-10 flex items-center gap-1 px-3">
+                {[0.4, 0.85, 0.35, 1, 0.5, 0.75, 0.4].map((hRatio, i) => (
+                  <motion.span
+                    key={i}
+                    className="w-1 rounded-full bg-gradient-to-t from-cyan-500 to-indigo-400 shadow-[0_0_4px_#38bdf8]"
+                    animate={{ scaleY: [0.25, 1, 0.25] }}
+                    transition={{
+                      repeat: Infinity,
+                      duration: 0.9,
+                      ease: "easeInOut",
+                      delay: i * 0.1,
+                    }}
+                    style={{ height: `${15 * hRatio}px` }}
+                  />
                 ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+              </div>
 
-        {aiStatus !== "thinking" && (
-          <label className="hidden sm:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none">
-            <Switch size="sm" checked={autoOn} onCheckedChange={onAutoChange} />
-            Auto
-          </label>
-        )}
+              {/* Right glowing sparkles icon */}
+              <div className="relative z-10 flex items-center">
+                <motion.div
+                  animate={{ rotate: 360 }}
+                  transition={{ repeat: Infinity, duration: 3.5, ease: "linear" }}
+                  className="text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.9)]"
+                >
+                  <HugeiconsIcon icon={SparklesIcon} className="size-4" />
+                </motion.div>
+              </div>
+            </motion.div>
+          ) : (
+            <motion.div
+              key="standard-controls"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex items-center gap-1 sm:gap-1.5"
+            >
+              {aiStatus === "done" && (
+                <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
+                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  {aiRun.doneProvider ? `Done · ${aiRun.doneProvider}` : "Done"}
+                </Badge>
+              )}
 
-        {!autoOn && (
-          <Button
-            size="sm"
-            variant="secondary"
-            onClick={onAskAi}
-            disabled={aiStatus === "thinking"}
-            className="gap-1 px-2.5 text-xs"
-          >
-            <HugeiconsIcon icon={SparklesIcon} className="size-3.5" />
-            <span>Ask AI</span>
-          </Button>
-        )}
+              {aiStatus === "error" && (
+                <Badge variant="destructive">Failed</Badge>
+              )}
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                onClick={onOpenSettings}
-                data-icon="true"
-                aria-label="AI settings"
-              >
-                <HugeiconsIcon icon={Settings01Icon} />
-              </Button>
-            }
-          />
-          <TooltipContent>AI settings</TooltipContent>
-        </Tooltip>
+              {hasModels && (
+                <div className="hidden lg:block">
+                  <Select
+                    value={settleValue}
+                    onValueChange={onModelChange}
+                    items={models.map((m) => ({ label: m, value: m }))}
+                  >
+                    <SelectTrigger size="sm" className="max-w-44 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      {models.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
+              <label className="hidden sm:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none">
+                <Switch size="sm" checked={autoOn} onCheckedChange={onAutoChange} />
+                Auto
+              </label>
+
+              {!autoOn && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={onAskAi}
+                  className="gap-1 px-2.5 text-xs"
+                >
+                  <HugeiconsIcon icon={SparklesIcon} className="size-3.5" />
+                  <span>Ask AI</span>
+                </Button>
+              )}
+
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      onClick={onOpenSettings}
+                      data-icon="true"
+                      aria-label="AI settings"
+                    >
+                      <HugeiconsIcon icon={Settings01Icon} />
+                    </Button>
+                  }
+                />
+                <TooltipContent>AI settings</TooltipContent>
+              </Tooltip>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
     </header>
   );
