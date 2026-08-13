@@ -161,6 +161,29 @@ export function CanvasApp() {
   const refineFocusRef = useRef<{ rect: Rect; widgetId: string } | null>(null);
   const activeEditTargetRef = useRef<string | null>(null);
 
+  // ---- Mobile touch pinch-zoom & 2-finger pan tracking ----
+  const activePointersRef = useRef<Map<number, Point>>(new Map());
+  const pinchRef = useRef<{
+    startCenter: Point;
+    startDistance: number;
+    startScale: number;
+    startPanX: number;
+    startPanY: number;
+  } | null>(null);
+  const gestureOverlayRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = gestureOverlayRef.current;
+    if (!el) return;
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        e.preventDefault();
+      }
+    };
+    el.addEventListener("touchmove", onTouchMove, { passive: false });
+    return () => el.removeEventListener("touchmove", onTouchMove);
+  }, []);
+
   // ---- AI provider config (localStorage-driven; dialog writes, we react) ----
   const [models, setModels] = useState<string[]>([]);
   const [activeModel, setActiveModelState] = useState<string | null>(null);
@@ -1007,6 +1030,41 @@ if (e.shiftKey && k === "h") setMode("highlighter");
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!engine || textOpen) return;
+
+    activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+    // Multi-touch pinch gesture on mobile (2+ active touch points)
+    if (activePointersRef.current.size >= 2) {
+      if (drawingRef.current) {
+        drawingRef.current = null;
+      }
+      const tm = tools.current;
+      if (tm) {
+        for (const pid of activePointersRef.current.keys()) {
+          tm.cancel(pid);
+        }
+      }
+
+      const pts = Array.from(activePointersRef.current.values());
+      const target = gestureOverlayRef.current || (e.currentTarget as HTMLElement);
+      const rect = target.getBoundingClientRect();
+      const p1 = { x: pts[0].x - rect.left, y: pts[0].y - rect.top };
+      const p2 = { x: pts[1].x - rect.left, y: pts[1].y - rect.top };
+
+      const startCenter = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      const startDistance = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+      const cam = engine.camera;
+
+      pinchRef.current = {
+        startCenter,
+        startDistance,
+        startScale: cam.scale,
+        startPanX: cam.panX,
+        startPanY: cam.panY,
+      };
+      return;
+    }
+
     // penecho: capture the pointer for EVERY gesture, so strokes survive moving
     // over widget iframes or off the canvas element.
     try {
@@ -1047,6 +1105,36 @@ if (e.shiftKey && k === "h") setMode("highlighter");
 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!engine) return;
+
+    if (activePointersRef.current.has(e.pointerId)) {
+      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    }
+
+    // Active 2-finger touch pinch & pan
+    if (activePointersRef.current.size >= 2 && pinchRef.current) {
+      const pts = Array.from(activePointersRef.current.values());
+      const target = gestureOverlayRef.current || (e.currentTarget as HTMLElement);
+      const rect = target.getBoundingClientRect();
+      const p1 = { x: pts[0].x - rect.left, y: pts[0].y - rect.top };
+      const p2 = { x: pts[1].x - rect.left, y: pts[1].y - rect.top };
+
+      const currentCenter = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
+      const currentDistance = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+
+      const p = pinchRef.current;
+      engine.camera.pinchZoom(
+        currentCenter,
+        p.startCenter,
+        p.startDistance,
+        currentDistance,
+        p.startScale,
+        p.startPanX,
+        p.startPanY
+      );
+      engine.requestRender();
+      return;
+    }
+
     const tm = tools.current;
     if (!tm) return;
     const world = screenToWorld(e);
@@ -1064,6 +1152,11 @@ if (e.shiftKey && k === "h") setMode("highlighter");
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
+    activePointersRef.current.delete(e.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchRef.current = null;
+    }
+
     const tm = tools.current;
     if (!tm) return;
     const changed = tm.end(e.pointerId);
@@ -1163,6 +1256,7 @@ if (e.shiftKey && k === "h") setMode("highlighter");
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div ref={mountRef} className="absolute inset-0" />
         <div
+          ref={gestureOverlayRef}
           onPointerDown={onPointerDown}
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
