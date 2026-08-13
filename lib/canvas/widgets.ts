@@ -162,6 +162,9 @@ export class WidgetManager {
   };
 
   add(widget: WidgetItem): void {
+    if (this.shells.has(widget.id)) {
+      this.unmount(widget.id);
+    }
     this.widgets.set(widget.id, widget);
     this.mount(widget);
     this.position(widget);
@@ -362,8 +365,8 @@ export class WidgetManager {
         if (typeof width === "number" && typeof height === "number") {
           const w = this.widgets.get(widget.id);
           if (w) {
-            const shellW = Math.min(900, Math.max(220, Math.round(width + 24)));
-            const shellH = Math.min(700, Math.max(140, Math.round(height + 24)));
+            const shellW = Math.min(1200, Math.max(220, Math.round(width + 24)));
+            const shellH = Math.min(900, Math.max(140, Math.round(height + 24)));
             if (Math.abs(w.w - shellW) > 6 || Math.abs(w.h - shellH) > 6) {
               w.w = shellW;
               w.h = shellH;

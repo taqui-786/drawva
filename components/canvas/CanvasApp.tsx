@@ -593,6 +593,8 @@ export function CanvasApp() {
         onAccept: (id) => {
           history.current?.recordWidgets();
           wm.setStatus(id, "accepted");
+          const item = wm.get(id);
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
           afterBoardChangeRef.current();
         },
         onAiRefine: (id) => {
@@ -718,8 +720,8 @@ export function CanvasApp() {
         if (oldWidget) {
           cmd.x = oldWidget.x;
           cmd.y = oldWidget.y;
-          cmd.w = oldWidget.w;
-          cmd.h = oldWidget.h;
+          cmd.w = Math.max(oldWidget.w, Number(cmd.w) || oldWidget.w);
+          cmd.h = Math.max(oldWidget.h, Number(cmd.h) || oldWidget.h);
         }
         wm.remove(targetId);
       }
@@ -814,8 +816,8 @@ export function CanvasApp() {
         if (oldWidget) {
           cmd.x = oldWidget.x;
           cmd.y = oldWidget.y;
-          cmd.w = oldWidget.w;
-          cmd.h = oldWidget.h;
+          cmd.w = Math.max(oldWidget.w, Number(cmd.w) || oldWidget.w);
+          cmd.h = Math.max(oldWidget.h, Number(cmd.h) || oldWidget.h);
         }
         wm.remove(targetId);
       }

@@ -44,13 +44,32 @@
           try {
             const body = document.body;
             if (!body) return;
-            let w = 0;
-            let h = 0;
+            let w = Math.max(body.scrollWidth || 0, body.offsetWidth || 0);
+            let h = Math.max(body.scrollHeight || 0, body.offsetHeight || 0);
+
             const first = body.firstElementChild;
             if (first) {
               const rect = first.getBoundingClientRect();
-              w = Math.ceil(Math.max(first.offsetWidth || 0, rect.width || 0));
-              h = Math.ceil(Math.max(first.offsetHeight || 0, rect.height || 0));
+              w = Math.max(w, Math.ceil(first.scrollWidth || 0), Math.ceil(first.offsetWidth || 0), Math.ceil(rect.width || 0));
+              h = Math.max(h, Math.ceil(first.scrollHeight || 0), Math.ceil(first.offsetHeight || 0), Math.ceil(rect.height || 0));
+
+              if (first.children && first.children.length > 0) {
+                let maxRight = 0;
+                let maxBottom = 0;
+                const fr = first.getBoundingClientRect();
+                for (let i = 0; i < first.children.length; i++) {
+                  const child = first.children[i];
+                  const cr = child.getBoundingClientRect();
+                  if (cr && cr.width > 0 && cr.height > 0) {
+                    const r = (cr.left - fr.left) + cr.width;
+                    const b = (cr.top - fr.top) + cr.height;
+                    if (r > maxRight) maxRight = r;
+                    if (b > maxBottom) maxBottom = b;
+                  }
+                }
+                if (maxRight > 0) w = Math.max(w, Math.ceil(maxRight + 16));
+                if (maxBottom > 0) h = Math.max(h, Math.ceil(maxBottom + 16));
+              }
             }
 
             const svg = document.querySelector('svg');
@@ -69,8 +88,8 @@
 
             if (w < 100) w = 320;
             if (h < 80) h = 240;
-            w = Math.min(900, Math.max(220, w));
-            h = Math.min(700, Math.max(140, h));
+            w = Math.min(1200, Math.max(220, w));
+            h = Math.min(900, Math.max(140, h));
 
             if (Math.abs(w - lastW) > 6 || Math.abs(h - lastH) > 6) {
               lastW = w;

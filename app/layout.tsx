@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Outfit, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono, Outfit, JetBrains_Mono, MuseoModerno } from "next/font/google";
 import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
+
+const museoModerno = MuseoModerno({subsets:['latin'],variable:'--font-brand'});
 
 const jetbrainsMonoHeading = JetBrains_Mono({subsets:['latin'],variable:'--font-heading'});
 
@@ -30,7 +32,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={cn(geistSans.variable, geistMono.variable, "font-sans", outfit.variable, jetbrainsMonoHeading.variable)}>
+    <html lang="en" className={cn(geistSans.variable, geistMono.variable, "font-sans", outfit.variable, jetbrainsMonoHeading.variable, museoModerno.variable)}>
       <body className="min-h-full antialiased">
         <TooltipProvider>{children}</TooltipProvider>
         <Toaster richColors position="bottom-right" />

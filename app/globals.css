@@ -10,6 +10,7 @@
   --font-sans: var(--font-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-heading);
+  --font-brand: var(--font-brand);
   --font-serif: var(--font-serif);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
@@ -137,6 +138,16 @@
     html {
       scroll-behavior: auto;
     }
+  }
+
+  /* ── Brand wordmark ───────────────────────────────────── */
+  .brand-wordmark {
+    font-family: "MuseoModerno", sans-serif;
+    color: var(--primary);
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    -webkit-text-stroke: 0.5px color-mix(in oklch, #000 40%, transparent);
+    text-stroke: 0.5px color-mix(in oklch, #000 40%, transparent);
   }
 
   /* ── Landing page keystroke key ────────────────────────── */

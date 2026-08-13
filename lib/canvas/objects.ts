@@ -151,6 +151,9 @@ export class ObjectManager {
   }
 
   add(item: ObjectItem): void {
+    if (this.shells.has(item.id)) {
+      this.unmount(item.id);
+    }
     this.items.set(item.id, item);
     this.mount(item);
     this.position(item);

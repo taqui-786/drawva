@@ -20,7 +20,6 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
-  Brain01Icon,
   ChevronDownIcon,
   CursorIcon,
   ColorsIcon,
@@ -37,7 +36,7 @@ import {
   Image01Icon,
   Loading02Icon,
   MathIcon,
-  PenTool01Icon,
+  PencilIcon,
   RedoIcon,
   Settings01Icon,
   SparklesIcon,
@@ -63,7 +62,7 @@ const PALETTE = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b", "#9333ea
 const TOOLS: { mode: CanvasMode; label: string; kbd: string; icon: typeof CursorIcon }[] = [
   { mode: "select", label: "Select", kbd: "V", icon: CursorIcon },
   { mode: "hand", label: "Hand", kbd: "H", icon: HandIcon },
-  { mode: "pen", label: "Pen", kbd: "P", icon: PenTool01Icon },
+  { mode: "pen", label: "Pen", kbd: "P", icon: PencilIcon },
   { mode: "highlighter", label: "Highlighter", kbd: "⇧H", icon: HighlighterIcon },
   { mode: "eraser", label: "Eraser", kbd: "E", icon: EraserIcon },
   { mode: "text", label: "Text", kbd: "T", icon: TextIcon },
@@ -88,7 +87,7 @@ function ToolButton({
         render={
           <Button
             size="icon-sm"
-            variant={active ? "secondary" : "ghost"}
+            variant={active ? "secondaryPrimary" : "ghost"}
             aria-pressed={active}
             onClick={() => onMode(tool.mode)}
             data-icon="true"
@@ -203,10 +202,7 @@ export function CanvasHeader({
     <header className="flex h-12 shrink-0 items-center gap-1.5 border-b bg-background px-2">
       {/* ── Left: brand + project menus ─────────────────────────── */}
       <div className="flex items-center gap-1">
-        <Badge variant="outline" className="gap-1 px-2 py-1 font-heading">
-          <HugeiconsIcon icon={Brain01Icon} strokeWidth={2} className="size-3.5" />
-          Drawva
-        </Badge>
+        <span className="brand-wordmark px-2 text-lg leading-none">Drawva</span>
 
         <DropdownMenu>
           <DropdownMenuTrigger
