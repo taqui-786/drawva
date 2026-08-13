@@ -45,7 +45,7 @@ export function createChatModel({
         model,
         apiKey,
         temperature,
-        maxRetries: 1,
+        maxRetries: 0,
         clientOptions: {
           timeout: timeoutMs,
           ...(cleanBaseUrl ? { baseURL: cleanBaseUrl } : {}),
@@ -60,14 +60,14 @@ export function createChatModel({
           configuration: { baseURL: cleanBaseUrl },
           temperature,
           timeout: timeoutMs,
-          maxRetries: 1,
+          maxRetries: 0,
         }) as unknown as BaseChatModel;
       }
       return new ChatGoogleGenerativeAI({
         model,
         apiKey,
         temperature,
-        maxRetries: 1,
+        maxRetries: 0,
       }) as unknown as BaseChatModel;
     }
     case "nvidia": {
@@ -78,7 +78,7 @@ export function createChatModel({
         configuration: { baseURL: effectiveBaseUrl },
         temperature,
         timeout: timeoutMs,
-        maxRetries: 1,
+        maxRetries: 0,
       }) as unknown as BaseChatModel;
     }
     case "groq": {
@@ -89,14 +89,14 @@ export function createChatModel({
           configuration: { baseURL: cleanBaseUrl },
           temperature,
           timeout: timeoutMs,
-          maxRetries: 1,
+          maxRetries: 0,
         }) as unknown as BaseChatModel;
       }
       return new ChatGroq({
         model,
         apiKey,
         temperature,
-        maxRetries: 1,
+        maxRetries: 0,
       }) as unknown as BaseChatModel;
     }
     case "openai": {
@@ -107,7 +107,7 @@ export function createChatModel({
         configuration: { baseURL: effectiveBaseUrl },
         temperature,
         timeout: timeoutMs,
-        maxRetries: 1,
+        maxRetries: 0,
       }) as unknown as BaseChatModel;
     }
     case "custom":
@@ -121,7 +121,7 @@ export function createChatModel({
         configuration: { baseURL: cleanBaseUrl },
         temperature,
         timeout: timeoutMs,
-        maxRetries: 1,
+        maxRetries: 0,
       }) as unknown as BaseChatModel;
     }
   }

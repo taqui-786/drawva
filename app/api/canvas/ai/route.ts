@@ -151,6 +151,10 @@ function streamReply(
         let userMsg = "AI request failed";
         if (aborted) {
           userMsg = "AI request timed out";
+        } else if (msg.includes("429") || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("capacity")) {
+          userMsg = "Provider rate limit capacity reached (429). Please wait a few seconds before retrying.";
+        } else if (msg.includes("401") || msg.toLowerCase().includes("api key") || msg.toLowerCase().includes("unauthorized")) {
+          userMsg = "API key rejected by provider (401 Unauthorized). Check Settings.";
         } else if (msg.includes("529") || msg.includes("prediction")) {
           userMsg = "AI provider is currently overloaded.";
         }

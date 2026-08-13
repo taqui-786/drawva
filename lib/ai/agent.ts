@@ -32,6 +32,40 @@ export interface AgentOptions {
   onEvent?: (event: AgentEvent) => void;
 }
 
+export function isRateLimitError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const rec = err as Record<string, unknown>;
+  const status = Number(rec.status || rec.statusCode || 0);
+  const lcCode = String(rec.lc_error_code || "");
+
+  return (
+    status === 429 ||
+    lcCode === "MODEL_RATE_LIMIT" ||
+    msg.includes("429") ||
+    msg.includes("rate limit") ||
+    msg.includes("too many requests") ||
+    msg.includes("capacity")
+  );
+}
+
+export function isFatalAuthError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const rec = err as Record<string, unknown>;
+  const status = Number(rec.status || rec.statusCode || 0);
+
+  return (
+    status === 401 ||
+    status === 403 ||
+    msg.includes("401") ||
+    msg.includes("403") ||
+    msg.includes("unauthorized") ||
+    msg.includes("api key not valid") ||
+    msg.includes("invalid api key")
+  );
+}
+
 export async function runAgent(
   req: AiRequest,
   sceneText: string,
@@ -263,10 +297,21 @@ async function runModel(
       if (controller.signal.aborted) throw err;
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
+
+      if (isFatalAuthError(err)) {
+        console.error(`[AI Pipeline] ❌ Provider rejected API key (401 Unauthorized): ${msg}`);
+        onEvent?.({ type: "provider_failed", provider, error: "Invalid API key (401 Unauthorized)" });
+        throw new Error(`API key rejected by provider (401 Unauthorized). Please check your API key in Settings.`);
+      }
+
       console.warn(`[AI Pipeline] ⚠️ Attempt ${attemptNo + 1}/${MAX_RETRIES} failed: ${msg}`);
       onEvent?.({ type: "provider_failed", provider, error: msg });
-      if (!isRetry) {
-        console.log(`[AI Pipeline] 🔄 Retrying...`);
+
+      if (attemptNo < MAX_RETRIES - 1) {
+        const rateLimit = isRateLimitError(err);
+        const delayMs = rateLimit ? (attemptNo + 1) * 2500 : 1200;
+        console.log(`[AI Pipeline] ⏳ Waiting ${delayMs}ms backoff before attempt ${attemptNo + 2}/${MAX_RETRIES}...`);
+        await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
     }
   }
@@ -303,9 +348,16 @@ async function attemptReply(
   let response: AgentReply | null = null;
   let usage: TokenUsage | undefined;
 
+  // Use jsonMode for non-OpenAI or custom providers (like NVIDIA, Ollama, DeepSeek, Groq)
+  // because OpenAI function_calling tools parameter is unsupported on vision endpoints for custom models.
+  const isCustomOrNvidia = req.providerType !== "openai";
+  const structOpts = isCustomOrNvidia
+    ? { method: "jsonMode" as const, name: "canvas_reply" }
+    : { name: "canvas_reply" };
+
   try {
     if (typeof model.withStructuredOutput === "function") {
-      const base = model.withStructuredOutput(AgentReplySchema, { name: "canvas_reply" });
+      const base = model.withStructuredOutput(AgentReplySchema, structOpts);
       const res = await base.invoke(messages, { signal: controller.signal });
       usage = extractTokenUsage(res);
       response = {
@@ -318,6 +370,11 @@ async function attemptReply(
       throw new Error("Structured output unavailable");
     }
   } catch (structErr) {
+    // If structErr is a Rate Limit (429), Auth (401/403), or Abort error, DO NOT call model.invoke in catch!
+    if (isRateLimitError(structErr) || isFatalAuthError(structErr) || controller.signal.aborted) {
+      throw structErr;
+    }
+
     console.warn(
       `[AI Pipeline] Structured output failed, falling back to direct JSON invocation:`,
       structErr instanceof Error ? structErr.message : structErr
