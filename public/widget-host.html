@@ -44,57 +44,84 @@
           try {
             const body = document.body;
             if (!body) return;
-            let w = Math.max(body.scrollWidth || 0, body.offsetWidth || 0);
-            let h = Math.max(body.scrollHeight || 0, body.offsetHeight || 0);
-
             const first = body.firstElementChild;
-            if (first) {
-              const rect = first.getBoundingClientRect();
-              w = Math.max(w, Math.ceil(first.scrollWidth || 0), Math.ceil(first.offsetWidth || 0), Math.ceil(rect.width || 0));
-              h = Math.max(h, Math.ceil(first.scrollHeight || 0), Math.ceil(first.offsetHeight || 0), Math.ceil(rect.height || 0));
+            if (!first) return;
 
-              if (first.children && first.children.length > 0) {
-                let maxRight = 0;
-                let maxBottom = 0;
-                const fr = first.getBoundingClientRect();
-                for (let i = 0; i < first.children.length; i++) {
-                  const child = first.children[i];
-                  const cr = child.getBoundingClientRect();
-                  if (cr && cr.width > 0 && cr.height > 0) {
-                    const r = (cr.left - fr.left) + cr.width;
-                    const b = (cr.top - fr.top) + cr.height;
-                    if (r > maxRight) maxRight = r;
-                    if (b > maxBottom) maxBottom = b;
-                  }
-                }
-                if (maxRight > 0) w = Math.max(w, Math.ceil(maxRight + 16));
-                if (maxBottom > 0) h = Math.max(h, Math.ceil(maxBottom + 16));
-              }
-            }
+            const bodyRect = body.getBoundingClientRect();
+            const firstRect = first.getBoundingClientRect();
+            let targetW = 0;
+            let targetH = 0;
 
+            // 1. Check for SVG graphics (Mermaid / DOT / Vega / SMILES / Icons)
             const svg = document.querySelector('svg');
             if (svg) {
               try {
+                let svgW = 0, svgH = 0;
                 const g = svg.querySelector('g');
                 if (g && g.getBBox) {
                   const gb = g.getBBox();
                   if (gb && gb.width > 20 && gb.height > 20) {
-                    w = Math.max(w, Math.ceil(gb.width + 32));
-                    h = Math.max(h, Math.ceil(gb.height + 32));
+                    svgW = gb.width;
+                    svgH = gb.height;
                   }
+                }
+                if (!svgW && svg.viewBox && svg.viewBox.baseVal) {
+                  svgW = svg.viewBox.baseVal.width;
+                  svgH = svg.viewBox.baseVal.height;
+                }
+                if (svgW > 20 && svgH > 20) {
+                  targetW = Math.max(targetW, Math.ceil(svgW + 32));
+                  targetH = Math.max(targetH, Math.ceil(svgH + 32));
                 }
               } catch(e) {}
             }
 
-            if (w < 100) w = 320;
-            if (h < 80) h = 240;
-            w = Math.min(1200, Math.max(220, w));
-            h = Math.min(900, Math.max(140, h));
+            // 2. Measure HTML container intrinsic width
+            const firstStyle = window.getComputedStyle(first);
+            const hasMaxWidth = firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && firstStyle.maxWidth !== '100%';
+            const hasExplicitWidth = firstStyle.width && firstStyle.width !== '100%' && !firstStyle.width.endsWith('%');
 
-            if (Math.abs(w - lastW) > 6 || Math.abs(h - lastH) > 6) {
-              lastW = w;
-              lastH = h;
-              window.parent.postMessage({ type: 'drawva-widget-resize-content', width: w, height: h }, '*');
+            if (hasMaxWidth || hasExplicitWidth) {
+              targetW = Math.max(targetW, Math.ceil(firstRect.width));
+            } else {
+              // Measure rightmost coordinate of content elements inside wrapper
+              let maxRight = 0;
+              const children = first.querySelectorAll('input, button, select, textarea, img, svg, canvas, table, h1, h2, h3, h4, h5, h6, p, span, a, label, form, section, article, .card, [class*="card"], [class*="container"], [class*="box"]');
+              if (children.length > 0) {
+                for (let i = 0; i < children.length; i++) {
+                  const child = children[i];
+                  const cr = child.getBoundingClientRect();
+                  if (cr.width > 0 && cr.height > 0) {
+                    const r = (cr.right - bodyRect.left);
+                    // Ignore full-width block containers stretching to 100% iframe width unless fixed element
+                    const isFullStretchedBlock = (cr.width >= bodyRect.width - 12) && (child.tagName === 'DIV' || child.tagName === 'FORM' || child.tagName === 'SECTION');
+                    if (r > maxRight && !isFullStretchedBlock) {
+                      maxRight = r;
+                    }
+                  }
+                }
+              }
+
+              if (maxRight > 40) {
+                targetW = Math.max(targetW, Math.ceil(maxRight + 16));
+              } else {
+                targetW = Math.max(targetW, Math.ceil(firstRect.width || 0));
+              }
+            }
+
+            // Height measurement
+            const contentH = Math.max(body.scrollHeight || 0, first.scrollHeight || 0, Math.ceil(firstRect.height || 0));
+            targetH = Math.max(targetH, contentH);
+
+            if (targetW < 100) targetW = 320;
+            if (targetH < 80) targetH = 240;
+            targetW = Math.min(1200, Math.max(220, targetW));
+            targetH = Math.min(900, Math.max(140, targetH));
+
+            if (Math.abs(targetW - lastW) > 6 || Math.abs(targetH - lastH) > 6) {
+              lastW = targetW;
+              lastH = targetH;
+              window.parent.postMessage({ type: 'drawva-widget-resize-content', width: targetW, height: targetH }, '*');
             }
           } catch(e) {}
         }

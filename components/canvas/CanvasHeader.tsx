@@ -392,7 +392,7 @@ export function CanvasHeader({
           </PopoverContent>
         </Popover>
 
-        {/* Undo / Redo */}
+        {/* Undo / Redo / Clear */}
         <div className="hidden md:flex items-center gap-0.5">
           <Separator orientation="vertical" className="mx-1 h-6" />
           <Tooltip>
@@ -418,6 +418,16 @@ export function CanvasHeader({
             <TooltipContent>
               Redo <span className="kbd">⇧⌘Z</span>
             </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button size="icon-sm" variant="ghost" onClick={onClear} data-icon="true" aria-label="Clear board">
+                  <HugeiconsIcon icon={Delete02Icon} />
+                </Button>
+              }
+            />
+            <TooltipContent>Clear board</TooltipContent>
           </Tooltip>
         </div>
 

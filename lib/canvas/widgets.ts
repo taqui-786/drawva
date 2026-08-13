@@ -20,6 +20,7 @@ export interface WidgetItem {
   copyText?: string;
   copyLabel?: string;
   status: WidgetStatus;
+  userResized?: boolean;
 }
 
 export interface WidgetCallbacks {
@@ -315,6 +316,7 @@ export class WidgetManager {
   resize(id: string, newW: number, newH: number): void {
     const w = this.widgets.get(id);
     if (!w) return;
+    w.userResized = true;
     w.w = Math.max(300, Math.min(SIZE - w.x, Math.round(newW)));
     w.h = Math.max(200, Math.min(SIZE - w.y, Math.round(newH)));
     this.position(w);
@@ -364,7 +366,7 @@ export class WidgetManager {
         const { width, height } = event.data;
         if (typeof width === "number" && typeof height === "number") {
           const w = this.widgets.get(widget.id);
-          if (w) {
+          if (w && !w.userResized) {
             const shellW = Math.min(1200, Math.max(220, Math.round(width + 24)));
             const shellH = Math.min(900, Math.max(140, Math.round(height + 24)));
             if (Math.abs(w.w - shellW) > 6 || Math.abs(w.h - shellH) > 6) {

@@ -38,6 +38,7 @@ CONTRACT (additionalProperties allowed per command):
 }`;
 
 export const WIDGET_VISUAL_RULES = `WIDGET VISUAL RULES
+- FIT CONTENT & SMART SIZING: Outer wrappers for cards, forms, controls, and applets MUST fit tight content bounds (e.g. max-width: 400px; width: fit-content; margin: 0;). Do NOT let empty block containers stretch full iframe width unnecessarily.
 - STRICT TRANSPARENT BACKGROUND & NO SHADOWS: All generated widgets, html_widget, applets, and diagrams MUST use a 100% TRANSPARENT background (background: transparent !important;). STRICTLY NO card borders (border: none !important;) and NO box shadows (box-shadow: none !important;).
 - ONLY render the primary graphic elements (e.g. clock dial/hands, SVG paths, network nodes, text) directly over the transparent canvas. Do NOT wrap elements in white (#ffffff) card containers, solid boxes, or drop shadows.
 - High Contrast & Typography: Ensure all numbers, clock dials, tick marks, buttons, network nodes, database tables, circuit symbols, and text labels have high-contrast, clear, readable colors against the canvas.
