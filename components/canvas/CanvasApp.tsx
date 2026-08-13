@@ -29,13 +29,16 @@ import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { buildAtlas, buildFocusInset } from "@/lib/canvas/atlas";
 import { buildScene } from "@/lib/canvas/scene";
 import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
-import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson } from "@/lib/canvas/persistence";
+import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject } from "@/lib/canvas/persistence";
 import { BoardHistory } from "@/lib/canvas/history";
 import type { AiReply, AiRequest, AgentEvent } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
 import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel, addTokenUsageRecord } from "@/lib/ai/provider";
 import { Textarea } from "@/components/ui/textarea";
+import { SyncManager, type SyncStatus } from "@/lib/canvas/sync";
+import { ConnectDialog } from "./ConnectDialog";
+import { strokeSegment } from "@/lib/canvas/strokes";
 
 function parseCleanErrorMessage(raw: string): string {
   if (!raw) return "AI request failed";
@@ -123,10 +126,23 @@ export function CanvasApp() {
   const widgetResize = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
   const objectDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
   const objectResize = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
+  const syncManager = useRef<SyncManager | null>(null);
+  const [syncState, setSyncState] = useState<{
+    status: SyncStatus;
+    roomCode: string | null;
+    peerCount: number;
+    error?: string;
+  }>({
+    status: "idle",
+    roomCode: null,
+    peerCount: 0,
+  });
+  const [connectOpen, setConnectOpen] = useState(false);
 
   // ---- living object helpers (#3): create + merge-back-to-ink ----
   function addObject(item: ObjectItem): void {
     objects.current?.add(item);
+    syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: item });
   }
 
   function bakePlotObject(cmd: PlotFunctionCommand): HTMLCanvasElement {
@@ -148,6 +164,7 @@ export function CanvasApp() {
       bakePlot(eng, { tool: "plot_function", x: item.x, y: item.y, w: item.w, h: item.h, expression: item.source, color: item.color });
     }
     om.remove(id);
+    syncManager.current?.broadcast({ type: "SYNC_OBJECT_MERGE", id });
     afterBoardChangeRef.current();
   }
 
@@ -493,6 +510,7 @@ export function CanvasApp() {
     objects.current?.clear();
     inkBoxRef.current = null;
     aiRevision.current++;
+    syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
     afterBoardChange();
   }
 
@@ -542,8 +560,10 @@ export function CanvasApp() {
           wm.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
         },
-        onDragEnd: () => {
+        onDragEnd: (id) => {
           widgetDrag.current = null;
+          const item = wm.get(id);
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h });
           afterBoardChangeRef.current(); // widget move is an undoable change
         },
         onResizeStart: (id, e) => {
@@ -558,13 +578,16 @@ export function CanvasApp() {
           wm.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
           g.last = { x: e.clientX, y: e.clientY };
         },
-        onResizeEnd: () => {
+        onResizeEnd: (id) => {
           widgetResize.current = null;
+          const item = wm.get(id);
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h });
           afterBoardChangeRef.current();
         },
         onRemove: (id) => {
           history.current?.recordWidgets();
           wm.remove(id);
+          syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id });
           afterBoardChangeRef.current();
         },
         onAccept: (id) => {
@@ -613,8 +636,10 @@ export function CanvasApp() {
           om.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
         },
-        onDragEnd: () => {
+        onDragEnd: (id) => {
           objectDrag.current = null;
+          const item = om.get(id);
+          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
           afterBoardChangeRef.current();
         },
         onResizeStart: (id, e) => {
@@ -629,13 +654,16 @@ export function CanvasApp() {
           om.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
           g.last = { x: e.clientX, y: e.clientY };
         },
-        onResizeEnd: () => {
+        onResizeEnd: (id) => {
           objectResize.current = null;
+          const item = om.get(id);
+          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_RESIZE", id, w: item.w, h: item.h });
           afterBoardChangeRef.current();
         },
         onRemove: (id) => {
           history.current?.recordObjects();
           om.remove(id);
+          syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id });
           afterBoardChangeRef.current();
         },
         onMerge: (id) => mergeObjectToInk(id),
@@ -713,6 +741,7 @@ export function CanvasApp() {
         status: "draft",
       };
       wm.add(item);
+      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
       setMode("select");
     });
     draft.setRenderer("write_text", (_eng, cmd) => {
@@ -809,6 +838,7 @@ export function CanvasApp() {
         status: "draft",
       };
       wm.add(item);
+      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
       setMode("select");
     });
     drafts.current = draft;
@@ -825,8 +855,112 @@ export function CanvasApp() {
       objects.current?.sync();
     };
     const unsub = engine.onPostFrame(sync);
+
+    const sm = new SyncManager();
+    syncManager.current = sm;
+    sm.setHandlers({
+      onStatusChange: (status, roomCode, peerCount, error) => {
+        setSyncState({ status, roomCode, peerCount, error });
+      },
+      onRequestInitialState: () => {
+        if (!engine) return null;
+        return serializeSnapshot(engine, widgets.current, objects.current);
+      },
+      onInitState: async (snapshot) => {
+        if (!engine) return;
+        await restoreSnapshot(engine, widgets.current, objects.current, snapshot);
+        history.current?.reset();
+      },
+      onRemoteStroke: (seg) => {
+        if (!engine) return;
+        strokeSegment(engine, seg.a, seg.b, {
+          erase: seg.erase,
+          size: seg.size,
+          color: seg.color,
+        });
+      },
+      onRemoteObjectAdd: async (obj) => {
+        if (!engine || !objects.current) return;
+        const restored = await renderObject(engine, obj);
+        if (restored) objects.current.add(restored);
+      },
+      onRemoteObjectMove: (id, x, y) => {
+        const o = objects.current?.get(id);
+        if (o && objects.current) {
+          o.x = x;
+          o.y = y;
+          objects.current.sync();
+        }
+      },
+      onRemoteObjectResize: (id, w, h) => {
+        objects.current?.resize(id, w, h);
+      },
+      onRemoteObjectRemove: (id) => {
+        objects.current?.remove(id);
+      },
+      onRemoteObjectMerge: (id) => {
+        void mergeObjectToInk(id);
+      },
+      onRemoteWidgetAdd: (w) => {
+        widgets.current?.add(w);
+      },
+      onRemoteWidgetMove: (id, x, y, w, h) => {
+        if (widgets.current?.has(id)) {
+          const currentItem = widgets.current.get(id)!;
+          widgets.current.move(id, x - currentItem.x, y - currentItem.y);
+          widgets.current.resize(id, w, h);
+        }
+      },
+      onRemoteWidgetRemove: (id) => {
+        widgets.current?.remove(id);
+      },
+      onRemoteClear: () => {
+        if (!engine) return;
+        engine.tiles.clear();
+        engine.requestRender();
+        widgets.current?.clear();
+        objects.current?.clear();
+      },
+    });
+
+    engine.setStrokeSegmentHook((a, b, opts) => {
+      if (!sm.isRemote) {
+        sm.broadcast({
+          type: "SYNC_STROKE_SEGMENT",
+          a,
+          b,
+          erase: opts.erase,
+          size: opts.size,
+          color: opts.color,
+        });
+      }
+    });
+
+    const unsubRemoteCursors = engine.onInteractionFrame((ctx) => {
+      const cursors = sm.getRemoteCursors();
+      for (const c of cursors) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(c.x, c.y, 6, 0, Math.PI * 2);
+        ctx.fillStyle = c.color;
+        ctx.fill();
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillStyle = c.color;
+        ctx.fillText(c.name, c.x + 10, c.y + 4);
+        ctx.restore();
+      }
+    });
+
     return () => {
       unsub();
+      unsubRemoteCursors();
+      engine.setStrokeSegmentHook(null);
+      sm.disconnect();
+      syncManager.current = null;
       engine.setTileWriteHook(null);
       wm.destroy();
       om.destroy();
@@ -1138,6 +1272,7 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     const tm = tools.current;
     if (!tm) return;
     const world = screenToWorld(e);
+    syncManager.current?.sendCursor(world.x, world.y, mode);
     // Passive moves with no active gesture still update live marquee/ink previews.
     tm.move(gestureEvent(e));
     // Expand the live ink bbox during a drawing gesture.
@@ -1248,6 +1383,10 @@ if (e.shiftKey && k === "h") setMode("highlighter");
         activeModel={activeModel}
         onModelChange={handleModelChange}
         onOpenSettings={() => setSettingsOpen(true)}
+        syncStatus={syncState.status}
+        syncRoomCode={syncState.roomCode}
+        syncPeerCount={syncState.peerCount}
+        onOpenConnect={() => setConnectOpen(true)}
       />
 
       {/* Playground: engine root + one deterministic gesture target above it.
@@ -1326,6 +1465,17 @@ if (e.shiftKey && k === "h") setMode("highlighter");
       />
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <ConnectDialog
+        open={connectOpen}
+        onOpenChange={setConnectOpen}
+        status={syncState.status}
+        roomCode={syncState.roomCode}
+        peerCount={syncState.peerCount}
+        errorMessage={syncState.error}
+        onHost={() => syncManager.current!.hostSession()}
+        onJoin={(code) => syncManager.current!.joinSession(code)}
+        onDisconnect={() => syncManager.current!.disconnect()}
+      />
     </div>
   );
 }

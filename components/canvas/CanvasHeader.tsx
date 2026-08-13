@@ -45,6 +45,8 @@ import {
   TextIcon,
   UndoIcon,
   Upload01Icon,
+  Share01Icon,
+  Wifi01Icon,
 } from "@hugeicons/core-free-icons";
 import type { CanvasMode } from "@/lib/canvas/types";
 
@@ -131,6 +133,10 @@ export function CanvasHeader({
   activeModel,
   onModelChange,
   onOpenSettings,
+  syncStatus,
+  syncRoomCode,
+  syncPeerCount,
+  onOpenConnect,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
@@ -160,6 +166,10 @@ export function CanvasHeader({
   activeModel: string | null;
   onModelChange: (model: string | null) => void;
   onOpenSettings: () => void;
+  syncStatus: "idle" | "hosting" | "connecting" | "connected" | "error";
+  syncRoomCode: string | null;
+  syncPeerCount: number;
+  onOpenConnect: () => void;
 }) {
   const drawing = ["pen", "highlighter", "eraser", "rect", "ellipse", "arrow"].includes(mode);
 
@@ -261,6 +271,35 @@ export function CanvasHeader({
             </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                variant={syncStatus === "connected" ? "secondary" : "ghost"}
+                size="sm"
+                onClick={onOpenConnect}
+                className="gap-1.5"
+              >
+                <HugeiconsIcon
+                  icon={syncStatus === "connected" ? Wifi01Icon : Share01Icon}
+                  className={syncStatus === "connected" ? "text-emerald-500" : ""}
+                />
+                {syncStatus === "connected" && syncRoomCode ? (
+                  <span className="font-mono font-bold text-xs">{syncRoomCode}</span>
+                ) : (
+                  "Connect"
+                )}
+                {syncPeerCount > 0 && (
+                  <Badge variant="secondary" className="px-1 py-0 text-[10px]">
+                    {syncPeerCount}
+                  </Badge>
+                )}
+              </Button>
+            }
+          />
+          <TooltipContent>Live Device Connection (P2P)</TooltipContent>
+        </Tooltip>
       </div>
 
       <Separator orientation="vertical" className="h-6" />

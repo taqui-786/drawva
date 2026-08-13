@@ -65,6 +65,7 @@ export function strokeSegment(
 
   markDirty(engine, a, pad);
   markDirty(engine, b, pad);
+  engine.onStrokeSegment?.(a, b, { erase, size, color });
   void bounds;
 }
 

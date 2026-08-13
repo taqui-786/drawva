@@ -64,6 +64,7 @@ export class CanvasEngine {
    * framework-free.
    */
   onTileWrite: ((tx: number, ty: number) => void) | null = null;
+  onStrokeSegment: ((a: Point, b: Point, opts: { erase: boolean; size: number; color: string }) => void) | null = null;
 
   constructor(root: HTMLDivElement) {
     this.root = root;
@@ -106,6 +107,13 @@ export class CanvasEngine {
   /** Bind/unbind the history journal hook (assigned from the React shell). */
   setTileWriteHook(fn: ((tx: number, ty: number) => void) | null): void {
     this.onTileWrite = fn;
+  }
+
+  /** Bind/unbind live stroke broadcast hook (assigned from React shell). */
+  setStrokeSegmentHook(
+    fn: ((a: Point, b: Point, opts: { erase: boolean; size: number; color: string }) => void) | null
+  ): void {
+    this.onStrokeSegment = fn;
   }
 
   ctx(name: LayerName): CanvasRenderingContext2D {
