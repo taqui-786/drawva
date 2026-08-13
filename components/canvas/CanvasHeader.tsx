@@ -473,63 +473,57 @@ export function CanvasHeader({
           {aiStatus === "thinking" ? (
             <motion.div
               key="sci-fi-loader"
-              initial={{ opacity: 0, scale: 0.92, width: 120 }}
-              animate={{ opacity: 1, scale: 1, width: "auto" }}
-              exit={{ opacity: 0, scale: 0.92 }}
-              transition={{ duration: 0.25, ease: "easeOut" }}
-              className="relative flex h-8 min-w-[220px] sm:min-w-[300px] max-w-sm items-center justify-between overflow-hidden rounded-full border border-cyan-500/50 bg-slate-950/95 px-3.5 shadow-[0_0_20px_rgba(6,182,212,0.4)] backdrop-blur-md"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.2, ease: "easeOut" }}
+              className="relative flex h-8 min-w-[200px] sm:min-w-[280px] max-w-xs items-center justify-between overflow-hidden rounded-full border border-primary/30 bg-muted/80 px-3.5 shadow-sm backdrop-blur-sm"
             >
-              {/* Laser scanner beam */}
+              {/* System primary shimmering sweep beam */}
               <motion.div
-                className="absolute inset-y-0 w-28 bg-gradient-to-r from-transparent via-cyan-400/90 to-transparent blur-[2px]"
-                animate={{ x: ["-100%", "280%"] }}
-                transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut", repeatType: "mirror" }}
-              />
-              {/* Ambient background glow pulse */}
-              <motion.div
-                className="absolute inset-0 bg-gradient-to-r from-cyan-500/10 via-purple-500/15 to-blue-500/10"
-                animate={{ opacity: [0.3, 0.85, 0.3] }}
-                transition={{ repeat: Infinity, duration: 2, ease: "easeInOut" }}
+                className="absolute inset-y-0 w-24 bg-gradient-to-r from-transparent via-primary/30 to-transparent"
+                animate={{ x: ["-100%", "260%"] }}
+                transition={{ repeat: Infinity, duration: 1.4, ease: "easeInOut", repeatType: "mirror" }}
               />
 
-              {/* Left glowing quantum dots */}
+              {/* Left pulsing system primary status dot */}
               <div className="relative z-10 flex items-center gap-1.5">
                 <motion.span
-                  className="size-2 rounded-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]"
-                  animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
-                  transition={{ repeat: Infinity, duration: 1, ease: "easeInOut" }}
+                  className="size-2 rounded-full bg-primary shadow-[0_0_8px_var(--primary)]"
+                  animate={{ scale: [1, 1.4, 1], opacity: [0.6, 1, 0.6] }}
+                  transition={{ repeat: Infinity, duration: 1.1, ease: "easeInOut" }}
                 />
                 <motion.span
-                  className="size-1.5 rounded-full bg-indigo-400 shadow-[0_0_6px_#818cf8]"
-                  animate={{ scale: [1.4, 1, 1.4], opacity: [0.8, 0.4, 0.8] }}
-                  transition={{ repeat: Infinity, duration: 1, ease: "easeInOut", delay: 0.2 }}
+                  className="size-1.5 rounded-full bg-primary/60"
+                  animate={{ scale: [1.3, 1, 1.3], opacity: [0.8, 0.4, 0.8] }}
+                  transition={{ repeat: Infinity, duration: 1.1, ease: "easeInOut", delay: 0.2 }}
                 />
               </div>
 
-              {/* Center equalizer sci-fi wave */}
-              <div className="relative z-10 flex items-center gap-1 px-3">
+              {/* Center system equalizer bars */}
+              <div className="relative z-10 flex items-center gap-1 px-2">
                 {[0.4, 0.85, 0.35, 1, 0.5, 0.75, 0.4].map((hRatio, i) => (
                   <motion.span
                     key={i}
-                    className="w-1 rounded-full bg-gradient-to-t from-cyan-500 to-indigo-400 shadow-[0_0_4px_#38bdf8]"
-                    animate={{ scaleY: [0.25, 1, 0.25] }}
+                    className="w-1 rounded-full bg-primary"
+                    animate={{ scaleY: [0.3, 1, 0.3], opacity: [0.5, 1, 0.5] }}
                     transition={{
                       repeat: Infinity,
                       duration: 0.9,
                       ease: "easeInOut",
                       delay: i * 0.1,
                     }}
-                    style={{ height: `${15 * hRatio}px` }}
+                    style={{ height: `${14 * hRatio}px` }}
                   />
                 ))}
               </div>
 
-              {/* Right glowing sparkles icon */}
+              {/* Right rotating sparkles icon in primary brand color */}
               <div className="relative z-10 flex items-center">
                 <motion.div
                   animate={{ rotate: 360 }}
                   transition={{ repeat: Infinity, duration: 3.5, ease: "linear" }}
-                  className="text-cyan-400 drop-shadow-[0_0_8px_rgba(34,211,238,0.9)]"
+                  className="text-primary drop-shadow-[0_0_6px_var(--primary)]"
                 >
                   <HugeiconsIcon icon={SparklesIcon} className="size-4" />
                 </motion.div>
