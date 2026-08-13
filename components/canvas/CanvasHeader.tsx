@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -35,6 +36,7 @@ import {
   ImageAdd01Icon,
   Image01Icon,
   MathIcon,
+  Maximize01Icon,
   Menu01Icon,
   MoreHorizontalIcon,
   PencilIcon,
@@ -174,6 +176,24 @@ export function CanvasHeader({
   syncPeerCount: number;
   onOpenConnect: () => void;
 }) {
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const updateFs = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener("fullscreenchange", updateFs);
+    return () => document.removeEventListener("fullscreenchange", updateFs);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    } else {
+      document.exitFullscreen?.().catch(() => {});
+    }
+  };
+
   const isShapeActive = ["rect", "ellipse", "arrow"].includes(mode);
   const activeShapeTool = SHAPE_TOOLS.find((s) => s.mode === mode) || SHAPE_TOOLS[0];
 
@@ -240,6 +260,10 @@ export function CanvasHeader({
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLabel>Canvas</DropdownMenuLabel>
+              <DropdownMenuItem onClick={toggleFullscreen}>
+                <HugeiconsIcon icon={Maximize01Icon} />
+                {isFullscreen ? "Exit Fullscreen" : "Fullscreen Mode"}
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={onOpenConnect}>
                 <HugeiconsIcon icon={Share01Icon} />
                 Live P2P Sync
