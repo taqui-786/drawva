@@ -1,3 +1,5 @@
+import type { ProviderType } from "./provider";
+
 export interface AiBox {
   x: number;
   y: number;
@@ -42,12 +44,20 @@ export interface AiRequest {
   widgetEdit?: WidgetEditContext;
   /** Magnified 2x crop of recent handwriting for high-precision OCR/LaTeX. */
   focusInset?: string;
+  /** Provider type (openai, anthropic, gemini, nvidia, custom). */
+  providerType?: ProviderType;
   /** Provider base URL (OpenAI-compatible), sent per request by the client. */
   baseUrl?: string;
   /** Provider API key, sent per request by the client. Never logged. */
   apiKey?: string;
   /** Model id the user picked (see lib/ai/provider.ts). */
   model?: string;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
 }
 
 export interface AiReply {
@@ -58,8 +68,10 @@ export interface AiReply {
   commands: unknown[];
   attempts: number;
   requestId: string;
-  /** Provider id that actually generated this reply (after any fallbacks). */
+  /** Provider id that actually generated this reply. */
   providerId?: string;
+  /** Token usage for this request. */
+  tokenUsage?: TokenUsage;
 }
 
 /** Zod-validated model output before command normalization. */
@@ -68,6 +80,7 @@ export interface ModelReply {
   message?: string;
   observedText?: string;
   commands: unknown[];
+  tokenUsage?: TokenUsage;
 }
 
 export interface SceneJson {

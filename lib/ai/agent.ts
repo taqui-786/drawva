@@ -1,5 +1,5 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import type { ChatOpenAI } from "@langchain/openai";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { z } from "zod";
 import { MAX_RETRIES } from "./model";
 import {
@@ -13,7 +13,7 @@ import {
   RETRY_INSTRUCTION,
   SYSTEM_PROMPT,
 } from "./prompts";
-import type { AiReply, AiRequest, AgentEvent } from "./types";
+import type { AiReply, AiRequest, AgentEvent, TokenUsage } from "./types";
 
 export const AgentReplySchema = z.object({
   intent: z.enum(["none", "hint", "continue", "explain", "plot", "correct", "erase", "answer", "typeset"]),
@@ -22,7 +22,9 @@ export const AgentReplySchema = z.object({
   commands: z.array(z.record(z.string(), z.unknown())),
 });
 
-export type AgentReply = z.infer<typeof AgentReplySchema>;
+export type AgentReply = z.infer<typeof AgentReplySchema> & {
+  tokenUsage?: TokenUsage;
+};
 
 export interface AgentOptions {
   timeoutMs?: number;
@@ -33,7 +35,7 @@ export interface AgentOptions {
 export async function runAgent(
   req: AiRequest,
   sceneText: string,
-  model: ChatOpenAI,
+  model: BaseChatModel,
   opts: AgentOptions = {}
 ): Promise<AiReply> {
   const timeoutMs = opts.timeoutMs ?? AI_TIMEOUT_MS;
@@ -133,7 +135,6 @@ export function parseJsonResponse(raw: string): AgentReply | null {
     clean = clean.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   }
 
-  // 1. Direct parse check
   try {
     const parsed = JSON.parse(clean);
     const validated = AgentReplySchema.safeParse(parsed);
@@ -148,7 +149,6 @@ export function parseJsonResponse(raw: string): AgentReply | null {
     }
   } catch {}
 
-  // 2. Multi-object extraction (e.g. write_text{...} diagram_source{...})
   const commands: Record<string, unknown>[] = [];
   let observedText: string | undefined;
   let message: string | undefined;
@@ -184,7 +184,6 @@ export function parseJsonResponse(raw: string): AgentReply | null {
     return { intent: finalIntent, observedText, message, commands };
   }
 
-  // 3. Truncated JSON salvage
   try {
     const salvagedStr = salvageTruncatedJson(clean);
     const parsed = JSON.parse(salvagedStr);
@@ -203,18 +202,40 @@ export function parseJsonResponse(raw: string): AgentReply | null {
   return null;
 }
 
-/**
- * AI Perception & Execution Pipeline:
- *   Single user-configured model receives the image, canvas scene metadata,
- *   user prompt, and returns structured JSON commands directly. Structured
- *   output is attempted first; on failure the attempt falls back to a raw
- *   JSON-completable invocation. The whole request retries up to MAX_RETRIES
- *   total attempts, then throws.
- */
+function extractTokenUsage(res: unknown): TokenUsage | undefined {
+  if (!res || typeof res !== "object") return undefined;
+  const obj = res as Record<string, unknown>;
+
+  const usageMeta = (obj.usage_metadata || (obj.raw as Record<string, unknown> | undefined)?.usage_metadata) as Record<string, unknown> | undefined;
+  if (usageMeta && typeof usageMeta === "object") {
+    const inputTokens = Number(usageMeta.input_tokens || usageMeta.prompt_tokens || 0);
+    const outputTokens = Number(usageMeta.output_tokens || usageMeta.completion_tokens || 0);
+    const totalTokens = Number(usageMeta.total_tokens || inputTokens + outputTokens);
+    if (inputTokens > 0 || outputTokens > 0 || totalTokens > 0) {
+      return { inputTokens, outputTokens, totalTokens };
+    }
+  }
+
+  const respMeta = (obj.response_metadata || (obj.raw as Record<string, unknown> | undefined)?.response_metadata) as Record<string, unknown> | undefined;
+  if (respMeta && typeof respMeta === "object") {
+    const tokenUsage = (respMeta.tokenUsage || respMeta.usage) as Record<string, unknown> | undefined;
+    if (tokenUsage && typeof tokenUsage === "object") {
+      const inputTokens = Number(tokenUsage.promptTokens || tokenUsage.prompt_tokens || tokenUsage.input_tokens || 0);
+      const outputTokens = Number(tokenUsage.completionTokens || tokenUsage.completion_tokens || tokenUsage.output_tokens || 0);
+      const totalTokens = Number(tokenUsage.totalTokens || tokenUsage.total_tokens || inputTokens + outputTokens);
+      if (inputTokens > 0 || outputTokens > 0 || totalTokens > 0) {
+        return { inputTokens, outputTokens, totalTokens };
+      }
+    }
+  }
+
+  return undefined;
+}
+
 async function runModel(
   req: AiRequest,
   sceneText: string,
-  model: ChatOpenAI,
+  model: BaseChatModel,
   controller: AbortController,
   opts: AgentOptions
 ): Promise<AiReply> {
@@ -257,7 +278,7 @@ async function runModel(
 async function attemptReply(
   req: AiRequest,
   sceneText: string,
-  model: ChatOpenAI,
+  model: BaseChatModel,
   controller: AbortController,
   isRetry: boolean
 ): Promise<AgentReply> {
@@ -280,22 +301,29 @@ async function attemptReply(
   const messages = [new SystemMessage(system), userMsg];
 
   let response: AgentReply | null = null;
+  let usage: TokenUsage | undefined;
 
   try {
-    const base = model.withStructuredOutput(AgentReplySchema, { name: "canvas_reply" });
-    const res = await base.invoke(messages, { signal: controller.signal });
-    response = {
-      intent: res.intent ?? "answer",
-      message: res.message,
-      observedText: res.observedText,
-      commands: Array.isArray(res.commands) ? res.commands : [],
-    };
+    if (typeof model.withStructuredOutput === "function") {
+      const base = model.withStructuredOutput(AgentReplySchema, { name: "canvas_reply" });
+      const res = await base.invoke(messages, { signal: controller.signal });
+      usage = extractTokenUsage(res);
+      response = {
+        intent: res.intent ?? "answer",
+        message: res.message,
+        observedText: res.observedText,
+        commands: Array.isArray(res.commands) ? res.commands : [],
+      };
+    } else {
+      throw new Error("Structured output unavailable");
+    }
   } catch (structErr) {
     console.warn(
       `[AI Pipeline] Structured output failed, falling back to direct JSON invocation:`,
       structErr instanceof Error ? structErr.message : structErr
     );
     const rawRes = await model.invoke(messages, { signal: controller.signal });
+    usage = extractTokenUsage(rawRes);
     const text = typeof rawRes.content === "string" ? rawRes.content : JSON.stringify(rawRes.content);
     response = parseJsonResponse(text);
     if (!response) {
@@ -319,5 +347,6 @@ async function attemptReply(
     message: response.message,
     observedText: response.observedText,
     commands,
+    tokenUsage: usage,
   };
 }

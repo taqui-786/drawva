@@ -5,6 +5,7 @@ import { MAX_BODY_BYTES, MAX_COMMANDS, MAX_DIAGRAM_BYTES, MAX_HTML_BYTES } from 
 import { validateCommands } from "@/lib/canvas/commands";
 import { SIZE } from "@/lib/canvas/constants";
 import type { AiRequest, AgentEvent } from "@/lib/ai/types";
+import type { ProviderType } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
 
@@ -46,6 +47,7 @@ function validateReply(
     requestId: reply.requestId,
     attempts: reply.attempts,
     providerId: reply.providerId,
+    tokenUsage: reply.tokenUsage,
   };
 }
 
@@ -60,12 +62,16 @@ export async function POST(req: Request) {
   if (!parsed.ok) return json(parsed, 400);
   const p = parsed.data as Partial<AiRequest> & { stream?: boolean };
 
+  const providerType: ProviderType = p.providerType || "custom";
   const baseUrl = typeof p.baseUrl === "string" ? p.baseUrl.trim() : "";
   const apiKey = typeof p.apiKey === "string" ? p.apiKey.trim() : "";
   const modelId = typeof p.model === "string" ? p.model.trim() : "";
 
-  if (!baseUrl || !apiKey || !modelId) {
-    return json({ error: "Missing provider configuration (baseUrl, apiKey, and model are required). Configure a provider in Settings." }, 400);
+  if (!apiKey || !modelId) {
+    return json({ error: "Missing API key or model. Configure a provider in Settings." }, 400);
+  }
+  if (providerType === "custom" && !baseUrl) {
+    return json({ error: "Custom provider requires a Base URL. Configure it in Settings." }, 400);
   }
 
   const visibleRect = clampBox(p.visibleRect);
@@ -73,7 +79,6 @@ export async function POST(req: Request) {
   const sourceRect = clampBox(p.sourceRect);
   const requestId = String(p.requestId || `req-${Date.now()}`);
 
-  // Size / content caps on the image.
   const atlasImage = typeof p.atlasImage === "string" ? p.atlasImage : "";
   if (!atlasImage || atlasImage.length > MAX_BODY_BYTES) {
     return json({ error: "atlasImage missing or too large" }, 400);
@@ -93,12 +98,13 @@ export async function POST(req: Request) {
     userPrompt: typeof p.userPrompt === "string" ? p.userPrompt.slice(0, 2000) : "",
     scene: typeof p.scene === "string" ? p.scene.slice(0, 20000) : "",
     trigger: p.trigger === "manual" ? "manual" : "user_paused",
+    providerType,
     baseUrl,
     apiKey,
     model: modelId,
   };
 
-  const model = createChatModel({ baseUrl, apiKey, model: modelId });
+  const model = createChatModel({ providerType, baseUrl, apiKey, model: modelId });
   const sceneText = aiRequest.scene || "";
 
   if (p.stream === true) {

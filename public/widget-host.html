@@ -124,6 +124,11 @@
     postAnywhere({ type: "drawva-widget-wheel", clientX: ev.clientX, clientY: ev.clientY, deltaY: ev.deltaY });
   }, { passive: false });
 
+  // Forward pointerdown from inside the host so parent WidgetManager selects this widget on click.
+  addEventListener("pointerdown", () => {
+    postAnywhere({ type: "drawva-widget-pointerdown" });
+  }, true);
+
   forward({ type: "penecho-widget-host-ready" });
 })();
 </script>

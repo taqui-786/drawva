@@ -34,8 +34,34 @@ import { BoardHistory } from "@/lib/canvas/history";
 import type { AiReply, AiRequest, AgentEvent } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
-import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel } from "@/lib/ai/provider";
+import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel, addTokenUsageRecord } from "@/lib/ai/provider";
 import { Textarea } from "@/components/ui/textarea";
+
+function parseCleanErrorMessage(raw: string): string {
+  if (!raw) return "AI request failed";
+  let clean = raw.trim();
+
+  // Extract inner JSON error message if present (e.g. 400 {"error":{"message":"..."}})
+  const jsonBraceIndex = clean.indexOf("{");
+  if (jsonBraceIndex >= 0) {
+    try {
+      const jsonStr = clean.slice(jsonBraceIndex);
+      const parsed = JSON.parse(jsonStr) as { error?: { message?: string } | string; message?: string };
+      if (typeof parsed.error === "object" && parsed.error?.message) {
+        return parsed.error.message;
+      }
+      if (typeof parsed.error === "string") {
+        return parsed.error;
+      }
+      if (typeof parsed.message === "string") {
+        return parsed.message;
+      }
+    } catch {}
+  }
+
+  clean = clean.replace(/^\d{3}\s*/, "");
+  return clean || "AI request failed";
+}
 
 /** Parse the SSE stream from POST /api/canvas/ai. */
 async function readSse(
@@ -66,8 +92,11 @@ async function readSse(
         if (data) {
           if (eventName === "event") onEvent(data as AgentEvent);
           else if (eventName === "result") result = data as AiReply & { rejected?: string[] };
-          else if (eventName === "error")
-            throw new Error((data as { error?: string }).error || "AI request failed");
+          else if (eventName === "error") {
+            const errData = data as { error?: string; detail?: string };
+            const rawErr = errData.detail || errData.error || "AI request failed";
+            throw new Error(parseCleanErrorMessage(rawErr));
+          }
         }
       }
       sep = buffer.indexOf("\n\n");
@@ -289,12 +318,23 @@ export function CanvasApp() {
       scene: JSON.stringify(scene),
       trigger: userPrompt ? "manual" : "user_paused",
       ...(widgetEditTarget ? { widgetEdit: widgetEditTarget } : {}),
+      providerType: config.type,
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model,
     };
 
     const applyReply = async (data: AiReply & { rejected?: string[] }) => {
+      if (data.tokenUsage) {
+        addTokenUsageRecord({
+          providerType: config.type || "custom",
+          modelId: model,
+          inputTokens: data.tokenUsage.inputTokens,
+          outputTokens: data.tokenUsage.outputTokens,
+          totalTokens: data.tokenUsage.totalTokens,
+          intent: data.intent,
+        });
+      }
       if (Array.isArray(data.commands) && data.commands.length) {
         // An accepted AI batch can spawn objects/widgets — capture the pre-state
         // so the accept is a single undoable gesture (Penecho pendingBefore).
@@ -327,9 +367,9 @@ export function CanvasApp() {
         let msg = "AI request failed";
         try {
           const d = await res.json();
-          msg = d.error || d.detail || msg;
+          msg = d.detail || d.error || msg;
         } catch {}
-        throw new Error(msg);
+        throw new Error(parseCleanErrorMessage(msg));
       }
       // Late-response discard: ignore stale replies (request-id guard).
       if (requestId !== aiSeq.current) return;
@@ -344,8 +384,9 @@ export function CanvasApp() {
       if (controller.signal.aborted) return; // superseded — clean drop
       setAiStatus("error");
       setAiRun((prev) => ({ ...prev, phase: "error" }));
+      const desc = err instanceof Error ? parseCleanErrorMessage(err.message) : "AI request failed";
       toast.error("Generation failed after 3 attempts", {
-        description: err instanceof Error ? err.message : undefined,
+        description: desc,
       });
       console.error("AI request failed:", err);
     } finally {
@@ -463,6 +504,9 @@ export function CanvasApp() {
       engineContainer: engine.rootElement,
       camera: engine.camera,
       callbacks: {
+        onSelect: () => {
+          om.setSelected(null);
+        },
         onDragStart: (id, e) => {
           widgetDrag.current = { id, last: { x: e.clientX, y: e.clientY } };
         },
@@ -531,6 +575,9 @@ export function CanvasApp() {
       engineContainer: engine.rootElement,
       camera: engine.camera,
       callbacks: {
+        onSelect: () => {
+          wm.setSelected(null);
+        },
         onDragStart: (id, e) => {
           objectDrag.current = { id, last: { x: e.clientX, y: e.clientY } };
         },

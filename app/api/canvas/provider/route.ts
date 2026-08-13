@@ -1,21 +1,17 @@
 import { NextResponse } from "next/server";
+import { PROVIDER_INFOS, type ProviderType, type CustomModel } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
 
-const MAX_BODY_BYTES = 4 * 1024;
+const MAX_BODY_BYTES = 16 * 1024;
 
-/**
- * Verify a user-supplied OpenAI-compatible provider and list its models.
- * The API key is used only for the outgoing models request and is never
- * logged or persisted server-side.
- *
- * When the provider exposes per-model input/output capabilities (e.g.
- * OpenRouter's `architecture.input_modalities` / `output_modalities`), only
- * models accepting image + text input and emitting text output are returned
- * (Drawva's pipeline sends the canvas as an image and reads commands back as
- * text). Providers whose /models response does not declare capabilities (most
- * OpenAI-compatible hosts) fall back to returning every model.
- */
+interface ProviderRequestBody {
+  providerType?: ProviderType;
+  baseUrl?: unknown;
+  apiKey?: unknown;
+  customModels?: CustomModel[];
+}
+
 export async function POST(req: Request) {
   let raw: string;
   try {
@@ -27,85 +23,132 @@ export async function POST(req: Request) {
     return json({ error: "Request too large" }, 400);
   }
 
-  let body: { baseUrl?: unknown; apiKey?: unknown };
+  let body: ProviderRequestBody;
   try {
-    body = JSON.parse(raw) as { baseUrl?: unknown; apiKey?: unknown };
+    body = JSON.parse(raw) as ProviderRequestBody;
   } catch {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
-  if (!baseUrl || !apiKey) {
-    return json({ error: "Missing baseUrl or apiKey" }, 400);
+  const baseUrlInput = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  const customModels = Array.isArray(body.customModels) ? body.customModels : [];
+
+  if (!apiKey) {
+    return json({ error: "Missing API key" }, 400);
   }
 
-  const candidates = [baseUrl.replace(/\/+$/, ""), `${baseUrl.replace(/\/+$/, "")}/v1`];
-  let lastError: unknown = null;
+  if (providerType === "custom" && !baseUrlInput && customModels.length === 0) {
+    return json({ error: "Custom provider requires a Base URL or custom models list." }, 400);
+  }
 
-  for (const candidate of candidates) {
-    const endpoint = `${candidate}/models`;
-    try {
-      const res = await fetch(endpoint, {
-        method: "GET",
-        headers: {
-          authorization: `Bearer ${apiKey}`,
+  const info = PROVIDER_INFOS[providerType] || PROVIDER_INFOS.custom;
+  const baseUrl = baseUrlInput || info.defaultBaseUrl || "";
+
+  let fetchedModels: string[] = [];
+  let fetchError: string | null = null;
+
+  if (baseUrl) {
+    const cleanUrl = baseUrl.replace(/\/+$/, "");
+    const candidates = cleanUrl.endsWith("/v1")
+      ? [`${cleanUrl}/models`, `${cleanUrl.slice(0, -3)}/models`]
+      : [`${cleanUrl}/models`, `${cleanUrl}/v1/models`];
+
+    for (const endpoint of candidates) {
+      try {
+        const headers: Record<string, string> = {
           accept: "application/json",
-        },
-        signal: AbortSignal.timeout(15_000),
-      });
-      if (!res.ok) {
-        const text = (await res.text()).slice(0, 300);
-        lastError = new Error(`HTTP ${res.status} from ${candidate}: ${text}`);
-        continue;
-      }
-      const data = (await res.json()) as {
-        data?: Array<Record<string, unknown>>;
-      };
-      const rows = Array.isArray(data.data)
-        ? data.data.filter((m) => typeof m?.id === "string")
-        : [];
-      if (rows.length === 0) {
-        return json({ error: `No models returned by ${candidate}` }, 422);
-      }
+        };
+        if (providerType === "anthropic") {
+          headers["x-api-key"] = apiKey;
+          headers["anthropic-version"] = "2023-06-01";
+        } else {
+          headers["authorization"] = `Bearer ${apiKey}`;
+        }
 
-      const compatibleRows = rows.filter(isCompatibleModel);
-      const models = compatibleRows.map((m) => String(m.id));
+        const res = await fetch(endpoint, {
+          method: "GET",
+          headers,
+          signal: AbortSignal.timeout(15_000),
+        });
 
-      if (models.length === 0) {
-        return json(
-          { error: "Img + text supported input models required to run the AI generation here." },
-          422
-        );
+        if (res.ok) {
+          const data = (await res.json()) as {
+            data?: Array<Record<string, unknown>>;
+            models?: Array<Record<string, unknown>>;
+          };
+          const rawRows = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
+          const rows = rawRows.filter((m) => typeof m?.id === "string" || typeof m?.name === "string");
+          if (rows.length > 0) {
+            const compatible = rows.filter((m) => providerType === "custom" || isCompatibleModel(m));
+            fetchedModels = compatible.map((m) => String(m.id || m.name));
+            if (fetchedModels.length > 0) break;
+          }
+        } else {
+          const text = (await res.text()).slice(0, 300);
+          fetchError = `HTTP ${res.status}: ${text}`;
+        }
+      } catch (err) {
+        fetchError = err instanceof Error ? err.message : String(err);
       }
-
-      return json({ models, filteredByVision: true });
-    } catch (err) {
-      lastError = err;
     }
   }
 
-  const detail = lastError instanceof Error ? lastError.message : String(lastError);
-  console.error("[API /api/canvas/provider Error]: 🛑 Verification failed:", detail);
-  return json({ error: `Could not reach provider: ${detail}` }, 400);
+  // Combine user custom models + fetched models + built-in fallback presets
+  const combinedCandidates: string[] = [];
+
+  if (customModels.length > 0) {
+    for (const m of customModels) {
+      if (m.id && (providerType === "custom" || isCompatibleModel(m.id))) {
+        if (!combinedCandidates.includes(m.id)) {
+          combinedCandidates.push(m.id);
+        }
+      }
+    }
+  }
+
+  for (const m of fetchedModels) {
+    if (!combinedCandidates.includes(m) && (providerType === "custom" || isCompatibleModel(m))) {
+      combinedCandidates.push(m);
+    }
+  }
+
+  if (combinedCandidates.length === 0 && info.defaultModels.length > 0) {
+    for (const m of info.defaultModels) {
+      if (providerType === "custom" || isCompatibleModel(m)) {
+        if (!combinedCandidates.includes(m)) {
+          combinedCandidates.push(m);
+        }
+      }
+    }
+  }
+
+  if (combinedCandidates.length === 0) {
+    return json(
+      {
+        error:
+          fetchError ||
+          "No vision-supported models found for this provider configuration.",
+      },
+      422
+    );
+  }
+
+  return json({ models: combinedCandidates, filteredByVision: true, providerType });
 }
 
 function hasModality(list: string[], value: string): boolean {
   return list.some((s) => s.trim().toLowerCase() === value);
 }
 
-/**
- * Drawva's pipeline sends a canvas image snapshot plus text, and needs text
- * back, so a model is usable only when it accepts image + text input AND
- * emits text output. Returns true/false when the row declares its full
- * capabilities, or null when it exposes none (i.e. plain /v1/models hosts).
- */
-function isCompatibleModel(m: Record<string, unknown>): boolean {
-  const cap = supportsCanvasChat(m);
+function isCompatibleModel(m: Record<string, unknown> | string): boolean {
+  const modelObj = typeof m === "string" ? { id: m } : m;
+  const cap = supportsCanvasChat(modelObj);
   if (cap !== null) {
     return cap;
   }
-  const id = typeof m.id === "string" ? m.id.toLowerCase() : "";
+  const id = typeof modelObj.id === "string" ? modelObj.id.toLowerCase() : String(m).toLowerCase();
   return (
     id.includes("vision") ||
     id.includes("-vl") ||
@@ -116,6 +159,9 @@ function isCompatibleModel(m: Record<string, unknown>): boolean {
     id.includes("gemini") ||
     id.includes("pixtral") ||
     id.includes("llava") ||
+    id.includes("neva") ||
+    id.includes("llama-3.2-11b-vision") ||
+    id.includes("llama-3.2-90b-vision") ||
     id.includes("molmo") ||
     id.includes("paligemma") ||
     id.includes("fuyu") ||
@@ -132,9 +178,6 @@ function isCompatibleModel(m: Record<string, unknown>): boolean {
 }
 
 function supportsCanvasChat(m: Record<string, unknown>): boolean | null {
-  // OpenRouter / gateway schema:
-  //   architecture.input_modalities  = ["file","image","text"]
-  //   architecture.output_modalities = ["text"]
   const arch =
     m.architecture && typeof m.architecture === "object"
       ? (m.architecture as Record<string, unknown>)
@@ -153,7 +196,6 @@ function supportsCanvasChat(m: Record<string, unknown>): boolean | null {
     outputs = m.output_modalities.map(String);
   }
 
-  // Fallback: "image->text" style modality strings.
   if (typeof m.modality === "string") {
     const sides = m.modality.split("->");
     if (!inputs && sides[0]) {
@@ -172,7 +214,6 @@ function supportsCanvasChat(m: Record<string, unknown>): boolean | null {
     );
   }
 
-  // Check if root-level modalities array contains both image and text
   if (Array.isArray(m.modalities)) {
     const mods = m.modalities.map((s) => String(s).toLowerCase());
     if (mods.includes("image") && mods.includes("text")) {
@@ -180,7 +221,6 @@ function supportsCanvasChat(m: Record<string, unknown>): boolean | null {
     }
   }
 
-  // Explicit boolean flags some gateways expose (image-input only).
   const flag = m.supports_image ?? m.supportsImage ?? m.vision;
   if (typeof flag === "boolean") return flag;
   return null;
