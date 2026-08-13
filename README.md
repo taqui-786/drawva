@@ -1,6 +1,6 @@
 # Drawva 🎨⚡
 
-**Drawva** is a high-performance, offline-first, tile-based infinite whiteboard engine powered by a **3-stage multimodal AI perception pipeline** and **zero-cloud-database WebRTC P2P real-time device synchronization**.
+**Drawva** is a high-performance, tile-based infinite whiteboard engine powered by a **multimodal AI perception agent** and **zero-cloud-database WebRTC P2P real-time device synchronization**.
 
 ---
 
@@ -13,7 +13,7 @@
 - **Independent Viewports**: Each device maintains its own camera view, pan offset, and zoom level without interrupting the other user's view.
 - **Live Remote Cursor & Pen Preview**: See the connected peer's live drawing pencil and cursor position in real time with custom name badges.
 
-### 🤖 2. 3-Stage Multimodal AI Perception Pipeline
+### 🤖 2. Multimodal AI Perception Agent
 - **Vision Perception & Evaluation**: Reads ink drawings, sketches, and annotations directly from the canvas atlas.
 - **Auto AI & Ask AI**: Instant **Ask AI** button or continuous debounced **Auto AI** loop that turns hand-drawn sketches into structured diagrams, code, or math equations.
 - **Universal Provider Compatibility**: Works with any OpenAI-compatible provider (OpenAI, DeepSeek-V4, NVIDIA Nemotron, Qwen2-VL, OpenRouter, Groq, Ollama, etc.). Configurable Base URL & API key.
@@ -58,7 +58,7 @@ Supports dynamic sandboxed rendering for **7 diagram & visualization formats**:
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/drawva.git
+git clone https://github.com/taqui-786/drawva.git
 cd drawva
 
 # Install dependencies using pnpm
@@ -93,10 +93,10 @@ Drawva Architecture:
  │  Widget Manager (lib/canvas/widgets.ts & diagram.ts):                    │
  │   └── Sandboxed iframe host for 7 diagram formats & HTML applets         │
  ├──────────────────────────────────────────────────────────────────────────┤
- │  3-Stage LangChain AI Agent (lib/ai/):                                   │
- │   ├── Stage 1: Vision Perception Model                                   │
- │   ├── Stage 2: Prompt Evaluation Engine                                  │
- │   └── Stage 3: Structured Code Model                                     │
+ │  LangChain AI Agent (lib/ai/):                                           │
+ │   ├── Canvas Perception (Atlas image & Scene JSON)                       │
+ │   ├── Multimodal Reasoning (Spatial intent & gestures)                    │
+ │   └── Structured Command Output (7 diagram formats, MathJax & applets)   │
  ├──────────────────────────────────────────────────────────────────────────┤
  │  Persistence (lib/canvas/persistence.ts): IndexedDB autosave canvas-db   │
  └──────────────────────────────────────────────────────────────────────────┘

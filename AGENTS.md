@@ -31,7 +31,7 @@ Add shadcn components with `pnpm dlx shadcn add <component>` — never hand-writ
 
 ## Architecture & Codebase Map
 
-Drawva is an offline-first, tile-based infinite canvas whiteboard engine powered by a 3-stage multimodal AI perception pipeline.
+Drawva is a tile-based infinite canvas whiteboard engine powered by a multimodal AI perception agent.
 
 ```
 Drawva Stack Architecture:
@@ -47,10 +47,10 @@ Drawva Stack Architecture:
  │  Widget Manager (lib/canvas/widgets.ts & diagram.ts):                    │
  │   └── Dynamic iframe host for 7 diagram formats & HTML applets           │
  ├──────────────────────────────────────────────────────────────────────────┤
- │  3-Stage LangChain AI Agent (lib/ai/):                                   │
- │   ├── Stage 1: Vision Perception Model (NVIDIA Nemotron-3 / Qwen2-VL)     │
- │   ├── Stage 2: Prompt Evaluation Engine (DeepSeek-V4 Flash / Nemotron)   │
- │   └── Stage 3: Structured Code Model (DeepSeek-V4 Flash)                 │
+ │  LangChain AI Agent (lib/ai/):                                           │
+ │   ├── Canvas Perception (Atlas image & Scene JSON)                       │
+ │   ├── Multimodal Reasoning (Spatial intent & gestures)                    │
+ │   └── Structured Command Output (7 diagram formats, MathJax & applets)   │
  ├──────────────────────────────────────────────────────────────────────────┤
  │  Persistence (lib/canvas/persistence.ts): IndexedDB autosave canvas-db   │
  └──────────────────────────────────────────────────────────────────────────┘
@@ -91,10 +91,10 @@ Drawva Stack Architecture:
 | `ellipse` | `O` | Vector ellipse shape |
 | `arrow` | `A` | Directed arrow vector shape |
 
-### 3. 3-Stage LangChain AI Agent (`lib/ai/`)
+### 3. LangChain AI Agent (`lib/ai/`)
 
 - `model.ts`: Single OpenAI-compatible model factory `createChatModel({ baseUrl, apiKey, model })` → `ChatOpenAI` (temp 0.2, timeout 60s). `MAX_RETRIES = 3` (total attempts). No env-based provider routing.
-- `agent.ts`: Single-model 3-stage pipeline (`runAgent(req, sceneText, model, opts)`): structured-output first, direct-JSON fallback within an attempt, up to `MAX_RETRIES` total attempts, then throws. No fallback chain (`getAllCodeModels`, `getFallbackReply` removed).
+- `agent.ts`: Single-model pipeline (`runAgent(req, sceneText, model, opts)`): structured-output first, direct-JSON fallback within an attempt, up to `MAX_RETRIES` total attempts, then throws. No fallback chain (`getAllCodeModels`, `getFallbackReply` removed).
 - `provider.ts`: Safe-SSR localStorage helpers for the user's provider config (`drawva.aiProvider`), cached model list (`drawva.aiModels`), and active model (`drawva.aiModel`).
 - `prompts.ts`: Core prompt contracts (`SYSTEM_PROMPT`, `CODE_SYSTEM_PROMPT_EXTRA`, `MANDATORY_VISIBLE_RESPONSE`, `FLOWCHART_RULES`, `WIDGET_VISUAL_RULES`). Anchors answers below the user's latest ink (`x = changedBox.x, y = changedBox.y + changedBox.h + 24`).
 - `app/api/canvas/provider/route.ts`: POST verifies a user-supplied OpenAI-compatible base URL + API key by fetching `{base}/models` (falls back to `{base}/v1/models`); returns the model list. When the provider declares per-model capabilities (OpenRouter `input_modalities`), it returns only vision-capable models (`filteredByVision: true`); otherwise it returns all models. Key is never logged or persisted.
