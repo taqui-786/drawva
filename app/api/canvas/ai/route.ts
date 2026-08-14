@@ -87,9 +87,16 @@ export async function POST(req: Request) {
     return json({ error: "atlasImage missing or too large" }, 400);
   }
 
+  const widgetEdit =
+    p.widgetEdit && typeof p.widgetEdit === "object"
+      ? (p.widgetEdit as import("@/lib/ai/types").WidgetEditContext)
+      : undefined;
+  const focusInset = typeof p.focusInset === "string" ? p.focusInset : undefined;
+
   const aiRequest: AiRequest = {
     requestId,
     atlasImage,
+    focusInset,
     visibleRect,
     sourceRect,
     captureRect: visibleRect,
@@ -101,6 +108,7 @@ export async function POST(req: Request) {
     userPrompt: typeof p.userPrompt === "string" ? p.userPrompt.slice(0, 2000) : "",
     scene: typeof p.scene === "string" ? p.scene.slice(0, 20000) : "",
     trigger: p.trigger === "manual" ? "manual" : "user_paused",
+    widgetEdit,
     providerType,
     baseUrl,
     apiKey,
@@ -111,11 +119,11 @@ export async function POST(req: Request) {
   const sceneText = aiRequest.scene || "";
 
   if (p.stream === true) {
-    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, !!p.widgetEdit);
+    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, !!widgetEdit);
   }
 
   const reply = await runAgent(aiRequest, sceneText, model);
-  return json(validateReply(reply, visibleRect, changedBox, !!p.widgetEdit));
+  return json(validateReply(reply, visibleRect, changedBox, !!widgetEdit));
 }
 
 /** Server-Sent Events response that reports live provider/retry progress. */

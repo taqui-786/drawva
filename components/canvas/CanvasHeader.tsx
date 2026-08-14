@@ -131,7 +131,7 @@ export function CanvasHeader({
   onInsertFormula,
   onInsertPlot,
   aiStatus,
-  aiRun,
+  aiRun: _aiRun,
   autoOn,
   onAutoChange,
   onAskAi,
@@ -519,14 +519,31 @@ export function CanvasHeader({
               className="flex items-center gap-1 sm:gap-1.5"
             >
               {aiStatus === "done" && (
-                <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
-                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Done{aiRun?.doneProvider ? ` · ${aiRun.doneProvider}` : ""}</span>
-                </Badge>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9, y: 1 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ duration: 0.2 }}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 shadow-xs select-none"
+                >
+                  <span className="relative flex size-1.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
+                  </span>
+                  <span>Ready</span>
+                </motion.div>
               )}
 
               {aiStatus === "error" && (
-                <Badge variant="destructive">Failed</Badge>
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-0.5 text-[11px] font-medium text-destructive border border-destructive/25 shadow-xs select-none"
+                >
+                  <span className="size-1.5 rounded-full bg-destructive animate-pulse" />
+                  <span>Failed</span>
+                </motion.div>
               )}
 
               {hasModels && (

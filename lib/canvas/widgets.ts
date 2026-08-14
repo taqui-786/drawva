@@ -80,6 +80,8 @@ export class WidgetManager {
 
   constructor(private opts: WidgetMountOptions) {
     this.hostRoot = document.createElement("div");
+    this.hostRoot.className = "drawva-widget-host";
+    this.hostRoot.dataset.mode = this.mode;
     this.hostRoot.style.cssText =
       "position:absolute;inset:0;pointer-events:none;z-index:1;overflow:hidden;";
     this.style = document.createElement("style");
@@ -91,19 +93,22 @@ export class WidgetManager {
         box-shadow: none !important;
         background: transparent !important;
       }
-      .drawva-widget-shell:hover,
-      .drawva-widget-shell[data-selected="true"] {
+      .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell:hover,
+      .drawva-widget-shell[data-selected="true"],
+      .drawva-widget-shell[data-status="draft"] {
         border-color: var(--primary) !important;
         border-style: dotted !important;
         box-shadow: none !important;
       }
-      .drawva-widget-shell:hover .drawva-widget-chrome,
-      .drawva-widget-shell[data-selected="true"] .drawva-widget-chrome {
+      .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell:hover .drawva-widget-chrome,
+      .drawva-widget-shell[data-selected="true"] .drawva-widget-chrome,
+      .drawva-widget-shell[data-status="draft"] .drawva-widget-chrome {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-widget-shell:hover .drawva-widget-resize,
-      .drawva-widget-shell[data-selected="true"] .drawva-widget-resize {
+      .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell:hover .drawva-widget-resize,
+      .drawva-widget-shell[data-selected="true"] .drawva-widget-resize,
+      .drawva-widget-shell[data-status="draft"] .drawva-widget-resize {
         display: flex !important;
         pointer-events: auto !important;
       }
@@ -223,6 +228,7 @@ export class WidgetManager {
   /** Match PenEcho's input model: widgets are interactive in hand/select mode or when active/hovered. */
   setMode(mode: CanvasMode): void {
     this.mode = mode;
+    this.hostRoot.dataset.mode = mode;
     for (const id of this.toolbars.keys()) this.applyMode(id);
   }
 

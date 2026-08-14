@@ -71,7 +71,12 @@ export function responsiveMermaidSource(
 
 async function renderMermaid(source: string): Promise<string> {
   const mermaid = (await import("mermaid")).default;
-  mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "base" });
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "loose",
+    theme: "base",
+    flowchart: { htmlLabels: false },
+  });
   const id = `dm-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
   const result = await mermaid.render(id, source);
   return result.svg || "";
@@ -147,7 +152,12 @@ export async function diagramDocument(
   try {
     if (format === "mermaid") {
       const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs");
-      mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "base" });
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "loose",
+        theme: "base",
+        flowchart: { htmlLabels: false },
+      });
       const id = "m-" + Math.random().toString(36).substring(2, 9);
       const res = await mermaid.render(id, source);
       stage.innerHTML = res.svg;

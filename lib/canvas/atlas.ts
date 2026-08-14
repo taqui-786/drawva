@@ -24,42 +24,92 @@ export async function renderWidgetToContext(
   widget: WidgetItem,
   q: CanvasRenderingContext2D
 ): Promise<void> {
-  if (!widget || !widget.html) return;
+  if (!widget || !widget.html || typeof document === "undefined") return;
   const w = Math.max(1, Math.round(widget.w || widget.contentW || 400));
   const h = Math.max(1, Math.round(widget.h || widget.contentH || 300));
   const wx = widget.x;
   const wy = widget.y;
 
-  // Case 1: Pure SVG diagram (e.g. Mermaid pre-rendered, DOT, SMILES)
-  const hasSvg = /<svg\b[^>]*>/i.test(widget.html);
-  const hasForeignObject = /<foreignObject\b/i.test(widget.html);
-
-  if (hasSvg && !hasForeignObject) {
+  if (widget.cachedImage) {
     try {
-      const svgMatch = widget.html.match(/<svg\b[\s\S]*?<\/svg>/i);
-      if (svgMatch) {
-        let svgStr = svgMatch[0];
-        if (!svgStr.includes("xmlns=")) {
-          svgStr = svgStr.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
-        }
-        const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const img = new Image();
-        img.src = url;
-        await img.decode();
-        URL.revokeObjectURL(url);
-        q.drawImage(img, wx, wy, w, h);
-        return;
+      q.drawImage(widget.cachedImage, wx, wy, w, h);
+      return;
+    } catch {}
+  }
+
+  // Parse HTML string with DOMParser to safely extract SVG and styles without regex XML corruption
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(widget.html, "text/html");
+  const svgEl = doc.querySelector("svg");
+
+  if (svgEl) {
+    try {
+      const clone = svgEl.cloneNode(true) as SVGSVGElement;
+      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+      clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+
+      // Extract all <style> elements from the document and insert into <defs> in the SVG
+      const styles = Array.from(doc.querySelectorAll("style"))
+        .map((s) => s.textContent || "")
+        .join("\n");
+      if (styles.trim()) {
+        const defs = doc.createElementNS("http://www.w3.org/2000/svg", "defs");
+        const styleTag = doc.createElementNS("http://www.w3.org/2000/svg", "style");
+        styleTag.textContent = styles;
+        defs.appendChild(styleTag);
+        clone.insertBefore(defs, clone.firstChild);
       }
+
+      // Sanitize foreignObjects to pure SVG <text> elements with exact centered coordinates
+      const foreignObjects = Array.from(clone.querySelectorAll("foreignObject"));
+      for (const fo of foreignObjects) {
+        const foW = parseFloat(fo.getAttribute("width") || "0");
+        const foH = parseFloat(fo.getAttribute("height") || "0");
+        const cx = foW > 0 ? foW / 2 : 0;
+        const cy = foH > 0 ? foH / 2 : 0;
+        const text = (fo.textContent || "").replace(/\s+/g, " ").trim();
+
+        const textEl = doc.createElementNS("http://www.w3.org/2000/svg", "text");
+        textEl.setAttribute("x", String(cx));
+        textEl.setAttribute("y", String(cy));
+        textEl.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
+        textEl.setAttribute("font-size", "14");
+        textEl.setAttribute("font-weight", "500");
+        textEl.setAttribute("fill", "#1e293b");
+        textEl.setAttribute("text-anchor", "middle");
+        textEl.setAttribute("dominant-baseline", "central");
+        textEl.textContent = text;
+
+        fo.parentElement?.replaceChild(textEl, fo);
+      }
+
+      // Ensure explicit width and height on root SVG
+      const vb = clone.viewBox?.baseVal;
+      if (vb && vb.width > 0 && vb.height > 0) {
+        clone.setAttribute("width", String(vb.width));
+        clone.setAttribute("height", String(vb.height));
+      } else {
+        clone.setAttribute("width", String(w));
+        clone.setAttribute("height", String(h));
+      }
+
+      const svgSource = new XMLSerializer().serializeToString(clone);
+      const blob = new Blob([svgSource], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const img = new Image();
+      img.src = url;
+      await img.decode();
+      URL.revokeObjectURL(url);
+      q.drawImage(img, wx, wy, w, h);
+      return;
     } catch (err) {
       console.warn("[renderWidgetToContext] SVG draw failed, falling back to DOM walker:", err);
     }
   }
 
   // Case 2: HTML widget or rich formatted document (CV layout, cards, forms, tables)
-  // Render via offscreen DOM text/box measurement with exact content dimensions and scaling
   try {
-    renderHtmlToContext(widget, q);
+    await renderHtmlToContext(widget, q);
   } catch (err) {
     console.warn("[renderWidgetToContext] HTML render error:", err);
   }
@@ -69,10 +119,10 @@ export async function renderWidgetToContext(
  * Accurately renders HTML elements (boxes, borders, backgrounds, typography, list bullets)
  * directly into CanvasRenderingContext2D matching the live canvas scaling and coordinate system.
  */
-function renderHtmlToContext(
+async function renderHtmlToContext(
   widget: WidgetItem,
   q: CanvasRenderingContext2D
-): void {
+): Promise<void> {
   if (typeof document === "undefined" || !widget.html) return;
 
   const contentW = Math.max(1, Math.round(widget.contentW || widget.w || 400));
@@ -210,6 +260,33 @@ function renderHtmlToContext(
         }
       }
     }
+
+    // Render any embedded <svg> elements inside the HTML widget
+    const svgs = doc.body.querySelectorAll<SVGSVGElement>("svg");
+    for (let j = 0; j < svgs.length; j++) {
+      const svgEl = svgs[j];
+      const sRect = svgEl.getBoundingClientRect();
+      if (sRect.width <= 0 || sRect.height <= 0) continue;
+      const sX = sRect.left - rootRect.left;
+      const sY = sRect.top - rootRect.top;
+      const sW = sRect.width;
+      const sH = sRect.height;
+      try {
+        const clone = svgEl.cloneNode(true) as SVGSVGElement;
+        clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+        const foreignObjects = Array.from(clone.querySelectorAll("foreignObject"));
+        for (const fo of foreignObjects) fo.remove();
+        const sSource = new XMLSerializer().serializeToString(clone);
+        const sBlob = new Blob([sSource], { type: "image/svg+xml;charset=utf-8" });
+        const sUrl = URL.createObjectURL(sBlob);
+        const sImg = new Image();
+        sImg.src = sUrl;
+        await sImg.decode();
+        URL.revokeObjectURL(sUrl);
+        q.drawImage(sImg, sX, sY, sW, sH);
+      } catch {}
+    }
+
     q.restore();
   } finally {
     frame.remove();

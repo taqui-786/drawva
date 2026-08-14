@@ -68,6 +68,12 @@ function parseCleanErrorMessage(raw: string): string {
   return clean || "AI request failed";
 }
 
+function distanceBetweenRects(a: Rect, b: { x: number; y: number; w: number; h: number }): number {
+  const dx = a.x + a.w < b.x ? b.x - (a.x + a.w) : a.x > b.x + b.w ? a.x - (b.x + b.w) : 0;
+  const dy = a.y + a.h < b.y ? b.y - (a.y + a.h) : a.y > b.y + b.h ? a.y - (b.y + b.h) : 0;
+  return Math.hypot(dx, dy);
+}
+
 /** Parse the SSE stream from POST /api/canvas/ai. */
 async function readSse(
   res: Response,
@@ -190,6 +196,7 @@ export function CanvasApp() {
   const aiRevision = useRef(0); // bump on every user ink commit
   const inkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
+  const lastStrokeTimeRef = useRef<number>(0);
   const refineFocusRef = useRef<{ rect: Rect; widgetId: string } | null>(null);
   const activeEditTargetRef = useRef<string | null>(null);
 
@@ -302,7 +309,7 @@ export function CanvasApp() {
     const atlas = await buildAtlas(engineAtCall, viewport, box, wm, objects.current);
     const scene = buildScene(wm, objects.current);
 
-    // Build widgetEdit target if refine focus set or ink drawn over/near an existing widget
+    // Build widgetEdit target if explicit refine focus set OR ink is drawn on/near an existing widget
     let widgetEditTarget: import("@/lib/ai/types").WidgetEditContext | undefined = undefined;
     if (refineFocusRef.current && wm) {
       const targetItem = wm.get(refineFocusRef.current.widgetId);
@@ -318,42 +325,27 @@ export function CanvasApp() {
           box: { x: targetItem.x, y: targetItem.y, w: targetItem.w, h: targetItem.h },
         };
       }
-    } else if (wm) {
-      // Proximity-based target detection: find widget intersecting or nearest to changedBox within 450px margin
-      const margin = 450;
-      let nearestItem: WidgetItem | null = null;
+    } else if (wm && box.w > 0 && box.h > 0 && box.w < 3500 && box.h < 3500) {
+      // Find closest widget within proximity threshold (160px in world coordinates)
+      let closestWidget: WidgetItem | null = null;
       let minDistance = Infinity;
-      const boxCenterX = box.x + box.w / 2;
-      const boxCenterY = box.y + box.h / 2;
-
       for (const w of wm.all()) {
-        const widgetCenterX = w.x + w.w / 2;
-        const widgetCenterY = w.y + w.h / 2;
-        const isNear =
-          box.x < w.x + w.w + margin &&
-          box.x + box.w > w.x - margin &&
-          box.y < w.y + w.h + margin &&
-          box.y + box.h > w.y - margin;
-
-        if (isNear) {
-          const dist = Math.hypot(boxCenterX - widgetCenterX, boxCenterY - widgetCenterY);
-          if (dist < minDistance) {
-            minDistance = dist;
-            nearestItem = w;
-          }
+        const dist = distanceBetweenRects(box, { x: w.x, y: w.y, w: w.w, h: w.h });
+        if (dist <= 160 && dist < minDistance) {
+          minDistance = dist;
+          closestWidget = w;
         }
       }
-
-      if (nearestItem) {
+      if (closestWidget) {
         widgetEditTarget = {
-          id: nearestItem.id,
-          pluginId: nearestItem.pluginId,
-          widgetType: nearestItem.kind === "diagram" ? "diagram_source" : "html_widget",
-          title: nearestItem.title,
-          sourceFormat: (nearestItem as unknown as { sourceFormat?: string }).sourceFormat || (nearestItem.kind === "diagram" ? "mermaid" : undefined),
-          source: nearestItem.copyText,
-          html: nearestItem.html,
-          box: { x: nearestItem.x, y: nearestItem.y, w: nearestItem.w, h: nearestItem.h },
+          id: closestWidget.id,
+          pluginId: closestWidget.pluginId,
+          widgetType: closestWidget.kind === "diagram" ? "diagram_source" : "html_widget",
+          title: closestWidget.title,
+          sourceFormat: (closestWidget as unknown as { sourceFormat?: string }).sourceFormat || (closestWidget.kind === "diagram" ? "mermaid" : undefined),
+          source: closestWidget.copyText,
+          html: closestWidget.html,
+          box: { x: closestWidget.x, y: closestWidget.y, w: closestWidget.w, h: closestWidget.h },
         };
       }
     }
@@ -522,7 +514,27 @@ export function CanvasApp() {
   }
 
   function askAi() {
-    const box = inkBoxRef.current ?? engine?.camera.visibleWorldRect() ?? { x: 0, y: 0, w: 100, h: 100 };
+    let box = inkBoxRef.current;
+    if (!box || box.w <= 0 || box.h <= 0) {
+      const visible = engine?.camera.visibleWorldRect();
+      if (visible && engine) {
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        engine.tiles.forTiles(visible, (_canvas, tx, ty) => {
+          minX = Math.min(minX, tx * 512);
+          minY = Math.min(minY, ty * 512);
+          maxX = Math.max(maxX, (tx + 1) * 512);
+          maxY = Math.max(maxY, (ty + 1) * 512);
+        }, false);
+        if (minX !== Infinity && maxX > minX && maxY > minY) {
+          box = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+        } else {
+          const center = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
+          box = { x: Math.round(center.x - 300), y: Math.round(center.y - 200), w: 600, h: 400 };
+        }
+      } else {
+        box = { x: 0, y: 0, w: 600, h: 400 };
+      }
+    }
     void fireAi(box, undefined);
   }
 
@@ -822,19 +834,21 @@ export function CanvasApp() {
     draft.setRenderer("html_widget", (_eng, cmd) => {
       if (cmd.tool !== "html_widget") return;
       const targetId = activeEditTargetRef.current;
-      if (targetId && wm.has(targetId)) {
-        const oldWidget = wm.get(targetId);
-        if (oldWidget) {
-          cmd.x = oldWidget.x;
-          cmd.y = oldWidget.y;
-          cmd.w = Math.max(oldWidget.w, Number(cmd.w) || oldWidget.w);
-          cmd.h = Math.max(oldWidget.h, Number(cmd.h) || oldWidget.h);
+      let oldWidget = targetId ? wm.get(targetId) : null;
+      if (!oldWidget && cmd.title) {
+        for (const w of wm.all()) {
+          if (w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 200) {
+            oldWidget = w;
+            break;
+          }
         }
-        wm.remove(targetId);
+      }
+      if (oldWidget) {
+        wm.remove(oldWidget.id);
       }
       activeEditTargetRef.current = null;
       const item: WidgetItem = {
-        id: targetId || `widget-${Date.now()}`,
+        id: oldWidget?.id || targetId || `widget-${Date.now()}`,
         kind: "html",
         pluginId: cmd.pluginId,
         x: cmd.x,
@@ -918,20 +932,22 @@ export function CanvasApp() {
     draft.setRenderer("diagram_source", async (_eng, cmd) => {
       if (cmd.tool !== "diagram_source") return;
       const targetId = activeEditTargetRef.current;
-      if (targetId && wm.has(targetId)) {
-        const oldWidget = wm.get(targetId);
-        if (oldWidget) {
-          cmd.x = oldWidget.x;
-          cmd.y = oldWidget.y;
-          cmd.w = Math.max(oldWidget.w, Number(cmd.w) || oldWidget.w);
-          cmd.h = Math.max(oldWidget.h, Number(cmd.h) || oldWidget.h);
+      let oldWidget = targetId ? wm.get(targetId) : null;
+      if (!oldWidget && cmd.title) {
+        for (const w of wm.all()) {
+          if (w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 200) {
+            oldWidget = w;
+            break;
+          }
         }
-        wm.remove(targetId);
+      }
+      if (oldWidget) {
+        wm.remove(oldWidget.id);
       }
       activeEditTargetRef.current = null;
       const html = await diagramDocument(cmd.sourceFormat, cmd.source);
       const item: WidgetItem = {
-        id: targetId || `diagram-${Date.now()}`,
+        id: oldWidget?.id || targetId || `diagram-${Date.now()}`,
         kind: "diagram",
         pluginId: "flowchart",
         x: cmd.x,
@@ -1108,7 +1124,18 @@ export function CanvasApp() {
     const onMsg = (e: MessageEvent) => {
       if (e.data?.type !== "drawva-widget-wheel") return;
       if (engine) {
-        engine.camera.zoomAt(e.data.clientX, e.data.clientY, e.data.deltaY);
+        let screenX = window.innerWidth / 2;
+        let screenY = window.innerHeight / 2;
+        const iframes = document.querySelectorAll<HTMLIFrameElement>(".drawva-widget-shell iframe");
+        for (const iframe of iframes) {
+          if (iframe.contentWindow === e.source) {
+            const rect = iframe.getBoundingClientRect();
+            screenX = rect.left + (typeof e.data.clientX === "number" ? e.data.clientX : rect.width / 2);
+            screenY = rect.top + (typeof e.data.clientY === "number" ? e.data.clientY : rect.height / 2);
+            break;
+          }
+        }
+        engine.camera.zoomAt(screenX, screenY, e.data.deltaY);
         engine.requestRender();
       }
     };
@@ -1338,6 +1365,8 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     if (middle || mode === "hand") {
       // Pan owns the pointer for the whole gesture; ToolManager routes it.
       e.preventDefault();
+      widgets.current?.setSelected(null);
+      objects.current?.setSelected(null);
       tm.begin(gestureEvent(e));
       return;
     }
@@ -1437,12 +1466,24 @@ if (e.shiftKey && k === "h") setMode("highlighter");
       } else {
         const isDrawing = ["pen", "highlighter", "rect", "ellipse", "arrow"].includes(mode);
         if (isDrawing) {
-          const box = { ...drawingRef.current };
+          const singleStrokeBox = { ...drawingRef.current };
           drawingRef.current = null;
-          inkBoxRef.current = box;
+          const now = Date.now();
+          if (
+            inkBoxRef.current &&
+            now - lastStrokeTimeRef.current < 20000 &&
+            Math.abs(singleStrokeBox.x - inkBoxRef.current.x) < 3000 &&
+            Math.abs(singleStrokeBox.y - inkBoxRef.current.y) < 3000
+          ) {
+            inkBoxRef.current = unionRect(inkBoxRef.current, singleStrokeBox);
+          } else {
+            inkBoxRef.current = singleStrokeBox;
+          }
+          lastStrokeTimeRef.current = now;
+          const currentInkBox = { ...inkBoxRef.current };
           aiRevision.current++;
           afterBoardChange();
-          if (appState.autoOn) scheduleAi(box);
+          if (appState.autoOn) scheduleAi(currentInkBox);
         } else {
           drawingRef.current = null;
         }

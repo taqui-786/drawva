@@ -106,8 +106,8 @@ function userMessageText(req: AiRequest, sceneText: string): string {
       `Source Format: ${req.widgetEdit.sourceFormat || "(none)"}`,
       `Current Title: ${req.widgetEdit.title || "(none)"}`,
       `Widget Box: ${JSON.stringify(req.widgetEdit.box)}`,
-      `Current Source / Code:\n${(req.widgetEdit.source || req.widgetEdit.html || "").slice(0, 4000)}`,
-      `REFINEMENT INSTRUCTION: This request is an in-place update for the target widget above. Read the newest handwritten ink near/on the target widget as modification instructions. Return exactly ONE replacement widget command (${req.widgetEdit.widgetType}) with pluginId:"${req.widgetEdit.pluginId}" and sourceFormat:"${req.widgetEdit.sourceFormat || "mermaid"}" that applies the requested changes while preserving unchanged content.`
+      `Current Baseline Source Code:\n${(req.widgetEdit.source || req.widgetEdit.html || "").slice(0, 4000)}`,
+      `REFINEMENT INSTRUCTION: This request is a one-shot in-place modification of the target widget above. The handwritten text, arrows, and notes near or pointing to this widget are edit instructions. Return exactly ONE updated replacement command (${req.widgetEdit.widgetType}) with pluginId:"${req.widgetEdit.pluginId}", sourceFormat:"${req.widgetEdit.sourceFormat || "mermaid"}", and title:"${req.widgetEdit.title || "Widget"}" that incorporates the new requested nodes/branches/changes while preserving all existing baseline structure and content.`
     );
   }
   parts.push(`Scene JSON:\n${req.scene || sceneText}`, `\nInspect the attached canvas image (if present) and evaluate the prompt.`);

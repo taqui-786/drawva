@@ -207,43 +207,39 @@ function fitWidgetGeometry(
   const rawH = Math.round(cmd.h as number);
 
   // Readable floors + viewport-capped ceilings for widgets/diagrams.
-  const minW = 400;
-  const minH = 260;
-  const maxW = Math.max(minW, Math.min(1600, Math.round(viewportW * 0.85)));
-  const maxH = Math.max(minH, Math.min(1000, Math.round(viewportH * 0.85)));
+  const minW = 320;
+  const minH = 200;
+  const maxW = Math.max(minW, Math.min(1800, Math.round(viewportW * 0.9)));
+  const maxH = Math.max(minH, Math.min(1400, Math.round(viewportH * 0.9)));
 
   let w = rawW;
   let h = rawH;
 
-  // Determine smart width and height: maintain a healthy, readable aspect ratio (~1.3:1 to ~1.7:1).
-  if (changedBox && changedBox.w > 0 && changedBox.h > 0) {
-    if (rawW >= 360 && rawH >= 240 && rawW / rawH >= 0.9 && rawW / rawH <= 2.2) {
-      w = clampNum(rawW, minW, maxW);
-      h = clampNum(rawH, minH, maxH);
+  // Determine smart width and height: support portrait (e.g. mobile/chatbot) & landscape (e.g. flowcharts)
+  if (rawW >= 240 && rawH >= 180 && rawW / rawH >= 0.35 && rawW / rawH <= 3.2) {
+    w = clampNum(rawW, minW, maxW);
+    h = clampNum(rawH, minH, maxH);
+  } else if (changedBox && changedBox.w > 0 && changedBox.h > 0 && changedBox.w < 10000) {
+    const footprintW = Math.max(changedBox.w * 1.1, 480);
+    w = clampNum(footprintW, minW, maxW);
+    if (changedBox.h > changedBox.w * 1.1) {
+      h = clampNum(Math.round(w * 1.45), minH, maxH);
     } else {
-      const footprintW = Math.max(changedBox.w * 1.15, 540);
-      w = clampNum(footprintW, minW, maxW);
-      h = clampNum(Math.round(w / 1.48), minH, maxH);
+      h = clampNum(Math.round(w / 1.4), minH, maxH);
     }
   } else {
     w = clampNum(rawW, minW, maxW);
     h = clampNum(rawH, minH, maxH);
   }
 
-  // Placement: anchor STRICTLY BELOW the drawing footprint (tight 20px gap), centered horizontally under it.
-  if (reposition && changedBox && changedBox.w > 0 && changedBox.h > 0) {
-    const gap = 20;
+  // Placement: anchor STRICTLY DIRECTLY BELOW the drawing footprint (clean 24px gap), centered horizontally under it.
+  if (reposition && changedBox && changedBox.w > 0 && changedBox.h > 0 && changedBox.w < SIZE * 0.9) {
+    const gap = 24;
     y = Math.round(changedBox.y + changedBox.h + gap);
 
     // Center horizontally directly under the drawing's bounding box.
     const centerX = changedBox.x + changedBox.w / 2;
     x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
-  } else if (changedBox && changedBox.w > 0 && changedBox.h > 0) {
-    // Enforce minimum vertical clearance even if reposition is false (e.g. widgetEdit)
-    const minY = Math.round(changedBox.y + changedBox.h + 20);
-    if (y < minY) {
-      y = minY;
-    }
   }
 
   x = Math.max(0, Math.min(SIZE - w, x));

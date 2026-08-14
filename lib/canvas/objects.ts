@@ -86,6 +86,8 @@ export class ObjectManager {
 
   constructor(private opts: ObjectMountOptions) {
     this.hostRoot = document.createElement("div");
+    this.hostRoot.className = "drawva-object-host";
+    this.hostRoot.dataset.mode = this.mode;
     this.hostRoot.style.cssText =
       "position:absolute;inset:0;pointer-events:none;z-index:1;overflow:hidden;";
     this.style = document.createElement("style");
@@ -97,18 +99,18 @@ export class ObjectManager {
         box-shadow: none !important;
         background: transparent !important;
       }
-      .drawva-object-shell:hover,
+      .drawva-object-host:not([data-mode="hand"]) > .drawva-object-shell:hover,
       .drawva-object-shell[data-selected="true"] {
         border-color: var(--primary) !important;
         border-style: dotted !important;
         box-shadow: none !important;
       }
-      .drawva-object-shell:hover .drawva-object-chrome,
+      .drawva-object-host:not([data-mode="hand"]) > .drawva-object-shell:hover .drawva-object-chrome,
       .drawva-object-shell[data-selected="true"] .drawva-object-chrome {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-object-shell:hover .drawva-object-resize,
+      .drawva-object-host:not([data-mode="hand"]) > .drawva-object-shell:hover .drawva-object-resize,
       .drawva-object-shell[data-selected="true"] .drawva-object-resize {
         display: flex !important;
         pointer-events: auto !important;
@@ -190,6 +192,7 @@ export class ObjectManager {
 
   setMode(mode: CanvasMode): void {
     this.mode = mode;
+    this.hostRoot.dataset.mode = mode;
     for (const id of this.toolbars.keys()) this.applyMode(id);
   }
 
@@ -201,7 +204,7 @@ export class ObjectManager {
     const hand = this.mode === "hand";
     const select = this.mode === "select";
     const isSelected = this.selectedId === id;
-    const isHovered = shell?.dataset.hovered === "true";
+    const isHovered = !hand && shell?.dataset.hovered === "true";
     const active = isSelected || isHovered;
     // Live objects are always interactive in hand/select mode (Penecho parity).
     this.hostRoot.style.zIndex = active || hand || select ? "40" : "1";
