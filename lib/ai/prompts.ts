@@ -79,7 +79,7 @@ export const THEME_PERSONAS: Record<string, string> = {
   arcane: "Warm interdisciplinary knowledge guide. Favor intuition, memorable analogies, creative synthesis, and conceptual connections across science and humanities.",
 };
 
-export const AI_TIMEOUT_MS = 60_000;
+export const AI_TIMEOUT_MS = 120_000;
 export const MAX_ATLAS_WIDTH = 2048;
 export const MAX_HTML_BYTES = 100 * 1024;
 export const MAX_DIAGRAM_BYTES = 20 * 1024;

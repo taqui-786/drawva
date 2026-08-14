@@ -13,7 +13,7 @@ import {
   RETRY_INSTRUCTION,
   SYSTEM_PROMPT,
 } from "./prompts";
-import type { AiReply, AiRequest, AgentEvent, TokenUsage } from "./types";
+import type { AiReply, AiRequest, AgentEvent, TokenUsage, AiDebugInfo } from "./types";
 
 export const AgentReplySchema = z.object({
   intent: z.enum(["none", "hint", "continue", "explain", "plot", "correct", "erase", "answer", "typeset"]),
@@ -24,6 +24,7 @@ export const AgentReplySchema = z.object({
 
 export type AgentReply = z.infer<typeof AgentReplySchema> & {
   tokenUsage?: TokenUsage;
+  debug?: AiDebugInfo;
 };
 
 export interface AgentOptions {
@@ -405,5 +406,11 @@ async function attemptReply(
     observedText: response.observedText,
     commands,
     tokenUsage: usage,
+    debug: {
+      systemPrompt: system,
+      userPromptText: textContent,
+      model: req.model || "model",
+      rawResponse: response,
+    },
   };
 }

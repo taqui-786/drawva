@@ -20,6 +20,7 @@ import { rasterizeText, renderTextBlock } from "@/lib/canvas/textTool";
 import { placeImageAt } from "@/lib/canvas/images";
 import { CanvasHeader, type AiRunState } from "./CanvasHeader";
 import { SettingsDialog } from "./SettingsDialog";
+import { LogsDialog } from "./LogsDialog";
 import { CanvasFooter } from "./CanvasFooter";
 import { WidgetManager, type WidgetItem } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
@@ -32,7 +33,7 @@ import { buildScene } from "@/lib/canvas/scene";
 import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
 import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject } from "@/lib/canvas/persistence";
 import { BoardHistory } from "@/lib/canvas/history";
-import type { AiReply, AiRequest, AgentEvent } from "@/lib/ai/types";
+import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
 import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel, addTokenUsageRecord } from "@/lib/ai/provider";
@@ -219,6 +220,8 @@ export function CanvasApp() {
   const [models, setModels] = useState<string[]>([]);
   const [activeModel, setActiveModelState] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [logsOpen, setLogsOpen] = useState(false);
+  const [latestLog, setLatestLog] = useState<AiLogEntry | null>(null);
 
   useEffect(() => {
     const refresh = () => {
@@ -257,7 +260,7 @@ export function CanvasApp() {
     });
   };
 
-  async function fireAi(box: Rect, userPrompt?: string) {
+  const fireAi = useCallback(async (box: Rect, userPrompt?: string) => {
     const engineAtCall = engine;
     const wm = widgets.current;
     const draft = drafts.current;
@@ -296,7 +299,7 @@ export function CanvasApp() {
     const revision = aiRevision.current;
 
     const viewport = engineAtCall.camera.visibleWorldRect();
-    const atlas = buildAtlas(engineAtCall, viewport, box);
+    const atlas = await buildAtlas(engineAtCall, viewport, box, wm, objects.current);
     const scene = buildScene(wm, objects.current);
 
     // Build widgetEdit target if refine focus set or ink drawn over/near an existing widget
@@ -372,8 +375,9 @@ export function CanvasApp() {
       }
     }
 
-    const focusInset = buildFocusInset(engineAtCall, effectiveBox);
+    const focusInset = await buildFocusInset(engineAtCall, effectiveBox, wm, objects.current);
 
+    const reqTimestamp = Date.now();
     const payload: AiRequest = {
       requestId: `req-${requestId}`,
       atlasImage: atlas.atlasImage,
@@ -404,6 +408,33 @@ export function CanvasApp() {
           intent: data.intent,
         });
       }
+
+      // Record full AI request & generation log for debugging / inspection
+      const logEntry: AiLogEntry = {
+        timestamp: reqTimestamp,
+        requestId: payload.requestId,
+        model: payload.model || "Unknown",
+        providerType: payload.providerType,
+        attempts: data.attempts || 1,
+        status: "success",
+        atlasImage: payload.atlasImage,
+        focusInset: payload.focusInset,
+        systemPrompt: data.debug?.systemPrompt || "",
+        userPromptText: data.debug?.userPromptText || "",
+        userPromptRaw: payload.userPrompt,
+        sceneJson: payload.scene,
+        tokenUsage: data.tokenUsage,
+        response: {
+          intent: data.intent,
+          message: data.message,
+          observedText: data.observedText,
+          commands: data.commands,
+          rejected: data.rejected,
+          raw: data.debug?.rawResponse || data,
+        },
+      };
+      setLatestLog(logEntry);
+
       if (Array.isArray(data.commands) && data.commands.length) {
         // An accepted AI batch can spawn objects/widgets — capture the pre-state
         // so the accept is a single undoable gesture (Penecho pendingBefore).
@@ -454,6 +485,24 @@ export function CanvasApp() {
       setAiStatus("error");
       setAiRun((prev) => ({ ...prev, phase: "error" }));
       const desc = err instanceof Error ? parseCleanErrorMessage(err.message) : "AI request failed";
+
+      const logEntry: AiLogEntry = {
+        timestamp: reqTimestamp,
+        requestId: payload.requestId,
+        model: payload.model || "Unknown",
+        providerType: payload.providerType,
+        attempts: 3,
+        status: "error",
+        errorMessage: desc,
+        atlasImage: payload.atlasImage,
+        focusInset: payload.focusInset,
+        systemPrompt: "",
+        userPromptText: payload.userPrompt || "",
+        userPromptRaw: payload.userPrompt,
+        sceneJson: payload.scene,
+      };
+      setLatestLog(logEntry);
+
       toast.error("Generation failed after 3 attempts", {
         description: desc,
       });
@@ -462,7 +511,7 @@ export function CanvasApp() {
       if (aiAbort.current === controller) aiAbort.current = null;
       refineFocusRef.current = null;
     }
-  }
+  }, [engine, models]);
 
   function scheduleAi(box: Rect, userPrompt?: string) {
     if (aiTimer.current) clearTimeout(aiTimer.current);
@@ -552,7 +601,7 @@ export function CanvasApp() {
   }
 
   function doExportPng() {
-    if (engine) exportPng(engine);
+    if (engine) void exportPng(engine, widgets.current, objects.current);
   }
 
   function doExportJson() {
@@ -1475,6 +1524,8 @@ if (e.shiftKey && k === "h") setMode("highlighter");
         syncRoomCode={syncState.roomCode}
         syncPeerCount={syncState.peerCount}
         onOpenConnect={() => setConnectOpen(true)}
+        onOpenLogs={() => setLogsOpen(true)}
+        hasLogs={!!latestLog}
       />
 
       {/* Playground: engine root + one deterministic gesture target above it.
@@ -1553,6 +1604,12 @@ if (e.shiftKey && k === "h") setMode("highlighter");
       />
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <LogsDialog
+        open={logsOpen}
+        onOpenChange={setLogsOpen}
+        log={latestLog}
+        onClearLogs={() => setLatestLog(null)}
+      />
       <ConnectDialog
         open={connectOpen}
         onOpenChange={setConnectOpen}

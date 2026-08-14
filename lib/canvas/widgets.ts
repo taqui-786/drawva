@@ -21,6 +21,7 @@ export interface WidgetItem {
   copyLabel?: string;
   status: WidgetStatus;
   userResized?: boolean;
+  cachedImage?: HTMLImageElement | HTMLCanvasElement;
 }
 
 export interface WidgetCallbacks {

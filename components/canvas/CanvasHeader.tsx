@@ -45,6 +45,7 @@ import {
   SparklesIcon,
   SquareIcon,
   TextIcon,
+  TerminalIcon,
   UndoIcon,
   Upload01Icon,
   Share01Icon,
@@ -130,7 +131,7 @@ export function CanvasHeader({
   onInsertFormula,
   onInsertPlot,
   aiStatus,
-  aiRun: _aiRun,
+  aiRun,
   autoOn,
   onAutoChange,
   onAskAi,
@@ -142,6 +143,8 @@ export function CanvasHeader({
   syncRoomCode,
   syncPeerCount,
   onOpenConnect,
+  onOpenLogs,
+  hasLogs,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
@@ -175,6 +178,8 @@ export function CanvasHeader({
   syncRoomCode: string | null;
   syncPeerCount: number;
   onOpenConnect: () => void;
+  onOpenLogs?: () => void;
+  hasLogs?: boolean;
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -268,6 +273,12 @@ export function CanvasHeader({
                 <HugeiconsIcon icon={Share01Icon} />
                 Live P2P Sync
               </DropdownMenuItem>
+              {onOpenLogs && (
+                <DropdownMenuItem onClick={onOpenLogs}>
+                  <HugeiconsIcon icon={TerminalIcon} />
+                  AI Request Logs
+                </DropdownMenuItem>
+              )}
               <DropdownMenuItem onClick={onClear} className="text-destructive focus:text-destructive">
                 <HugeiconsIcon icon={Delete02Icon} />
                 Clear Board
@@ -510,7 +521,7 @@ export function CanvasHeader({
               {aiStatus === "done" && (
                 <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
                   <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  Done
+                  <span>Done{aiRun?.doneProvider ? ` · ${aiRun.doneProvider}` : ""}</span>
                 </Badge>
               )}
 
@@ -554,6 +565,29 @@ export function CanvasHeader({
                   <HugeiconsIcon icon={SparklesIcon} className="size-3.5" />
                   <span>Ask AI</span>
                 </Button>
+              )}
+
+              {onOpenLogs && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant={hasLogs ? "outline" : "ghost"}
+                        onClick={onOpenLogs}
+                        className="gap-1 px-2 text-xs h-8"
+                        aria-label="AI generation logs"
+                      >
+                        <HugeiconsIcon icon={TerminalIcon} className="size-3.5 text-primary" />
+                        <span className="hidden sm:inline">Logs</span>
+                        {hasLogs && (
+                          <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        )}
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>AI Generation Logs & Prompt Inspector</TooltipContent>
+                </Tooltip>
               )}
 
               <Tooltip>

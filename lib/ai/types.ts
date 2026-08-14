@@ -60,6 +60,13 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
+export interface AiDebugInfo {
+  systemPrompt: string;
+  userPromptText: string;
+  model: string;
+  rawResponse?: unknown;
+}
+
 export interface AiReply {
   intent: AiIntent;
   message?: string;
@@ -72,6 +79,33 @@ export interface AiReply {
   providerId?: string;
   /** Token usage for this request. */
   tokenUsage?: TokenUsage;
+  /** Debug and inspection log data. */
+  debug?: AiDebugInfo;
+}
+
+export interface AiLogEntry {
+  timestamp: number;
+  requestId: string;
+  model: string;
+  providerType?: ProviderType;
+  attempts: number;
+  status: "success" | "error";
+  errorMessage?: string;
+  atlasImage: string;
+  focusInset?: string;
+  systemPrompt: string;
+  userPromptText: string;
+  userPromptRaw?: string;
+  sceneJson?: string;
+  tokenUsage?: TokenUsage;
+  response?: {
+    intent?: AiIntent;
+    message?: string;
+    observedText?: string;
+    commands?: unknown[];
+    rejected?: string[];
+    raw?: unknown;
+  };
 }
 
 /** Zod-validated model output before command normalization. */

@@ -5,6 +5,7 @@ import { ObjectManager, type ObjectItem } from "./objects";
 import { renderTextBlock } from "./textTool";
 import { renderFormula } from "./formulas";
 import { plotCommand } from "./plotter";
+import { renderWidgetToContext } from "./atlas";
 
 // ============================================================================
 // Persistence: IndexedDB autosave + PNG export + project JSON import/export.
@@ -44,7 +45,13 @@ export function serializeSnapshot(
     version: 1,
     savedAt: Date.now(),
     tiles,
-    widgets: widgets ? widgets.all().map((w) => ({ ...w })) : [],
+    widgets: widgets
+      ? widgets.all().map((w) => {
+          const { cachedImage, ...rest } = w;
+          void cachedImage;
+          return rest;
+        })
+      : [],
     objects: objects
       ? objects.all().map((o) => {
           const { image, ...rest } = o;
@@ -180,31 +187,71 @@ export async function loadAutosave(): Promise<ProjectSnapshot | null> {
 
 // ---- PNG export ----
 
-export function exportPng(engine: CanvasEngine): void {
+export async function exportPng(
+  engine: CanvasEngine,
+  widgets: WidgetManager | null = null,
+  objects: ObjectManager | null = null
+): Promise<void> {
   const keys = engine.tiles.keys();
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
+
   for (const k of keys) {
     const [tx, ty] = parseKey(k);
-    minX = Math.min(minX, tx);
-    minY = Math.min(minY, ty);
-    maxX = Math.max(maxX, tx);
-    maxY = Math.max(maxY, ty);
+    minX = Math.min(minX, tx * TILE);
+    minY = Math.min(minY, ty * TILE);
+    maxX = Math.max(maxX, (tx + 1) * TILE);
+    maxY = Math.max(maxY, (ty + 1) * TILE);
   }
-  if (!keys.length) return;
+
+  const widgetList = widgets ? widgets.all() : [];
+  for (const w of widgetList) {
+    minX = Math.min(minX, w.x);
+    minY = Math.min(minY, w.y);
+    maxX = Math.max(maxX, w.x + w.w);
+    maxY = Math.max(maxY, w.y + w.h);
+  }
+
+  const objectList = objects ? objects.all() : [];
+  for (const o of objectList) {
+    minX = Math.min(minX, o.x);
+    minY = Math.min(minY, o.y);
+    maxX = Math.max(maxX, o.x + o.w);
+    maxY = Math.max(maxY, o.y + o.h);
+  }
+
+  if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) return;
+
+  const pad = 32;
+  const worldW = Math.ceil(maxX - minX) + pad * 2;
+  const worldH = Math.ceil(maxY - minY) + pad * 2;
+  const originX = minX - pad;
+  const originY = minY - pad;
+
   const out = document.createElement("canvas");
-  out.width = (maxX - minX + 1) * TILE;
-  out.height = (maxY - minY + 1) * TILE;
+  out.width = worldW;
+  out.height = worldH;
   const q = out.getContext("2d")!;
   q.fillStyle = "#fff";
   q.fillRect(0, 0, out.width, out.height);
+  q.setTransform(1, 0, 0, 1, -originX, -originY);
+
   for (const k of keys) {
     const [tx, ty] = parseKey(k);
     const c = engine.tiles.get(tx, ty);
-    if (c) q.drawImage(c, (tx - minX) * TILE, (ty - minY) * TILE);
+    if (c) q.drawImage(c, tx * TILE, ty * TILE);
   }
+
+  for (const w of widgetList) {
+    await renderWidgetToContext(w, q);
+  }
+
+  for (const o of objectList) {
+    if (o.image) q.drawImage(o.image, o.x, o.y, o.w, o.h);
+  }
+
   out.toBlob((blob) => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);

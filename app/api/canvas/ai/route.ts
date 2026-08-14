@@ -50,6 +50,7 @@ function validateReply(
     attempts: reply.attempts,
     providerId: reply.providerId,
     tokenUsage: reply.tokenUsage,
+    debug: reply.debug,
   };
 }
 

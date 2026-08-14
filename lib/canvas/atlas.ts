@@ -1,6 +1,8 @@
 import { CanvasEngine } from "./engine";
 import { TILE } from "./constants";
 import type { Rect } from "./types";
+import { WidgetManager, type WidgetItem } from "./widgets";
+import { ObjectManager, type ObjectItem } from "./objects";
 
 const MAX_ATLAS_WIDTH = 2048;
 const MAX_ATLAS_HEIGHT = 1536;
@@ -15,17 +17,295 @@ export interface AtlasResult {
 }
 
 /**
- * Build the AI-visible image from the current viewport: white background, then
- * the ink tiles packed in, scaled to ≤2048px, exported as a WebP data URL.
- * Port of penecho buildAtlas(). `changedBox` highlights the latest user ink
- * (drawn at full opacity) over a dimmed context.
+ * Render a widget directly to canvas context without tainting the canvas.
+ * Handles both pure SVG diagrams (Mermaid, DOT, SMILES) and rich HTML (CV, cards, tables).
  */
-export function buildAtlas(
+export async function renderWidgetToContext(
+  widget: WidgetItem,
+  q: CanvasRenderingContext2D
+): Promise<void> {
+  if (!widget || !widget.html) return;
+  const w = Math.max(1, Math.round(widget.w || widget.contentW || 400));
+  const h = Math.max(1, Math.round(widget.h || widget.contentH || 300));
+  const wx = widget.x;
+  const wy = widget.y;
+
+  // Case 1: Pure SVG diagram (e.g. Mermaid pre-rendered, DOT, SMILES)
+  const hasSvg = /<svg\b[^>]*>/i.test(widget.html);
+  const hasForeignObject = /<foreignObject\b/i.test(widget.html);
+
+  if (hasSvg && !hasForeignObject) {
+    try {
+      const svgMatch = widget.html.match(/<svg\b[\s\S]*?<\/svg>/i);
+      if (svgMatch) {
+        let svgStr = svgMatch[0];
+        if (!svgStr.includes("xmlns=")) {
+          svgStr = svgStr.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+        }
+        const blob = new Blob([svgStr], { type: "image/svg+xml;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const img = new Image();
+        img.src = url;
+        await img.decode();
+        URL.revokeObjectURL(url);
+        q.drawImage(img, wx, wy, w, h);
+        return;
+      }
+    } catch (err) {
+      console.warn("[renderWidgetToContext] SVG draw failed, falling back to DOM walker:", err);
+    }
+  }
+
+  // Case 2: HTML widget or rich formatted document (CV layout, cards, forms, tables)
+  // Render via offscreen DOM text/box measurement with exact content dimensions and scaling
+  try {
+    renderHtmlToContext(widget, q);
+  } catch (err) {
+    console.warn("[renderWidgetToContext] HTML render error:", err);
+  }
+}
+
+/**
+ * Accurately renders HTML elements (boxes, borders, backgrounds, typography, list bullets)
+ * directly into CanvasRenderingContext2D matching the live canvas scaling and coordinate system.
+ */
+function renderHtmlToContext(
+  widget: WidgetItem,
+  q: CanvasRenderingContext2D
+): void {
+  if (typeof document === "undefined" || !widget.html) return;
+
+  const contentW = Math.max(1, Math.round(widget.contentW || widget.w || 400));
+  const contentH = Math.max(1, Math.round(widget.contentH || widget.h || 300));
+  const sx = (widget.w || contentW) / contentW;
+  const sy = (widget.h || contentH) / contentH;
+
+  const frame = document.createElement("iframe");
+  frame.style.cssText = `
+    position: fixed;
+    left: 0;
+    top: 0;
+    width: ${contentW}px;
+    height: ${contentH}px;
+    opacity: 0;
+    pointer-events: none;
+    border: 0;
+    z-index: -99999;
+    background: transparent;
+  `;
+  document.body.appendChild(frame);
+
+  try {
+    const doc = frame.contentDocument;
+    if (!doc) return;
+
+    doc.open();
+    doc.write(
+      `<!doctype html><html><head><meta charset="utf-8"><style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style></head><body>${widget.html}</body></html>`
+    );
+    doc.close();
+
+    // Wrap text nodes in spans for accurate line-wrapping and word-position measurement
+    wrapTextNodes(doc.body);
+
+    const rootRect = doc.body.getBoundingClientRect();
+    q.save();
+    q.translate(widget.x, widget.y);
+    q.scale(sx, sy);
+    q.beginPath();
+    q.rect(0, 0, contentW, contentH);
+    q.clip();
+
+    const elements = doc.body.querySelectorAll<HTMLElement>("*");
+    for (let i = 0; i < elements.length; i++) {
+      const el = elements[i];
+      if (el.tagName === "SCRIPT" || el.tagName === "STYLE") continue;
+
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+
+      const elX = rect.left - rootRect.left;
+      const elY = rect.top - rootRect.top;
+      const elW = rect.width;
+      const elH = rect.height;
+
+      const style = frame.contentWindow?.getComputedStyle(el) || window.getComputedStyle(el);
+      if (style.display === "none") continue;
+
+      // Draw background color if non-transparent
+      const bg = style.backgroundColor;
+      if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") {
+        q.fillStyle = bg;
+        const radius = parseFloat(style.borderRadius) || 0;
+        if (radius > 0) {
+          q.beginPath();
+          q.roundRect(elX, elY, elW, elH, radius);
+          q.fill();
+        } else {
+          q.fillRect(elX, elY, elW, elH);
+        }
+      }
+
+      // Draw borders
+      const btW = parseFloat(style.borderTopWidth) || 0;
+      const bbW = parseFloat(style.borderBottomWidth) || 0;
+      const blW = parseFloat(style.borderLeftWidth) || 0;
+      const brW = parseFloat(style.borderRightWidth) || 0;
+
+      if (bbW > 0 && style.borderBottomStyle !== "none") {
+        q.strokeStyle = style.borderBottomColor || "#000";
+        q.lineWidth = bbW;
+        q.beginPath();
+        q.moveTo(elX, elY + elH - bbW / 2);
+        q.lineTo(elX + elW, elY + elH - bbW / 2);
+        q.stroke();
+      }
+      if (btW > 0 && style.borderTopStyle !== "none") {
+        q.strokeStyle = style.borderTopColor || "#000";
+        q.lineWidth = btW;
+        q.beginPath();
+        q.moveTo(elX, elY + btW / 2);
+        q.lineTo(elX + elW, elY + btW / 2);
+        q.stroke();
+      }
+      if (blW > 0 && style.borderLeftStyle !== "none") {
+        q.strokeStyle = style.borderLeftColor || "#000";
+        q.lineWidth = blW;
+        q.beginPath();
+        q.moveTo(elX + blW / 2, elY);
+        q.lineTo(elX + blW / 2, elY + elH);
+        q.stroke();
+      }
+      if (brW > 0 && style.borderRightStyle !== "none") {
+        q.strokeStyle = style.borderRightColor || "#000";
+        q.lineWidth = brW;
+        q.beginPath();
+        q.moveTo(elX + elW - brW / 2, elY);
+        q.lineTo(elX + elW - brW / 2, elY + elH);
+        q.stroke();
+      }
+
+      // If it's a list item, draw bullet
+      if (el.tagName === "LI") {
+        q.fillStyle = style.color || "#000";
+        q.beginPath();
+        const bulletRadius = 2.5;
+        const bulletX = elX - 8;
+        const bulletY = elY + elH / 2;
+        q.arc(bulletX, bulletY, bulletRadius, 0, Math.PI * 2);
+        q.fill();
+      }
+
+      // Draw word text spans
+      if (el.dataset.drawvaWord === "true") {
+        const text = el.textContent || "";
+        if (text) {
+          const weight = style.fontWeight || "400";
+          const size = style.fontSize || "14px";
+          const family = style.fontFamily || "system-ui, sans-serif";
+          q.font = `${weight} ${size} ${family}`;
+          q.fillStyle = style.color || "#000";
+          q.textBaseline = "middle";
+          q.fillText(text, elX, elY + elH / 2);
+        }
+      }
+    }
+    q.restore();
+  } finally {
+    frame.remove();
+  }
+}
+
+/**
+ * Wraps words into spans so we can measure each word's exact wrapped position.
+ */
+function wrapTextNodes(parent: Node): void {
+  const textNodes: Text[] = [];
+  const walk = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
+  let n: Text | null;
+  while ((n = walk.nextNode() as Text | null)) {
+    if (n.parentElement?.tagName === "SCRIPT" || n.parentElement?.tagName === "STYLE") continue;
+    if (n.textContent?.trim()) textNodes.push(n);
+  }
+
+  for (const node of textNodes) {
+    const text = node.textContent || "";
+    const parentEl = node.parentElement;
+    if (!parentEl) continue;
+
+    const frag = document.createDocumentFragment();
+    const parts = text.split(/(\s+)/);
+    for (const part of parts) {
+      if (!part) continue;
+      if (/^\s+$/.test(part)) {
+        frag.appendChild(document.createTextNode(part));
+      } else {
+        const span = document.createElement("span");
+        span.dataset.drawvaWord = "true";
+        span.style.display = "inline";
+        span.textContent = part;
+        frag.appendChild(span);
+      }
+    }
+    parentEl.replaceChild(frag, node);
+  }
+}
+
+async function drawWidgets(
+  wm: WidgetManager | WidgetItem[] | null | undefined,
+  q: CanvasRenderingContext2D,
+  rect: Rect
+): Promise<void> {
+  if (!wm) return;
+  const items = Array.isArray(wm) ? wm : wm.all();
+  for (const w of items) {
+    if (
+      w.x + w.w < rect.x ||
+      w.x > rect.x + rect.w ||
+      w.y + w.h < rect.y ||
+      w.y > rect.y + rect.h
+    ) {
+      continue;
+    }
+    await renderWidgetToContext(w, q);
+  }
+}
+
+function drawObjects(
+  om: ObjectManager | ObjectItem[] | null | undefined,
+  q: CanvasRenderingContext2D,
+  rect: Rect
+): void {
+  if (!om) return;
+  const items = Array.isArray(om) ? om : om.all();
+  for (const o of items) {
+    if (
+      o.x + o.w < rect.x ||
+      o.x > rect.x + rect.w ||
+      o.y + o.h < rect.y ||
+      o.y > rect.y + rect.h
+    ) {
+      continue;
+    }
+    if (o.image) {
+      q.drawImage(o.image, o.x, o.y, o.w, o.h);
+    }
+  }
+}
+
+/**
+ * Build the AI-visible image from the current viewport: white background, then
+ * ink tiles, widgets, and living objects packed in, scaled to ≤2048px, exported as a WebP data URL.
+ * `changedBox` highlights the latest user ink (drawn at full opacity) over a dimmed context.
+ */
+export async function buildAtlas(
   engine: CanvasEngine,
   viewport: Rect,
   changedBox: Rect | null,
+  widgets?: WidgetManager | WidgetItem[] | null,
+  objects?: ObjectManager | ObjectItem[] | null,
   includeWidgetTiles = false
-): AtlasResult {
+): Promise<AtlasResult> {
   const sourceRect = clip(viewport);
   const scale = Math.min(
     1,
@@ -43,13 +323,17 @@ export function buildAtlas(
   q.fillRect(0, 0, out.width, out.height);
   q.setTransform(scale, 0, 0, scale, -sourceRect.x * scale, -sourceRect.y * scale);
 
+  const hasChangedBox = !!changedBox && (changedBox.w > 0 || changedBox.h > 0);
+
   // Dim context for everything outside the changed box.
   q.save();
-  if (changedBox) q.globalAlpha = 0.42;
+  if (hasChangedBox) q.globalAlpha = 0.42;
   drawTiles(engine, q, sourceRect);
+  await drawWidgets(widgets, q, sourceRect);
+  drawObjects(objects, q, sourceRect);
   q.restore();
 
-  if (changedBox) {
+  if (hasChangedBox && changedBox) {
     const visible = clip(intersect(changedBox, sourceRect));
     if (visible.w > 0 && visible.h > 0) {
       q.save();
@@ -57,12 +341,31 @@ export function buildAtlas(
       q.rect(visible.x, visible.y, visible.w, visible.h);
       q.clip();
       drawTiles(engine, q, visible);
+      await drawWidgets(widgets, q, visible);
+      drawObjects(objects, q, visible);
       q.restore();
     }
   }
   q.setTransform(1, 0, 0, 1, 0, 0);
 
-  const data = out.toDataURL(includeWidgetTiles ? "image/png" : "image/webp", 0.9);
+  let data = "";
+  try {
+    data = out.toDataURL(includeWidgetTiles ? "image/png" : "image/webp", 0.9);
+  } catch (err) {
+    console.warn("[buildAtlas] toDataURL fallback:", err);
+    // Fallback: draw only tiles if anything unexpected tainted the canvas
+    const fallbackCanvas = document.createElement("canvas");
+    fallbackCanvas.width = outW;
+    fallbackCanvas.height = outH;
+    const fq = fallbackCanvas.getContext("2d")!;
+    fq.fillStyle = "#fff";
+    fq.fillRect(0, 0, outW, outH);
+    fq.setTransform(scale, 0, 0, scale, -sourceRect.x * scale, -sourceRect.y * scale);
+    drawTiles(engine, fq, sourceRect);
+    fq.setTransform(1, 0, 0, 1, 0, 0);
+    data = fallbackCanvas.toDataURL("image/webp", 0.9);
+  }
+
   return {
     atlasImage: data,
     imageSize: { w: outW, h: outH },
@@ -110,7 +413,12 @@ function intersect(a: Rect, b: Rect): Rect {
  * Create a 2x magnified WebP image crop of the user's latest handwriting region
  * (changedBox) to assist the vision model with character-level OCR & math recognition.
  */
-export function buildFocusInset(engine: CanvasEngine, changedBox: Rect | null): string | undefined {
+export async function buildFocusInset(
+  engine: CanvasEngine,
+  changedBox: Rect | null,
+  widgets?: WidgetManager | WidgetItem[] | null,
+  objects?: ObjectManager | ObjectItem[] | null
+): Promise<string | undefined> {
   if (!changedBox || changedBox.w <= 0 || changedBox.h <= 0) return undefined;
   if (changedBox.w > 600 || changedBox.h > 600) return undefined;
 
@@ -133,7 +441,16 @@ export function buildFocusInset(engine: CanvasEngine, changedBox: Rect | null): 
   q.fillRect(0, 0, out.width, out.height);
   q.setTransform(scale, 0, 0, scale, -box.x * scale, -box.y * scale);
   drawTiles(engine, q, box);
+  await drawWidgets(widgets, q, box);
+  drawObjects(objects, q, box);
   q.setTransform(1, 0, 0, 1, 0, 0);
 
-  return out.toDataURL("image/webp", 0.95);
+  try {
+    return out.toDataURL("image/webp", 0.95);
+  } catch (err) {
+    console.warn("[buildFocusInset] toDataURL failed:", err);
+    return undefined;
+  }
 }
+
+
