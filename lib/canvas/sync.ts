@@ -237,39 +237,57 @@ export class SyncManager {
     });
   }
 
+  private cleanPacket(packet: SyncPacket): SyncPacket {
+    if (packet.type === "SYNC_OBJECT_ADD" && packet.object.image) {
+      const { image, ...rest } = packet.object;
+      void image;
+      return { ...packet, object: rest as ObjectItem };
+    }
+    return packet;
+  }
+
   private handlePacket(senderId: string, packet: SyncPacket): void {
+    const safePacket = this.cleanPacket(packet);
+    for (const [id, conn] of this.connections.entries()) {
+      if (id !== senderId && conn.open) {
+        try {
+          conn.send(safePacket);
+        } catch {}
+      }
+    }
+
     this.isApplyingRemote = true;
     try {
-      switch (packet.type) {
+      switch (safePacket.type) {
         case "SYNC_INIT_STATE":
-          this.handlers.onInitState?.(packet.snapshot);
+          this.handlers.onInitState?.(safePacket.snapshot);
           break;
         case "SYNC_STROKE_SEGMENT":
-          this.handlers.onRemoteStroke?.(packet);
+          this.handlers.onRemoteStroke?.(safePacket);
           break;
         case "SYNC_OBJECT_ADD":
-          this.handlers.onRemoteObjectAdd?.(packet.object);
+          this.handlers.onRemoteObjectAdd?.(safePacket.object);
           break;
         case "SYNC_OBJECT_MOVE":
-          this.handlers.onRemoteObjectMove?.(packet.id, packet.x, packet.y);
+          this.handlers.onRemoteObjectMove?.(safePacket.id, safePacket.x, safePacket.y);
           break;
         case "SYNC_OBJECT_RESIZE":
-          this.handlers.onRemoteObjectResize?.(packet.id, packet.w, packet.h);
+          this.handlers.onRemoteObjectResize?.(safePacket.id, safePacket.w, safePacket.h);
           break;
         case "SYNC_OBJECT_REMOVE":
-          this.handlers.onRemoteObjectRemove?.(packet.id);
+          this.handlers.onRemoteObjectRemove?.(safePacket.id);
           break;
         case "SYNC_OBJECT_MERGE":
-          this.handlers.onRemoteObjectMerge?.(packet.id);
+          this.handlers.onRemoteObjectMerge?.(safePacket.id);
           break;
         case "SYNC_WIDGET_ADD":
-          this.handlers.onRemoteWidgetAdd?.(packet.widget);
+          this.handlers.onRemoteWidgetAdd?.(safePacket.widget);
           break;
         case "SYNC_WIDGET_MOVE":
-          this.handlers.onRemoteWidgetMove?.(packet.id, packet.x, packet.y, packet.w, packet.h);
+          this.handlers.onRemoteWidgetMove?.(safePacket.id, safePacket.x, safePacket.y, safePacket.w, safePacket.h);
           break;
         case "SYNC_WIDGET_REMOVE":
-          this.handlers.onRemoteWidgetRemove?.(packet.id);
+          this.handlers.onRemoteWidgetRemove?.(safePacket.id);
           break;
         case "SYNC_CLEAR":
           this.handlers.onRemoteClear?.();
@@ -277,11 +295,11 @@ export class SyncManager {
         case "SYNC_CURSOR":
           this.remoteCursors.set(senderId, {
             peerId: senderId,
-            name: packet.name,
-            color: packet.color,
-            x: packet.x,
-            y: packet.y,
-            mode: packet.mode,
+            name: safePacket.name,
+            color: safePacket.color,
+            x: safePacket.x,
+            y: safePacket.y,
+            mode: safePacket.mode,
             timestamp: Date.now(),
           });
           break;
@@ -293,10 +311,11 @@ export class SyncManager {
 
   broadcast(packet: SyncPacket): void {
     if (this.isApplyingRemote || this.connections.size === 0) return;
+    const safePacket = this.cleanPacket(packet);
     for (const conn of this.connections.values()) {
       if (conn.open) {
         try {
-          conn.send(packet);
+          conn.send(safePacket);
         } catch {
           // ignore closed connection errors
         }

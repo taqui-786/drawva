@@ -10,6 +10,40 @@ export interface TextStyle {
 
 const FONT_FAMILY = "ui-rounded, system-ui, sans-serif";
 
+/**
+ * Split text into paragraphs by explicit newlines (\n), then soft-wrap long
+ * paragraphs at spaces to fit within maxWidth while preserving all explicit line breaks.
+ */
+export function layoutTextLines(
+  text: string,
+  ctx: CanvasRenderingContext2D,
+  maxWidth: number
+): string[] {
+  const paragraphs = text.split(/\r?\n/);
+  const lines: string[] = [];
+
+  for (const paragraph of paragraphs) {
+    if (!paragraph.trim()) {
+      lines.push("");
+      continue;
+    }
+    const words = paragraph.split(/[ \t]+/);
+    let cur = "";
+    for (const w of words) {
+      const trial = cur ? `${cur} ${w}` : w;
+      if (ctx.measureText(trial).width > maxWidth && cur) {
+        lines.push(cur);
+        cur = w;
+      } else {
+        cur = trial;
+      }
+    }
+    if (cur) lines.push(cur);
+  }
+
+  return lines;
+}
+
 /** Lay out multi-line text and paint it onto a standalone canvas (no tiles).
  * Returns the bitmap plus its logical world size. Penecho's logicalWidth()/
  * logicalHeight() equivalent — used to build living text attachments.
@@ -24,27 +58,20 @@ export function renderTextBlock(
   const ctx = off.getContext("2d")!;
   ctx.font = `${fontSize}px ${FONT_FAMILY}`;
 
-  const words = text.split(/\s+/).filter(Boolean);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    const trial = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(trial).width > maxWidth && cur) {
-      lines.push(cur);
-      cur = w;
-    } else cur = trial;
-  }
-  if (cur) lines.push(cur);
+  const lines = layoutTextLines(text, ctx, maxWidth);
   const lineHeight = fontSize * 1.35;
-  const w = Math.max(1, Math.ceil(Math.max(...lines.map((l) => ctx.measureText(l).width))));
-  const h = Math.max(1, Math.ceil(lines.length * lineHeight));
+  const lineWidths = lines.map((l) => (l ? ctx.measureText(l).width : 0));
+  const w = Math.max(1, Math.ceil(Math.max(0, ...lineWidths)));
+  const h = Math.max(1, Math.ceil(Math.max(1, lines.length) * lineHeight));
 
   off.width = w;
   off.height = h;
   ctx.font = `${fontSize}px ${FONT_FAMILY}`;
   ctx.fillStyle = color;
   ctx.textBaseline = "top";
-  lines.forEach((line, i) => ctx.fillText(line, 0, i * lineHeight));
+  lines.forEach((line, i) => {
+    if (line) ctx.fillText(line, 0, i * lineHeight);
+  });
   return { canvas: off, w, h };
 }
 
@@ -65,27 +92,19 @@ export function rasterizeText(
   const ctx = off.getContext("2d")!;
   ctx.font = `${fontSize}px ${FONT_FAMILY}`;
 
-  const lines: string[] = [];
-  const words = text.split(/\s+/);
-  let cur = "";
-  for (const w of words) {
-    const trial = cur ? `${cur} ${w}` : w;
-    if (ctx.measureText(trial).width > maxWidth && cur) {
-      lines.push(cur);
-      cur = w;
-    } else cur = trial;
-  }
-  if (cur) lines.push(cur);
-
+  const lines = layoutTextLines(text, ctx, maxWidth);
   const lineHeight = fontSize * 1.35;
-  const w = Math.ceil(maxWidth);
-  const h = Math.ceil(lines.length * lineHeight);
-  off.width = Math.min(w, TILE);
-  off.height = Math.min(h, TILE);
+  const lineWidths = lines.map((l) => (l ? ctx.measureText(l).width : 0));
+  const w = Math.max(1, Math.ceil(Math.max(maxWidth, ...lineWidths)));
+  const h = Math.max(1, Math.ceil(lines.length * lineHeight));
+  off.width = Math.min(w, TILE * 4);
+  off.height = Math.min(h, TILE * 4);
   ctx.font = `${fontSize}px ${FONT_FAMILY}`;
   ctx.fillStyle = color;
   ctx.textBaseline = "top";
-  lines.forEach((line, i) => ctx.fillText(line, 0, i * lineHeight));
+  lines.forEach((line, i) => {
+    if (line) ctx.fillText(line, 0, i * lineHeight);
+  });
 
   const pad = 2;
   const x0 = Math.max(0, Math.floor(anchor.x / TILE));

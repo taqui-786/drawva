@@ -130,7 +130,7 @@ export function CanvasHeader({
   onInsertFormula,
   onInsertPlot,
   aiStatus,
-  aiRun,
+  aiRun: _aiRun,
   autoOn,
   onAutoChange,
   onAskAi,
@@ -472,61 +472,31 @@ export function CanvasHeader({
         <AnimatePresence mode="wait">
           {aiStatus === "thinking" ? (
             <motion.div
-              key="sci-fi-loader"
+              key="bars-loader"
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ duration: 0.2, ease: "easeOut" }}
-              className="relative flex h-8 min-w-[200px] sm:min-w-[280px] max-w-xs items-center justify-between overflow-hidden rounded-full border border-primary/30 bg-muted/80 px-3.5 shadow-sm backdrop-blur-sm"
+              className="flex items-center"
             >
-              {/* System primary shimmering sweep beam */}
-              <motion.div
-                className="absolute inset-y-0 w-24 bg-gradient-to-r from-transparent via-primary/30 to-transparent"
-                animate={{ x: ["-100%", "260%"] }}
-                transition={{ repeat: Infinity, duration: 1.4, ease: "easeInOut", repeatType: "mirror" }}
-              />
-
-              {/* Left pulsing system primary status dot */}
-              <div className="relative z-10 flex items-center gap-1.5">
-                <motion.span
-                  className="size-2 rounded-full bg-primary shadow-[0_0_8px_var(--primary)]"
-                  animate={{ scale: [1, 1.4, 1], opacity: [0.6, 1, 0.6] }}
-                  transition={{ repeat: Infinity, duration: 1.1, ease: "easeInOut" }}
-                />
-                <motion.span
-                  className="size-1.5 rounded-full bg-primary/60"
-                  animate={{ scale: [1.3, 1, 1.3], opacity: [0.8, 0.4, 0.8] }}
-                  transition={{ repeat: Infinity, duration: 1.1, ease: "easeInOut", delay: 0.2 }}
-                />
-              </div>
-
-              {/* Center system equalizer bars */}
-              <div className="relative z-10 flex items-center gap-1 px-2">
-                {[0.4, 0.85, 0.35, 1, 0.5, 0.75, 0.4].map((hRatio, i) => (
-                  <motion.span
-                    key={i}
-                    className="w-1 rounded-full bg-primary"
-                    animate={{ scaleY: [0.3, 1, 0.3], opacity: [0.5, 1, 0.5] }}
-                    transition={{
-                      repeat: Infinity,
-                      duration: 0.9,
-                      ease: "easeInOut",
-                      delay: i * 0.1,
+              <style>{`
+                @keyframes bars-fill {
+                  0% { opacity: 0.2; }
+                  50% { opacity: 1; }
+                  100% { opacity: 0.2; }
+                }
+              `}</style>
+              <div className="flex gap-1 rounded-sm border border-primary/40 p-1 bg-background/90 shadow-xs">
+                {Array.from({ length: 12 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="h-4 w-2 rounded-[1px] bg-primary"
+                    style={{
+                      animation: "bars-fill 1s ease-in-out infinite",
+                      animationDelay: `${index * 0.08}s`,
                     }}
-                    style={{ height: `${14 * hRatio}px` }}
                   />
                 ))}
-              </div>
-
-              {/* Right rotating sparkles icon in primary brand color */}
-              <div className="relative z-10 flex items-center">
-                <motion.div
-                  animate={{ rotate: 360 }}
-                  transition={{ repeat: Infinity, duration: 3.5, ease: "linear" }}
-                  className="text-primary drop-shadow-[0_0_6px_var(--primary)]"
-                >
-                  <HugeiconsIcon icon={SparklesIcon} className="size-4" />
-                </motion.div>
               </div>
             </motion.div>
           ) : (
@@ -540,7 +510,7 @@ export function CanvasHeader({
               {aiStatus === "done" && (
                 <Badge variant="secondary" className="gap-1 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/30">
                   <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  {aiRun.doneProvider ? `Done · ${aiRun.doneProvider}` : "Done"}
+                  Done
                 </Badge>
               )}
 

@@ -140,6 +140,8 @@ export interface CommandValidationContext {
   plugins: Set<string>;
   visibleRect?: { x: number; y: number; w: number; h: number };
   changedBox?: { x: number; y: number; w: number; h: number };
+  /** In-place widget refinement — skip below-anchoring, keep the AI's position. */
+  keepPosition?: boolean;
 }
 
 const isFiniteNum = n as (v: unknown, min?: number, max?: number) => boolean;
@@ -172,10 +174,21 @@ function matchedTextFontSize(
   return characters < 10 ? size : Math.max(24, size * 0.5);
 }
 
+function clampNum(v: number, lo: number, hi: number): number {
+  return Math.round(Math.max(lo, Math.min(hi, v)));
+}
+
+/**
+ * Smart widget/diagram geometry: size tracks the footprint of the user's drawn
+ * ink (not the viewport), and the box is anchored STRICTLY BELOW the drawing —
+ * never to its left, right, or above — with a gap large enough that the iframe
+ * never touches, overlaps, or collapses into the drawn strokes.
+ */
 function fitWidgetGeometry(
   cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown },
   visibleRect?: { x: number; y: number; w: number; h: number },
-  changedBox?: { x: number; y: number; w: number; h: number }
+  changedBox?: { x: number; y: number; w: number; h: number },
+  reposition = true
 ): { x: number; y: number; w: number; h: number } | null {
   if (
     !isFiniteNum(cmd.x) ||
@@ -185,47 +198,58 @@ function fitWidgetGeometry(
   ) {
     return null;
   }
-  const viewportW = visibleRect?.w ?? 2000;
-  const viewportH = visibleRect?.h ?? 1200;
-  const target = {
-    w: Math.max(300, Math.round(viewportW / 2)),
-    h: Math.max(200, Math.round(viewportH / 2)),
-  };
+  const viewportW = Math.max(visibleRect?.w ?? 2000, 1);
+  const viewportH = Math.max(visibleRect?.h ?? 1200, 1);
+
   let x = Math.round(cmd.x as number);
   let y = Math.round(cmd.y as number);
-  let w = Math.round(cmd.w as number);
-  let h = Math.round(cmd.h as number);
+  const rawW = Math.round(cmd.w as number);
+  const rawH = Math.round(cmd.h as number);
 
-  // Reasonable bounds for widgets/diagrams (allows fit-content wrapping around rendered diagrams)
-  const minW = 280;
-  const minH = 160;
-  if (w < minW) w = minW;
-  if (h < minH) h = minH;
+  // Readable floors + viewport-capped ceilings for widgets/diagrams.
+  const minW = 400;
+  const minH = 260;
+  const maxW = Math.max(minW, Math.min(1600, Math.round(viewportW * 0.85)));
+  const maxH = Math.max(minH, Math.min(1000, Math.round(viewportH * 0.85)));
 
-  // Spatial placement math: Anchor directly BELOW user prompt/drawing (left-aligned)
-  if (changedBox && changedBox.h > 0) {
-    if (y < changedBox.y + changedBox.h + 10) {
-      y = Math.round(changedBox.y + changedBox.h + 24);
+  let w = rawW;
+  let h = rawH;
+
+  // Determine smart width and height: maintain a healthy, readable aspect ratio (~1.3:1 to ~1.7:1).
+  if (changedBox && changedBox.w > 0 && changedBox.h > 0) {
+    if (rawW >= 360 && rawH >= 240 && rawW / rawH >= 0.9 && rawW / rawH <= 2.2) {
+      w = clampNum(rawW, minW, maxW);
+      h = clampNum(rawH, minH, maxH);
+    } else {
+      const footprintW = Math.max(changedBox.w * 1.15, 540);
+      w = clampNum(footprintW, minW, maxW);
+      h = clampNum(Math.round(w / 1.48), minH, maxH);
     }
-    // If changedBox is just the last stroke (far right), left-align under the prompt line start
-    const promptStartX =
-      visibleRect && changedBox.x > visibleRect.x + 200
-        ? Math.max(visibleRect.x + 40, changedBox.x - Math.min(900, changedBox.x - visibleRect.x))
-        : changedBox.x;
-    x = Math.round(promptStartX);
+  } else {
+    w = clampNum(rawW, minW, maxW);
+    h = clampNum(rawH, minH, maxH);
   }
 
-  if (w > 10000 || h > 10000 || w * h > 40_000_000) {
-    const s = Math.min(1, target.w / w, target.h / h, 10000 / w, 10000 / h, Math.sqrt(40_000_000 / (w * h)));
-    w = Math.floor(w * s);
-    h = Math.floor(h * s);
+  // Placement: anchor STRICTLY BELOW the drawing footprint (tight 20px gap), centered horizontally under it.
+  if (reposition && changedBox && changedBox.w > 0 && changedBox.h > 0) {
+    const gap = 20;
+    y = Math.round(changedBox.y + changedBox.h + gap);
+
+    // Center horizontally directly under the drawing's bounding box.
+    const centerX = changedBox.x + changedBox.w / 2;
+    x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
+  } else if (changedBox && changedBox.w > 0 && changedBox.h > 0) {
+    // Enforce minimum vertical clearance even if reposition is false (e.g. widgetEdit)
+    const minY = Math.round(changedBox.y + changedBox.h + 20);
+    if (y < minY) {
+      y = minY;
+    }
   }
-  w = Math.max(300, Math.min(w, SIZE));
-  h = Math.max(200, Math.min(h, SIZE));
+
   x = Math.max(0, Math.min(SIZE - w, x));
   y = Math.max(0, Math.min(SIZE - h, y));
-  return w >= 300 && h >= 200 ? { x, y, w, h } : null;
-}  
+  return w >= minW && h >= minH ? { x, y, w, h } : null;
+}
 
 /**
  * Validate + normalize a single raw command object. Returns null (with a
@@ -306,7 +330,7 @@ export function validateCommand(
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim() : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim() : "";
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition);
       if (
         ctx.widgetSlots <= 0 ||
         typeof c.title !== "string" ||
@@ -346,7 +370,7 @@ export function validateCommand(
       return out;
     }
     case "diagram_source": {
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition);
       const sourceFormat = canonicalDiagramFormat(c.sourceFormat);
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       if (

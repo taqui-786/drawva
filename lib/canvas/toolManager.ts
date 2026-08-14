@@ -39,6 +39,8 @@ export interface ShellPicker {
   focus(node: PickedNode | null): void;
   /** Translate a shell by a world-space delta during a drag. */
   translate(node: PickedNode, dx: number, dy: number, world: Point): void;
+  /** Called when a drag ends to broadcast unthrottled final position. */
+  endTranslate?(node: PickedNode): void;
 }
 
 /**
@@ -206,7 +208,11 @@ export class ToolManager {
       result = false;
     } else if (this.nodeDrag && this.nodeDrag.pointerId === pointerId) {
       const moved = this.nodeDrag.moved;
+      const node = this.nodeDrag.node;
       this.nodeDrag = null;
+      if (moved) {
+        this.picker?.endTranslate?.(node);
+      }
       result = moved;
     } else if (this.selection.isMoving) {
       result = this.selection.endMove();

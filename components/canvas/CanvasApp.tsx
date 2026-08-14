@@ -27,6 +27,7 @@ import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { buildAtlas, buildFocusInset } from "@/lib/canvas/atlas";
+import { unionRect } from "@/lib/canvas/engine";
 import { buildScene } from "@/lib/canvas/scene";
 import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
 import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject } from "@/lib/canvas/persistence";
@@ -139,11 +140,24 @@ export function CanvasApp() {
   });
   const [connectOpen, setConnectOpen] = useState(false);
 
-  // ---- living object helpers (#3): create + merge-back-to-ink ----
-  function addObject(item: ObjectItem): void {
-    objects.current?.add(item);
-    syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: item });
+  // ---- P2P real-time move/resize sync ----
+  // Drag gestures fire at pointer rate; throttle to ~25 packets/s per item.
+  const lastMoveSyncRef = useRef<Record<string, number>>({});
+  function broadcastMove(kind: "widget" | "object", packet: Extract<import("@/lib/canvas/sync").SyncPacket, { id: string }>): void {
+    const key = `${kind}:${packet.id}`;
+    const now = performance.now();
+    if (now - (lastMoveSyncRef.current[key] ?? 0) < 40) return;
+    lastMoveSyncRef.current[key] = now;
+    syncManager.current?.broadcast(packet);
   }
+
+  // ---- living object helpers (#3): create + merge-back-to-ink ----
+  const addObject = useCallback((item: ObjectItem): void => {
+    objects.current?.add(item);
+    const { image, ...cleanObject } = item;
+    void image;
+    syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: cleanObject });
+  }, []);
 
   function bakePlotObject(cmd: PlotFunctionCommand): HTMLCanvasElement {
     return plotCommand(cmd);
@@ -343,7 +357,22 @@ export function CanvasApp() {
 
     activeEditTargetRef.current = widgetEditTarget?.id ?? null;
 
-    const focusInset = buildFocusInset(engineAtCall, box);
+    let effectiveBox = { ...box };
+    const boxMargin = 20;
+    if (objects.current && box.w > 0 && box.h > 0) {
+      for (const o of objects.current.all()) {
+        const isNear =
+          box.x < o.x + o.w + boxMargin &&
+          box.x + box.w > o.x - boxMargin &&
+          box.y < o.y + o.h + boxMargin &&
+          box.y + box.h > o.y - boxMargin;
+        if (isNear) {
+          effectiveBox = unionRect(effectiveBox, { x: o.x, y: o.y, w: o.w, h: o.h });
+        }
+      }
+    }
+
+    const focusInset = buildFocusInset(engineAtCall, effectiveBox);
 
     const payload: AiRequest = {
       requestId: `req-${requestId}`,
@@ -352,7 +381,7 @@ export function CanvasApp() {
       visibleRect: viewport,
       captureRect: viewport,
       sourceRect: atlas.sourceRect,
-      changedBox: box,
+      changedBox: effectiveBox,
       imageSize: atlas.imageSize,
       userPrompt,
       scene: JSON.stringify(scene),
@@ -567,6 +596,8 @@ export function CanvasApp() {
           const dy = (e.clientY - g.last.y) / engine.camera.scale;
           wm.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
+          const item = wm.get(id);
+          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h });
         },
         onDragEnd: (id) => {
           widgetDrag.current = null;
@@ -585,6 +616,8 @@ export function CanvasApp() {
           if (!item) return;
           wm.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
           g.last = { x: e.clientX, y: e.clientY };
+          const resized = wm.get(id);
+          if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h });
         },
         onResizeEnd: (id) => {
           widgetResize.current = null;
@@ -645,6 +678,8 @@ export function CanvasApp() {
           const dy = (e.clientY - g.last.y) / engine.camera.scale;
           om.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
+          const item = om.get(id);
+          if (item) broadcastMove("object", { type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
         },
         onDragEnd: (id) => {
           objectDrag.current = null;
@@ -663,6 +698,8 @@ export function CanvasApp() {
           if (!item) return;
           om.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
           g.last = { x: e.clientX, y: e.clientY };
+          const resized = om.get(id);
+          if (resized) broadcastMove("object", { type: "SYNC_OBJECT_RESIZE", id, w: resized.w, h: resized.h });
         },
         onResizeEnd: (id) => {
           objectResize.current = null;
@@ -712,9 +749,22 @@ export function CanvasApp() {
         if (node.kind === "widget") {
           history.current?.recordWidgets(); // first translate = before-capture
           wm.move(node.id, dx, dy);
+          const item = wm.get(node.id);
+          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h });
         } else {
           history.current?.recordObjects();
           om.move(node.id, dx, dy);
+          const item = om.get(node.id);
+          if (item) broadcastMove("object", { type: "SYNC_OBJECT_MOVE", id: node.id, x: item.x, y: item.y });
+        }
+      },
+      endTranslate: (node) => {
+        if (node.kind === "widget") {
+          const item = wm.get(node.id);
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h });
+        } else {
+          const item = om.get(node.id);
+          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id: node.id, x: item.x, y: item.y });
         }
       },
     });
@@ -1108,13 +1158,33 @@ export function CanvasApp() {
 
   const commitText = useCallback(() => {
     if (engine && textAnchor && textValue.trim()) {
-      rasterizeText(engine, textValue, textAnchor, { color, fontSize: Math.max(8, pen * 6), maxWidth: 360 });
+      // Create a LIVING text object (not baked ink) so P2P peers receive it via
+      // SYNC_OBJECT_ADD and can re-render + move it — same path as AI write_text.
+      const fontSize = Math.max(8, pen * 6);
+      const maxWidth = 600;
+      const block = renderTextBlock(textValue, color, fontSize, maxWidth);
+      addObject({
+        id: `text-${Date.now()}`,
+        kind: "text",
+        x: textAnchor.x,
+        y: textAnchor.y,
+        w: block.w,
+        h: block.h,
+        contentW: block.w,
+        contentH: block.h,
+        source: textValue,
+        color,
+        fontSize,
+        maxWidth,
+        status: "accepted",
+        image: block.canvas,
+      });
       afterBoardChangeRef.current(); // text commit is an undoable change
     }
     setTextOpen(false);
     setTextValue("");
     setTextAnchor(null);
-  }, [engine, textAnchor, textValue, color, pen]);
+  }, [engine, textAnchor, textValue, color, pen, addObject]);
 
   // ---- keyboard shortcuts ----
   useEffect(() => {
@@ -1451,7 +1521,7 @@ if (e.shiftKey && k === "h") setMode("highlighter");
               }
             }}
             placeholder="Type text…"
-            className="absolute z-30 w-44 resize-none"
+            className="absolute z-30 min-w-56 max-w-2xl resize border-2 border-primary/50 bg-background/95 shadow-md"
             style={{
               left: anchorCss.x,
               top: anchorCss.y,
