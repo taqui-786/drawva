@@ -651,12 +651,12 @@ export function CanvasHeader({
                     onValueChange={onModelChange}
                     items={models.map((m) => ({ label: m, value: m }))}
                   >
-                    <SelectTrigger size="sm" className="max-w-44 text-xs">
+                    <SelectTrigger size="sm" className="w-auto min-w-36 max-w-64 font-mono text-xs">
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent align="end">
+                    <SelectContent align="end" alignItemWithTrigger={false} className="w-auto min-w-[280px] max-w-lg font-mono text-xs">
                       {models.map((m) => (
-                        <SelectItem key={m} value={m}>
+                        <SelectItem key={m} value={m} className="font-mono text-xs whitespace-nowrap">
                           {m}
                         </SelectItem>
                       ))}

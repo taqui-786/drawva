@@ -167,6 +167,13 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
+const MIN_WIDGET_WIDTH = 480;
+const MIN_WIDGET_HEIGHT = 240;
+const DEFAULT_WIDGET_WIDTH = 620;
+const DEFAULT_WIDGET_HEIGHT = 420;
+const MAX_WIDGET_WIDTH = 2800;
+const MAX_WIDGET_HEIGHT = 4500;
+
 function fitWidgetGeometry(
   cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown },
   visibleRect?: { x: number; y: number; w: number; h: number },
@@ -186,32 +193,23 @@ function fitWidgetGeometry(
 
   let x = Math.round(cmd.x as number);
   let y = Math.round(cmd.y as number);
-  const rawW = Math.round(cmd.w as number);
-  const rawH = Math.round(cmd.h as number);
+  let rawW = Math.round(cmd.w as number);
+  let rawH = Math.round(cmd.h as number);
 
-  const minW = 320;
-  const minH = 200;
-  const maxW = Math.max(minW, Math.min(1800, Math.round(viewportW * 0.9)));
-  const maxH = Math.max(minH, Math.min(1400, Math.round(viewportH * 0.9)));
-
-  let w = rawW;
-  let h = rawH;
-
-  if (rawW >= 240 && rawH >= 180 && rawW / rawH >= 0.35 && rawW / rawH <= 3.2) {
-    w = clampNum(rawW, minW, maxW);
-    h = clampNum(rawH, minH, maxH);
-  } else if (changedBox && changedBox.w > 0 && changedBox.h > 0 && changedBox.w < 10000) {
-    const footprintW = Math.max(changedBox.w * 1.1, 480);
-    w = clampNum(footprintW, minW, maxW);
-    if (changedBox.h > changedBox.w * 1.1) {
-      h = clampNum(Math.round(w * 1.45), minH, maxH);
-    } else {
-      h = clampNum(Math.round(w / 1.4), minH, maxH);
-    }
-  } else {
-    w = clampNum(rawW, minW, maxW);
-    h = clampNum(rawH, minH, maxH);
+  if (rawW <= 0 || rawH <= 0) {
+    rawW = DEFAULT_WIDGET_WIDTH;
+    rawH = DEFAULT_WIDGET_HEIGHT;
+  } else if (rawW < MIN_WIDGET_WIDTH || rawH < MIN_WIDGET_HEIGHT) {
+    const scale = Math.max(MIN_WIDGET_WIDTH / Math.max(1, rawW), MIN_WIDGET_HEIGHT / Math.max(1, rawH));
+    rawW = Math.ceil(rawW * scale);
+    rawH = Math.ceil(rawH * scale);
   }
+
+  const maxW = Math.min(MAX_WIDGET_WIDTH, Math.max(1800, Math.round(viewportW * 0.95)));
+  const maxH = Math.min(MAX_WIDGET_HEIGHT, Math.max(1400, Math.round(viewportH * 0.95)));
+
+  const w = clampNum(rawW, MIN_WIDGET_WIDTH, maxW);
+  const h = clampNum(rawH, MIN_WIDGET_HEIGHT, maxH);
 
   if (reposition && changedBox && changedBox.w > 0 && changedBox.h > 0 && changedBox.w < SIZE * 0.9) {
     const gap = 24;
@@ -222,7 +220,7 @@ function fitWidgetGeometry(
 
   x = Math.max(0, Math.min(SIZE - w, x));
   y = Math.max(0, Math.min(SIZE - h, y));
-  return w >= minW && h >= minH ? { x, y, w, h } : null;
+  return { x, y, w, h };
 }
 
 export function validateCommand(

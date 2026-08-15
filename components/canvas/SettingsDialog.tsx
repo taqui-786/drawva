@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -20,7 +20,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Loading02Icon,
@@ -29,6 +36,10 @@ import {
   Add01Icon,
   EyeIcon,
   EyeOffIcon,
+  FlashIcon,
+  CloudServerIcon,
+  Analytics01Icon,
+  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import {
   getProviderConfig,
@@ -51,38 +62,140 @@ interface SettingsDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
+const PROVIDER_METADATA: Record<
+  ProviderType,
+  {
+    tagline: string;
+    apiKeyUrl?: string;
+    keyPlaceholder: string;
+  }
+> = {
+  openai: {
+    tagline: "GPT-4o & GPT-4o-mini",
+    apiKeyUrl: "https://platform.openai.com/api-keys",
+    keyPlaceholder: "sk-proj-...",
+  },
+  anthropic: {
+    tagline: "Claude 3.7 & 3.5 Sonnet",
+    apiKeyUrl: "https://console.anthropic.com/settings/keys",
+    keyPlaceholder: "sk-ant-...",
+  },
+  gemini: {
+    tagline: "Gemini 2.5 Flash & Pro",
+    apiKeyUrl: "https://aistudio.google.com/app/apikey",
+    keyPlaceholder: "AIzaSy...",
+  },
+  groq: {
+    tagline: "Llama 3.2 Vision Inference",
+    apiKeyUrl: "https://console.groq.com/keys",
+    keyPlaceholder: "gsk_...",
+  },
+  nvidia: {
+    tagline: "NVIDIA NIM Cloud Endpoints",
+    apiKeyUrl: "https://build.nvidia.com/",
+    keyPlaceholder: "nvapi-...",
+  },
+  custom: {
+    tagline: "Ollama, LM Studio, OpenRouter",
+    apiKeyUrl: "https://openrouter.ai/keys",
+    keyPlaceholder: "API key or local token...",
+  },
+};
+
+const LOCAL_PRESETS = [
+  {
+    name: "Ollama Local",
+    baseUrl: "http://localhost:11434/v1",
+    apiKey: "ollama",
+    models: [
+      { id: "llava", name: "LLaVA Vision" },
+      { id: "llama3.2-vision", name: "Llama 3.2 Vision" },
+    ],
+  },
+  {
+    name: "LM Studio",
+    baseUrl: "http://localhost:1234/v1",
+    apiKey: "lm-studio",
+    models: [{ id: "default", name: "Active LM Studio Model" }],
+  },
+  {
+    name: "OpenRouter Gateway",
+    baseUrl: "https://openrouter.ai/api/v1",
+    apiKey: "",
+    models: [
+      { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash" },
+      { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
+    ],
+  },
+];
+
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+  const [currentConfig, setCurrentConfig] = useState<ProviderConfig | null>(() => getProviderConfig());
+  const [activeModelName, setActiveModelName] = useState<string | null>(() => getActiveModel());
+
+  useEffect(() => {
+    const syncState = () => {
+      setCurrentConfig(getProviderConfig());
+      setActiveModelName(getActiveModel());
+    };
+    window.addEventListener("storage", syncState);
+    return () => window.removeEventListener("storage", syncState);
+  }, []);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[48rem] max-w-[calc(100%-2rem)] p-0 overflow-hidden">
-        <DialogHeader className="px-6 pt-6 pb-0">
-          <DialogTitle>AI Settings</DialogTitle>
+      <DialogContent className="sm:max-w-2xl">
+        <DialogHeader>
+          <div className="flex items-center justify-between">
+            <DialogTitle>AI Settings</DialogTitle>
+            {currentConfig?.apiKey ? (
+              <Badge variant="secondary" className="font-mono text-xs capitalize">
+                {currentConfig.type}: {activeModelName || "connected"}
+              </Badge>
+            ) : (
+              <Badge variant="outline" className="text-xs">
+                Not configured
+              </Badge>
+            )}
+          </div>
           <DialogDescription>
-            Configure your AI provider and model.
+            Configure your AI provider, model routing, and monitor token usage.
           </DialogDescription>
         </DialogHeader>
 
-        <Tabs defaultValue="provider" className="px-6 pb-6">
-          <TabsList className="w-full justify-start rounded-none border-b bg-transparent p-0 h-auto">
-            <TabsTrigger
-              value="provider"
-              className="rounded-none border-b-2 border-transparent px-4 py-2.5 text-muted-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none"
-            >
-              Provider
+        <Tabs defaultValue="provider" className="flex flex-col gap-4">
+          <TabsList className="grid w-full grid-cols-3">
+            <TabsTrigger value="provider" className="gap-2">
+              <HugeiconsIcon icon={FlashIcon} />
+              <span>Provider</span>
             </TabsTrigger>
-            <TabsTrigger
-              value="usage"
-              className="rounded-none border-b-2 border-transparent px-4 py-2.5 text-muted-foreground data-[state=active]:border-foreground data-[state=active]:text-foreground data-[state=active]:shadow-none"
-            >
-              Usage
+            <TabsTrigger value="models" className="gap-2">
+              <HugeiconsIcon icon={CloudServerIcon} />
+              <span>Models</span>
+            </TabsTrigger>
+            <TabsTrigger value="usage" className="gap-2">
+              <HugeiconsIcon icon={Analytics01Icon} />
+              <span>Usage</span>
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="provider" className="mt-4">
-            <ProviderTab />
+          <TabsContent value="provider" className="flex flex-col gap-4">
+            <ProviderTabContent
+              onConfigSaved={(cfg, model) => {
+                setCurrentConfig(cfg);
+                setActiveModelName(model);
+              }}
+            />
           </TabsContent>
-          <TabsContent value="usage" className="mt-4">
-            <UsageTab />
+
+          <TabsContent value="models" className="flex flex-col gap-4">
+            <ModelsTabContent
+              onModelChanged={(model) => setActiveModelName(model)}
+            />
+          </TabsContent>
+
+          <TabsContent value="usage" className="flex flex-col gap-4">
+            <UsageTabContent />
           </TabsContent>
         </Tabs>
       </DialogContent>
@@ -90,81 +203,37 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   );
 }
 
-function ProviderTab() {
+function ProviderTabContent({
+  onConfigSaved,
+}: {
+  onConfigSaved: (cfg: ProviderConfig, activeModel: string | null) => void;
+}) {
   const initial = getProviderConfig();
   const [providerType, setProviderType] = useState<ProviderType>(initial?.type || "openai");
   const [apiKey, setApiKey] = useState(initial?.apiKey || "");
   const [baseUrl, setBaseUrl] = useState(initial?.baseUrl || "");
   const [showApiKey, setShowApiKey] = useState(false);
-  const [customModels, setCustomModels] = useState<CustomModel[]>(initial?.customModels || []);
-  const [newModelId, setNewModelId] = useState("");
-  const [newModelName, setNewModelName] = useState("");
+  const [customModels] = useState<CustomModel[]>(initial?.customModels || []);
 
   const [verifying, setVerifying] = useState(false);
-  const [cachedModels, setModels] = useState<string[]>(() => getCachedModels());
-  const [activeModel, setActive] = useState<string | null>(() => getActiveModel());
+  const [verifiedCount, setVerifiedCount] = useState<number | null>(() => getCachedModels().length || null);
+  const meta = PROVIDER_METADATA[providerType];
 
   const handleSelectProvider = (type: ProviderType) => {
     setProviderType(type);
     const info = PROVIDER_INFOS[type];
     if (type !== "custom") {
       setBaseUrl(info.defaultBaseUrl || "");
-      if (info.defaultModels.length > 0) {
-        setModels(info.defaultModels);
-        if (!activeModel || !info.defaultModels.includes(activeModel)) {
-          setActive(info.defaultModels[0]);
-        }
-      }
-    } else if (customModels.length > 0) {
-      const ids = customModels.map((m) => m.id);
-      setModels(ids);
-      if (!activeModel || !ids.includes(activeModel)) {
-        setActive(ids[0]);
-      }
-    }
-  };
-
-  const handleAddCustomModel = () => {
-    if (!newModelId.trim()) {
-      toast.error("Enter a model ID.");
-      return;
-    }
-    const id = newModelId.trim();
-    const name = newModelName.trim() || id;
-    if (customModels.some((m) => m.id === id)) {
-      toast.error("Model already added.");
-      return;
-    }
-    const updated = [...customModels, { id, name }];
-    setCustomModels(updated);
-    setNewModelId("");
-    setNewModelName("");
-    if (providerType === "custom") {
-      const ids = updated.map((m) => m.id);
-      setModels(ids);
-      setActive(id);
-    }
-  };
-
-  const handleRemoveCustomModel = (id: string) => {
-    const updated = customModels.filter((m) => m.id !== id);
-    setCustomModels(updated);
-    if (providerType === "custom") {
-      const ids = updated.map((m) => m.id);
-      setModels(ids);
-      if (activeModel === id) {
-        setActive(ids[0] || null);
-      }
     }
   };
 
   const verifyAndSave = async () => {
     if (!apiKey.trim()) {
-      toast.error("Enter an API key.");
+      toast.error("Please enter an API key.");
       return;
     }
     if (providerType === "custom" && !baseUrl.trim() && customModels.length === 0) {
-      toast.error("Custom provider requires a base URL or models.");
+      toast.error("Custom provider requires a Base URL or at least one model ID.");
       return;
     }
 
@@ -188,7 +257,7 @@ function ProviderTab() {
       };
 
       if (!res.ok || !Array.isArray(data.models) || data.models.length === 0) {
-        toast.error(data.error || "No vision models available.");
+        toast.error(data.error || "No vision-capable models found at this endpoint.");
         return;
       }
 
@@ -201,134 +270,258 @@ function ProviderTab() {
 
       setProviderConfig(config);
       setCachedModels(data.models);
-      setModels(data.models);
+      setVerifiedCount(data.models.length);
 
       const currentActive = getActiveModel();
       const nextActive = currentActive && data.models.includes(currentActive) ? currentActive : data.models[0];
       if (nextActive) {
         setActiveModel(nextActive);
-        setActive(nextActive);
       }
 
+      onConfigSaved(config, nextActive);
+
       toast.success("Connected", {
-        description: `${data.models.length} models found.`,
+        description: `Found ${data.models.length} vision models.`,
       });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Verification failed.");
+      toast.error(err instanceof Error ? err.message : "Connection failed.");
     } finally {
       setVerifying(false);
     }
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {/* Provider Selection */}
       <div className="flex flex-col gap-2">
-        <Label className="text-xs text-muted-foreground">Provider</Label>
-        <div className="grid grid-cols-6 gap-2">
+        <Label>Provider</Label>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
           {(Object.keys(PROVIDER_INFOS) as ProviderType[]).map((type) => {
             const info = PROVIDER_INFOS[type];
             const isSelected = providerType === type;
+
             return (
-              <button
+              <Button
                 key={type}
                 type="button"
+                variant={isSelected ? "default" : "outline"}
+                className="h-auto flex-col items-start p-3 text-left"
                 onClick={() => handleSelectProvider(type)}
-                className={`flex flex-col items-center gap-1.5 p-3 rounded-lg border text-center transition-colors ${
-                  isSelected
-                    ? "border-primary bg-primary/5 text-primary"
-                    : "border-border hover:bg-muted/50 text-muted-foreground hover:text-foreground"
-                }`}
               >
-                <ProviderBadge type={type} />
-                <span className="text-xs font-medium truncate w-full">{info.name}</span>
-              </button>
+                <div className="flex items-center justify-between w-full">
+                  <span className="font-semibold text-sm">{info.name}</span>
+                  {isSelected && <HugeiconsIcon icon={Tick02Icon} />}
+                </div>
+                <span
+                  className={`text-xs ${
+                    isSelected ? "text-primary-foreground/80" : "text-muted-foreground"
+                  }`}
+                >
+                  {PROVIDER_METADATA[type].tagline}
+                </span>
+              </Button>
             );
           })}
         </div>
       </div>
 
-      <Separator />
-
-      {/* Credentials + Model Selection */}
-      <div className="grid grid-cols-2 gap-6">
-        {/* Credentials */}
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="api-key" className="text-xs">
-              API Key <span className="text-destructive">*</span>
-            </Label>
+      {/* Credentials Card */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>{PROVIDER_INFOS[providerType].name} Credentials</CardTitle>
+              <CardDescription>
+                Enter your API credentials to connect.
+              </CardDescription>
+            </div>
+            {meta.apiKeyUrl && (
+              <Button variant="link" size="sm" className="h-auto p-0" render={<a href={meta.apiKeyUrl} target="_blank" rel="noopener noreferrer" />}>
+                Get API key
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="api-key">API Key</Label>
             <div className="relative">
               <Input
                 id="api-key"
                 type={showApiKey ? "text" : "password"}
                 value={apiKey}
                 onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-..."
+                placeholder={meta.keyPlaceholder}
                 autoComplete="off"
                 spellCheck={false}
-                className="pr-9 font-mono text-xs"
+                className="pr-10 font-mono"
               />
-              <button
+              <Button
                 type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute right-1 top-1/2 -translate-y-1/2"
                 onClick={() => setShowApiKey(!showApiKey)}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                <HugeiconsIcon icon={showApiKey ? EyeOffIcon : EyeIcon} className="size-3.5" />
-              </button>
+                <HugeiconsIcon icon={showApiKey ? EyeOffIcon : EyeIcon} />
+                <span className="sr-only">Toggle API key visibility</span>
+              </Button>
             </div>
           </div>
 
-          {providerType === "custom" && (
-            <div className="flex flex-col gap-1.5">
-              <Label htmlFor="base-url" className="text-xs">
-                Base URL <span className="text-destructive">*</span>
-              </Label>
+          {(providerType === "custom" || baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl) && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="base-url">Base URL</Label>
+                {providerType !== "custom" && (
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs text-muted-foreground"
+                    onClick={() => setBaseUrl(PROVIDER_INFOS[providerType].defaultBaseUrl || "")}
+                  >
+                    Reset to default
+                  </Button>
+                )}
+              </div>
               <Input
                 id="base-url"
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder="https://api.example.com/v1"
+                placeholder={PROVIDER_INFOS[providerType].defaultBaseUrl || "https://api.openai.com/v1"}
                 autoComplete="off"
                 spellCheck={false}
-                className="font-mono text-xs"
+                className="font-mono"
               />
             </div>
           )}
 
-          <Button onClick={verifyAndSave} disabled={verifying} className="w-full gap-2">
-            {verifying ? (
-              <>
-                <HugeiconsIcon icon={Loading02Icon} className="size-3.5 animate-spin" />
-                Verifying...
-              </>
-            ) : (
-              <>
-                <HugeiconsIcon icon={CloudCheckIcon} className="size-3.5" />
-                Connect
-              </>
-            )}
-          </Button>
-        </div>
+          <div className="flex items-center justify-between pt-2">
+            <span className="text-xs text-muted-foreground">
+              {verifiedCount !== null && `${verifiedCount} models available`}
+            </span>
+            <Button onClick={verifyAndSave} disabled={verifying} className="gap-2">
+              {verifying ? (
+                <>
+                  <HugeiconsIcon icon={Loading02Icon} className="animate-spin" />
+                  <span>Connecting...</span>
+                </>
+              ) : (
+                <>
+                  <HugeiconsIcon icon={CloudCheckIcon} />
+                  <span>Connect</span>
+                </>
+              )}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
-        {/* Model Selection */}
-        <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Active Model</Label>
-              <span className="text-[10px] text-muted-foreground">
-                {cachedModels.length} verified
-              </span>
-            </div>
-            <Select
-              value={activeModel || ""}
-              onValueChange={(val) => {
-                setActiveModel(val);
-                setActive(val);
-              }}
-            >
-              <SelectTrigger className="font-mono text-xs">
-                <SelectValue placeholder="No models" />
+function ModelsTabContent({
+  onModelChanged,
+}: {
+  onModelChanged: (model: string) => void;
+}) {
+  const initial = getProviderConfig();
+  const [cachedModels, setModels] = useState<string[]>(() => getCachedModels());
+  const [activeModel, setActive] = useState<string | null>(() => getActiveModel());
+  const [customModels, setCustomModels] = useState<CustomModel[]>(initial?.customModels || []);
+  const [newModelId, setNewModelId] = useState("");
+  const [newModelName, setNewModelName] = useState("");
+
+  const handleSelectModel = (val: string | null) => {
+    if (!val) return;
+    setActiveModel(val);
+    setActive(val);
+    onModelChanged(val);
+    toast.success(`Active model switched to ${val}`);
+  };
+
+  const handleAddCustomModel = () => {
+    if (!newModelId.trim()) {
+      toast.error("Please enter a model ID.");
+      return;
+    }
+    const id = newModelId.trim();
+    const name = newModelName.trim() || id;
+    if (customModels.some((m) => m.id === id)) {
+      toast.error("Model ID already exists.");
+      return;
+    }
+    const updated = [...customModels, { id, name }];
+    setCustomModels(updated);
+    setNewModelId("");
+    setNewModelName("");
+
+    const currentCfg = getProviderConfig();
+    if (currentCfg) {
+      setProviderConfig({ ...currentCfg, customModels: updated });
+    }
+
+    if (!cachedModels.includes(id)) {
+      const newCache = [id, ...cachedModels];
+      setCachedModels(newCache);
+      setModels(newCache);
+      handleSelectModel(id);
+    }
+    toast.success(`Added ${name}`);
+  };
+
+  const handleRemoveCustomModel = (id: string) => {
+    const updated = customModels.filter((m) => m.id !== id);
+    setCustomModels(updated);
+
+    const currentCfg = getProviderConfig();
+    if (currentCfg) {
+      setProviderConfig({ ...currentCfg, customModels: updated });
+    }
+
+    if (activeModel === id) {
+      const next = cachedModels.find((m) => m !== id) || null;
+      setActiveModel(next);
+      setActive(next);
+      if (next) onModelChanged(next);
+    }
+  };
+
+  const handleApplyPreset = (preset: (typeof LOCAL_PRESETS)[0]) => {
+    const currentCfg = getProviderConfig();
+    const updatedCfg: ProviderConfig = {
+      type: "custom",
+      baseUrl: preset.baseUrl,
+      apiKey: currentCfg?.apiKey || preset.apiKey || "local",
+      customModels: preset.models,
+    };
+    setProviderConfig(updatedCfg);
+    setCustomModels(preset.models);
+    const modelIds = preset.models.map((m) => m.id);
+    setCachedModels(modelIds);
+    setModels(modelIds);
+    if (modelIds[0]) {
+      handleSelectModel(modelIds[0]);
+    }
+    toast.success(`Applied ${preset.name}`);
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* Active Model */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Active Model</CardTitle>
+          <CardDescription>
+            Select the model used for canvas perception and AI commands.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {cachedModels.length > 0 ? (
+            <Select value={activeModel || cachedModels[0]} onValueChange={handleSelectModel}>
+              <SelectTrigger className="w-full font-mono text-xs">
+                <SelectValue placeholder="Select model" />
               </SelectTrigger>
               <SelectContent>
                 {cachedModels.map((m) => (
@@ -338,65 +531,107 @@ function ProviderTab() {
                 ))}
               </SelectContent>
             </Select>
-          </div>
-
-          {providerType === "custom" && (
-            <div className="flex flex-col gap-2">
-              <Label className="text-xs">Custom Models</Label>
-              {customModels.length > 0 && (
-                <div className="flex flex-col gap-1 max-h-32 overflow-y-auto">
-                  {customModels.map((m) => (
-                    <div
-                      key={m.id}
-                      className="flex items-center justify-between py-1.5 px-2 rounded-md hover:bg-muted/50 text-xs"
-                    >
-                      <div className="flex flex-col min-w-0">
-                        <span className="font-medium truncate">{m.name}</span>
-                        <span className="font-mono text-[10px] text-muted-foreground truncate">{m.id}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveCustomModel(m.id)}
-                        className="text-muted-foreground hover:text-destructive p-0.5"
-                      >
-                        <HugeiconsIcon icon={Delete02Icon} className="size-3.5" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="flex gap-1.5">
-                <Input
-                  value={newModelId}
-                  onChange={(e) => setNewModelId(e.target.value)}
-                  placeholder="model-id"
-                  className="font-mono text-xs h-8"
-                />
-                <Input
-                  value={newModelName}
-                  onChange={(e) => setNewModelName(e.target.value)}
-                  placeholder="Name"
-                  className="text-xs h-8"
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={handleAddCustomModel}
-                  className="h-8 px-2"
-                >
-                  <HugeiconsIcon icon={Add01Icon} className="size-3.5" />
-                </Button>
-              </div>
+          ) : (
+            <div className="flex items-center justify-center py-6 border border-dashed rounded-lg text-sm text-muted-foreground">
+              No models available. Connect a provider first.
             </div>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
+
+      {/* Local & Gateway Presets */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Local & Gateway Presets</CardTitle>
+          <CardDescription>
+            Quickly configure local instances or gateway routers.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {LOCAL_PRESETS.map((preset) => (
+              <Button
+                key={preset.name}
+                type="button"
+                variant="outline"
+                className="h-auto flex-col items-start p-3 text-left"
+                onClick={() => handleApplyPreset(preset)}
+              >
+                <span className="font-medium text-xs">{preset.name}</span>
+                <span className="font-mono text-[10px] text-muted-foreground truncate w-full">
+                  {preset.baseUrl}
+                </span>
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Custom Models */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Custom Models</CardTitle>
+          <CardDescription>
+            Add manual model IDs for local or self-hosted endpoints.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {customModels.length > 0 && (
+            <div className="flex flex-col gap-1 max-h-36 overflow-y-auto">
+              {customModels.map((m) => (
+                <div
+                  key={m.id}
+                  className="flex items-center justify-between py-2 px-3 rounded-lg border text-xs"
+                >
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-medium truncate">{m.name}</span>
+                    <span className="font-mono text-[10px] text-muted-foreground truncate">{m.id}</span>
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => handleRemoveCustomModel(m.id)}
+                    className="text-muted-foreground hover:text-destructive"
+                  >
+                    <HugeiconsIcon icon={Delete02Icon} />
+                    <span className="sr-only">Remove model</span>
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2">
+            <Input
+              value={newModelId}
+              onChange={(e) => setNewModelId(e.target.value)}
+              placeholder="Model ID (e.g. qwen2.5-vl)"
+              className="font-mono text-xs"
+            />
+            <Input
+              value={newModelName}
+              onChange={(e) => setNewModelName(e.target.value)}
+              placeholder="Label"
+              className="text-xs"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleAddCustomModel}
+              className="gap-1.5 shrink-0"
+            >
+              <HugeiconsIcon icon={Add01Icon} />
+              <span>Add</span>
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-function UsageTab() {
+function UsageTabContent() {
   const [history, setHistory] = useState<TokenUsageRecord[]>(() => getTokenUsageHistory());
 
   useEffect(() => {
@@ -405,91 +640,122 @@ function UsageTab() {
     return () => window.removeEventListener("storage", update);
   }, []);
 
-  const totalTokens = history.reduce((acc, curr) => acc + (curr.totalTokens || 0), 0);
+  const stats = useMemo(() => {
+    const totalPrompt = history.reduce((acc, curr) => acc + (curr.inputTokens || 0), 0);
+    const totalCompletion = history.reduce((acc, curr) => acc + (curr.outputTokens || 0), 0);
+    const total = history.reduce((acc, curr) => acc + (curr.totalTokens || 0), 0);
+    return {
+      requests: history.length,
+      totalPrompt,
+      totalCompletion,
+      total,
+    };
+  }, [history]);
 
   const handleClear = () => {
     clearTokenUsageHistory();
     setHistory([]);
-    toast.success("History cleared.");
+    toast.success("Usage history cleared.");
   };
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <div className="flex gap-4 text-xs text-muted-foreground">
-          <span>{history.length} requests</span>
-          <span>{totalTokens.toLocaleString()} tokens</span>
-        </div>
-        {history.length > 0 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleClear}
-            className="h-7 text-xs text-destructive hover:text-destructive"
-          >
-            Clear
-          </Button>
-        )}
+      {/* Metric Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>Requests</CardDescription>
+            <CardTitle className="text-lg font-mono">{stats.requests.toLocaleString()}</CardTitle>
+          </CardHeader>
+        </Card>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>Prompt</CardDescription>
+            <CardTitle className="text-lg font-mono">{stats.totalPrompt.toLocaleString()}</CardTitle>
+          </CardHeader>
+        </Card>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>Completion</CardDescription>
+            <CardTitle className="text-lg font-mono">{stats.totalCompletion.toLocaleString()}</CardTitle>
+          </CardHeader>
+        </Card>
+
+        <Card size="sm">
+          <CardHeader>
+            <CardDescription>Total Tokens</CardDescription>
+            <CardTitle className="text-lg font-mono">{stats.total.toLocaleString()}</CardTitle>
+          </CardHeader>
+        </Card>
       </div>
 
-      {history.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 border border-dashed rounded-lg text-center gap-2">
-          <span className="text-sm text-muted-foreground">No usage yet</span>
-          <span className="text-xs text-muted-foreground/70">
-            Token usage will appear here after AI requests.
-          </span>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-1 max-h-[400px] overflow-y-auto">
-          {history.map((item) => (
-            <div
-              key={item.id}
-              className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-muted/50 text-xs"
-            >
-              <div className="flex items-center gap-2 min-w-0">
-                <ProviderBadge type={item.providerType || "custom"} size="sm" />
-                <span className="font-medium truncate">{item.modelId}</span>
-                {item.intent && (
-                  <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded uppercase">
-                    {item.intent}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
-                <span>in: {(item.inputTokens || 0).toLocaleString()}</span>
-                <span>out: {(item.outputTokens || 0).toLocaleString()}</span>
-                <span className="font-medium text-foreground">{(item.totalTokens || 0).toLocaleString()}</span>
-              </div>
+      {/* Audit Log */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Usage History</CardTitle>
+              <CardDescription>
+                Recent AI requests and token consumption.
+              </CardDescription>
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+            {history.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleClear}
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                Clear
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          {history.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-10 border border-dashed rounded-lg text-center gap-1">
+              <span className="text-sm font-medium">No usage recorded</span>
+              <span className="text-xs text-muted-foreground">
+                Token statistics will appear here after AI actions.
+              </span>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1 max-h-64 overflow-y-auto">
+              {history.map((item) => (
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between py-2 px-3 rounded-md hover:bg-muted/50 text-xs"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="font-mono text-[10px] text-muted-foreground">
+                      {new Date(item.timestamp).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </span>
+                    <Badge variant="outline" className="text-[10px] capitalize">
+                      {item.providerType}
+                    </Badge>
+                    <span className="font-mono font-medium truncate max-w-[140px]">
+                      {item.modelId}
+                    </span>
+                  </div>
 
-function ProviderBadge({ type, size = "sm" }: { type: ProviderType; size?: "sm" | "md" }) {
-  const sizeClass = size === "md" ? "size-6 text-[10px]" : "size-4 text-[8px]";
-  const colors: Record<ProviderType, string> = {
-    openai: "bg-emerald-500/10 text-emerald-600",
-    anthropic: "bg-amber-500/10 text-amber-600",
-    gemini: "bg-blue-500/10 text-blue-600",
-    nvidia: "bg-green-500/10 text-green-600",
-    groq: "bg-orange-500/10 text-orange-600",
-    custom: "bg-purple-500/10 text-purple-600",
-  };
-  const labels: Record<ProviderType, string> = {
-    openai: "O",
-    anthropic: "A",
-    gemini: "G",
-    nvidia: "N",
-    groq: "Q",
-    custom: "C",
-  };
-
-  return (
-    <div className={`${sizeClass} ${colors[type]} rounded-full flex items-center justify-center font-bold shrink-0`}>
-      {labels[type]}
+                  <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">
+                    <span>in: {(item.inputTokens || 0).toLocaleString()}</span>
+                    <span>out: {(item.outputTokens || 0).toLocaleString()}</span>
+                    <span className="font-medium text-foreground">
+                      {(item.totalTokens || 0).toLocaleString()}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

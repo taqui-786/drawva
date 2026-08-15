@@ -358,17 +358,28 @@ export class WidgetManager {
         sendInit(frame.contentWindow, event.origin);
       } else if (event.data?.type === "drawva-widget-resize-content") {
         const { width, height } = event.data;
-        if (typeof width === "number" && typeof height === "number") {
+        if (typeof height === "number" && height > 0) {
           const w = this.widgets.get(widget.id);
-          if (w && !w.userResized) {
-            const shellW = Math.min(1200, Math.max(220, Math.round(width + 24)));
-            const shellH = Math.min(900, Math.max(140, Math.round(height + 24)));
-            if (Math.abs(w.w - shellW) > 6 || Math.abs(w.h - shellH) > 6) {
-              w.w = shellW;
-              w.h = shellH;
-              w.contentW = shellW;
-              w.contentH = shellH;
-              this.position(w);
+          if (w) {
+            const shellH = Math.min(6000, Math.max(120, Math.round(height)));
+            const shellW = typeof width === "number" && width > 0
+              ? Math.min(3200, Math.max(220, Math.round(width)))
+              : w.w;
+
+            if (!w.userResized) {
+              if (Math.abs(w.w - shellW) > 4 || Math.abs(w.h - shellH) > 4) {
+                w.w = shellW;
+                w.h = shellH;
+                w.contentW = shellW;
+                w.contentH = shellH;
+                this.position(w);
+              }
+            } else {
+              if (w.contentW < shellW || w.contentH < shellH) {
+                w.contentW = Math.max(w.contentW, shellW);
+                w.contentH = Math.max(w.contentH, shellH);
+                this.position(w);
+              }
             }
           }
         }

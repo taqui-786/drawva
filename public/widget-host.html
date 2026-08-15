@@ -17,8 +17,8 @@
 // postMessage; the parent origin is validated before any reply is sent.
 (() => {
   const MAX_HTML_LENGTH = 200000;
-  const MAX_SNAPSHOT_DIMENSION = 2400;
-  const MAX_SNAPSHOT_PIXELS = 4800000;
+  const MAX_SNAPSHOT_DIMENSION = 4000;
+  const MAX_SNAPSHOT_PIXELS = 12000000;
   const MAX_SNAPSHOT_DATA_URL = 28 * 1024 * 1024;
 
   const requestedParentOrigin = new URL(location.href).searchParams.get("parent-origin");
@@ -38,101 +38,129 @@
   function writeInner(html) {
     const autoResizeScript = `<script>
       (function() {
-        let lastW = 0;
         let lastH = 0;
+        let lastW = 0;
+
         function postSize() {
           try {
             const body = document.body;
-            if (!body) return;
-            const first = body.firstElementChild;
-            if (!first) return;
+            const docEl = document.documentElement;
+            if (!body || !docEl) return;
 
             const bodyRect = body.getBoundingClientRect();
-            const firstRect = first.getBoundingClientRect();
-            let targetW = 0;
-            let targetH = 0;
+            let maxRight = 0;
+            let maxBottom = 0;
 
-            // 1. Check for SVG graphics (Mermaid / DOT / Vega / SMILES / Icons)
-            const svg = document.querySelector('svg');
-            if (svg) {
+            // 1. Measure SVG elements accurately using their viewBox / getBBox
+            const svgs = body.querySelectorAll('svg');
+            for (let i = 0; i < svgs.length; i++) {
+              const svg = svgs[i];
               try {
                 let svgW = 0, svgH = 0;
                 const g = svg.querySelector('g');
                 if (g && g.getBBox) {
                   const gb = g.getBBox();
-                  if (gb && gb.width > 20 && gb.height > 20) {
-                    svgW = gb.width;
-                    svgH = gb.height;
+                  if (gb && gb.width > 10 && gb.height > 10) {
+                    svgW = gb.width + (gb.x > 0 ? gb.x : 0);
+                    svgH = gb.height + (gb.y > 0 ? gb.y : 0);
                   }
                 }
-                if (!svgW && svg.viewBox && svg.viewBox.baseVal) {
+                if ((!svgW || !svgH) && svg.viewBox && svg.viewBox.baseVal) {
                   svgW = svg.viewBox.baseVal.width;
                   svgH = svg.viewBox.baseVal.height;
                 }
-                if (svgW > 20 && svgH > 20) {
-                  targetW = Math.max(targetW, Math.ceil(svgW + 32));
-                  targetH = Math.max(targetH, Math.ceil(svgH + 32));
+                if (!svgW && svg.getAttribute('viewBox')) {
+                  const vb = svg.getAttribute('viewBox').split(/[\\s,]+/).map(Number);
+                  if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
+                    svgW = vb[2];
+                    svgH = vb[3];
+                  }
+                }
+
+                if (svgW > 10 && svgH > 10) {
+                  const svgRect = svg.getBoundingClientRect();
+                  const svgTop = svgRect.top - bodyRect.top;
+                  const svgLeft = svgRect.left - bodyRect.left;
+                  const renderedW = svgRect.width > 0 ? svgRect.width : svgW;
+                  const aspect = svgH / svgW;
+                  const renderedH = Math.min(svgRect.height > 0 ? svgRect.height : svgH, renderedW * aspect);
+
+                  if (svgLeft + renderedW > maxRight) maxRight = svgLeft + renderedW;
+                  if (svgTop + renderedH > maxBottom) maxBottom = svgTop + renderedH;
                 }
               } catch(e) {}
             }
 
-            // 2. Measure HTML container intrinsic width
-            const firstStyle = window.getComputedStyle(first);
-            const hasMaxWidth = firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && firstStyle.maxWidth !== '100%';
-            const hasExplicitWidth = firstStyle.width && firstStyle.width !== '100%' && !firstStyle.width.endsWith('%');
-
-            if (hasMaxWidth || hasExplicitWidth) {
-              targetW = Math.max(targetW, Math.ceil(firstRect.width));
-            } else {
-              // Measure rightmost coordinate of content elements inside wrapper
-              let maxRight = 0;
-              const children = first.querySelectorAll('input, button, select, textarea, img, svg, canvas, table, h1, h2, h3, h4, h5, h6, p, span, a, label, form, section, article, .card, [class*="card"], [class*="container"], [class*="box"]');
-              if (children.length > 0) {
-                for (let i = 0; i < children.length; i++) {
-                  const child = children[i];
-                  const cr = child.getBoundingClientRect();
-                  if (cr.width > 0 && cr.height > 0) {
-                    const r = (cr.right - bodyRect.left);
-                    // Ignore full-width block containers stretching to 100% iframe width unless fixed element
-                    const isFullStretchedBlock = (cr.width >= bodyRect.width - 12) && (child.tagName === 'DIV' || child.tagName === 'FORM' || child.tagName === 'SECTION');
-                    if (r > maxRight && !isFullStretchedBlock) {
-                      maxRight = r;
-                    }
-                  }
+            // 2. Measure visible HTML content elements
+            const allElements = body.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, a, label, button, input, select, textarea, img, canvas, table, tr, td, th, pre, code, ul, ol, li, form, section, article, .card, [class*="card"], [class*="container"], [class*="box"], [style*="border"]');
+            for (let i = 0; i < allElements.length; i++) {
+              const el = allElements[i];
+              if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK' || el.tagName === 'META') continue;
+              const rect = el.getBoundingClientRect();
+              if (rect.width > 0 && rect.height > 0) {
+                const r = rect.right - bodyRect.left;
+                const b = rect.bottom - bodyRect.top;
+                const isFullStretchBlock = (rect.width >= bodyRect.width - 8) && (el.tagName === 'DIV' || el.tagName === 'SECTION' || el.tagName === 'BODY');
+                if (r > maxRight && !isFullStretchBlock) {
+                  maxRight = r;
+                }
+                if (b > maxBottom) {
+                  maxBottom = b;
                 }
               }
-
-              if (maxRight > 40) {
-                targetW = Math.max(targetW, Math.ceil(maxRight + 16));
-              } else {
-                targetW = Math.max(targetW, Math.ceil(firstRect.width || 0));
-              }
             }
 
-            // Height measurement
-            const contentH = Math.max(body.scrollHeight || 0, first.scrollHeight || 0, Math.ceil(firstRect.height || 0));
-            targetH = Math.max(targetH, contentH);
+            // 3. Check first container explicit widths
+            const contentElements = Array.from(body.children).filter(function(el) {
+              return el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE' && el.tagName !== 'LINK' && el.tagName !== 'META';
+            });
+            const first = contentElements[0] || body.firstElementChild || body;
+            const firstStyle = window.getComputedStyle(first);
+            const hasMaxWidth = firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && !firstStyle.maxWidth.endsWith('%');
+            const hasExplicitWidth = firstStyle.width && !firstStyle.width.endsWith('%') && firstStyle.width !== 'auto';
 
-            if (targetW < 100) targetW = 320;
-            if (targetH < 80) targetH = 240;
-            targetW = Math.min(1200, Math.max(220, targetW));
-            targetH = Math.min(900, Math.max(140, targetH));
+            if (hasMaxWidth || hasExplicitWidth) {
+              const firstRect = first.getBoundingClientRect();
+              if (firstRect.width > maxRight) maxRight = firstRect.width;
+            }
 
-            if (Math.abs(targetW - lastW) > 6 || Math.abs(targetH - lastH) > 6) {
-              lastW = targetW;
+            const contentH = Math.max(maxBottom, Math.ceil(first.getBoundingClientRect().height || 0));
+            const contentW = Math.max(maxRight, Math.ceil(first.getBoundingClientRect().width || 0));
+
+            let targetW = Math.min(3200, Math.max(220, Math.ceil(contentW + 16)));
+            let targetH = Math.min(6000, Math.max(120, Math.ceil(contentH + 16)));
+
+            if (Math.abs(targetH - lastH) > 4 || Math.abs(targetW - lastW) > 4) {
               lastH = targetH;
-              window.parent.postMessage({ type: 'drawva-widget-resize-content', width: targetW, height: targetH }, '*');
+              lastW = targetW;
+              window.parent.postMessage({
+                type: 'drawva-widget-resize-content',
+                width: targetW,
+                height: targetH
+              }, '*');
             }
           } catch(e) {}
         }
+
         window.addEventListener('DOMContentLoaded', postSize);
         window.addEventListener('load', postSize);
-        if (typeof ResizeObserver !== 'undefined' && document.body) {
+        if (document.fonts && document.fonts.ready) {
+          document.fonts.ready.then(postSize).catch(function() {});
+        }
+        if (typeof ResizeObserver !== 'undefined') {
           try {
-            const target = document.body.firstElementChild || document.body;
-            new ResizeObserver(postSize).observe(target);
+            const ro = new ResizeObserver(postSize);
+            if (document.body) ro.observe(document.body);
+            if (document.documentElement) ro.observe(document.documentElement);
           } catch(e) {}
         }
+        if (typeof MutationObserver !== 'undefined' && document.body) {
+          try {
+            const mo = new MutationObserver(postSize);
+            mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+          } catch(e) {}
+        }
+
         window.addEventListener('wheel', function(e) {
           e.preventDefault();
           window.parent.postMessage({
@@ -150,12 +178,15 @@
           }, '*');
         }, true);
 
-        setTimeout(postSize, 60);
+        setTimeout(postSize, 30);
+        setTimeout(postSize, 120);
         setTimeout(postSize, 300);
+        setTimeout(postSize, 600);
+        setTimeout(postSize, 1200);
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:6px 8px 12px 8px;box-sizing:border-box;width:100%!important;height:auto!important;min-height:0!important}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;

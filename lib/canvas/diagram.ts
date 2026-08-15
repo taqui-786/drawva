@@ -97,7 +97,7 @@ export async function diagramDocument(
     try {
       const svg = await renderMermaid(responsive);
       if (svg) {
-        return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important;box-sizing:border-box}#stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:12px}#stage svg{width:100%;height:100%;max-width:100%;max-height:100%;display:block;margin:auto}</style></head><body><div id="stage">${svg}</div><script>function fitServerSvg(){try{const s=document.querySelector("#stage svg");if(s){let w=0,h=0;try{const g=s.querySelector("g");if(g&&g.getBBox){const b=g.getBBox();if(b&&b.width>20&&b.height>20){w=b.width;h=b.height}}}catch(e){}if(!w&&s.viewBox&&s.viewBox.baseVal){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}if(w>20&&h>20){const tw=Math.min(1200,Math.max(220,Math.ceil(w+48)));const th=Math.min(900,Math.max(120,Math.ceil(h+48)));window.parent?.postMessage({type:"drawva-widget-resize-content",width:tw,height:th},"*")}}}catch(e){}}window.addEventListener("DOMContentLoaded",fitServerSvg);setTimeout(fitServerSvg,50);</script></body></html>`;
+        return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important;box-sizing:border-box}#stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:12px}#stage svg{width:100%;height:100%;max-width:100%;max-height:100%;display:block;margin:auto}</style></head><body><div id="stage">${svg}</div><script>function fitServerSvg(){try{const s=document.querySelector("#stage svg");if(s){let w=0,h=0;try{const g=s.querySelector("g");if(g&&g.getBBox){const b=g.getBBox();if(b&&b.width>20&&b.height>20){w=b.width;h=b.height}}}catch(e){}if(!w&&s.viewBox&&s.viewBox.baseVal){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}if(w>20&&h>20){const tw=Math.min(3200,Math.max(220,Math.ceil(w+48)));const th=Math.min(5000,Math.max(120,Math.ceil(h+48)));window.parent?.postMessage({type:"drawva-widget-resize-content",width:tw,height:th},"*")}}}catch(e){}}window.addEventListener("DOMContentLoaded",fitServerSvg);setTimeout(fitServerSvg,50);</script></body></html>`;
       }
     } catch (e) {
       console.warn("[Diagram Renderer] Mermaid pre-render failed, using fallback:", e);
@@ -240,8 +240,8 @@ export async function diagramDocument(
         }
 
         if (naturalW > 20 && naturalH > 20) {
-          const w = Math.min(1200, Math.max(220, Math.ceil(naturalW + 48)));
-          const h = Math.min(900, Math.max(120, Math.ceil(naturalH + 48)));
+          const w = Math.min(3200, Math.max(220, Math.ceil(naturalW + 48)));
+          const h = Math.min(5000, Math.max(120, Math.ceil(naturalH + 48)));
           window.parent?.postMessage({ type: "drawva-widget-resize-content", width: w, height: h }, "*");
         }
       }

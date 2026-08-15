@@ -315,7 +315,7 @@ export function CanvasApp() {
       let minDistance = Infinity;
       for (const w of wm.all()) {
         const dist = distanceBetweenRects(box, { x: w.x, y: w.y, w: w.w, h: w.h });
-        if (dist <= 160 && dist < minDistance) {
+        if (dist <= 450 && dist < minDistance) {
           minDistance = dist;
           closestWidget = w;
         }
