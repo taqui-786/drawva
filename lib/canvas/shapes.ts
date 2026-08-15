@@ -6,7 +6,7 @@ export type ShapeKind = "rect" | "ellipse" | "arrow" | "line";
 
 export interface ShapeStyle {
   color: string;
-  lineWidth: number; // world units
+  lineWidth: number;
 }
 
 export interface ShapePrimitive {
@@ -15,11 +15,6 @@ export interface ShapePrimitive {
   to: Point;
 }
 
-/**
- * Vector shape tool with preview-while-drag. The preview is rendered via the
- * engine's interaction-frame registry — so it survives pan/zoom redraws.
- * On release the shape is rasterized into the ink tiles.
- */
 export class ShapeController {
   private active: {
     id: number;

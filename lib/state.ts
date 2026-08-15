@@ -3,14 +3,6 @@ import type { CanvasMode } from "./canvas/types";
 
 export type AiStatus = "idle" | "thinking" | "done" | "error";
 
-/**
- * Global canvas state, shared Penecho-style: any module (React shell, tool
- * managers, engine code) can read `appState.x` and write through the exported
- * action functions below. React re-renders automatically via useSnapshot.
- *
- * Only UI-level state lives here. Per-pointermove hot data (stroke points,
- * bboxes, pressure) stays inside the engine to avoid per-frame re-renders.
- */
 export const appState = proxy({
   mode: "hand" as CanvasMode,
   color: "#111111",
@@ -20,10 +12,6 @@ export const appState = proxy({
   aiStatus: "idle" as AiStatus,
   autoOn: true,
 });
-
-// ---- Actions (Penecho-style mutators) -----------------------------------
-// Routed through functions at module scope so any component or framework-free
-// module can update shared state without tripping React immutability rules.
 
 export function setMode(mode: CanvasMode): void {
   appState.mode = mode;

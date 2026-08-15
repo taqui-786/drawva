@@ -6,7 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
-import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Slider } from "@/components/ui/slider";
 import {
   DropdownMenu,
@@ -17,8 +23,18 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipTrigger,
+  TooltipContent,
+} from "@/components/ui/tooltip";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
@@ -48,7 +64,7 @@ import {
   TerminalIcon,
   UndoIcon,
   Upload01Icon,
-  Share01Icon,
+  PeerToPeer01Icon,
   Wifi01Icon,
 } from "@hugeicons/core-free-icons";
 import type { CanvasMode } from "@/lib/canvas/types";
@@ -61,18 +77,41 @@ export interface AiRunState {
   doneProvider: string | null;
 }
 
-const PALETTE = ["#111111", "#2563eb", "#dc2626", "#16a34a", "#f59e0b", "#9333ea", "#fbbf24"];
+const PALETTE = [
+  "#111111",
+  "#2563eb",
+  "#dc2626",
+  "#16a34a",
+  "#f59e0b",
+  "#9333ea",
+  "#fbbf24",
+];
 
-const PRIMARY_TOOLS: { mode: CanvasMode; label: string; kbd: string; icon: typeof CursorIcon }[] = [
+const PRIMARY_TOOLS: {
+  mode: CanvasMode;
+  label: string;
+  kbd: string;
+  icon: typeof CursorIcon;
+}[] = [
   { mode: "select", label: "Select", kbd: "V", icon: CursorIcon },
   { mode: "hand", label: "Hand", kbd: "H", icon: HandIcon },
   { mode: "pen", label: "Pen", kbd: "P", icon: PencilIcon },
-  { mode: "highlighter", label: "Highlighter", kbd: "⇧H", icon: HighlighterIcon },
+  {
+    mode: "highlighter",
+    label: "Highlighter",
+    kbd: "⇧H",
+    icon: HighlighterIcon,
+  },
   { mode: "eraser", label: "Eraser", kbd: "E", icon: EraserIcon },
   { mode: "text", label: "Text", kbd: "T", icon: TextIcon },
 ];
 
-const SHAPE_TOOLS: { mode: CanvasMode; label: string; kbd: string; icon: typeof SquareIcon }[] = [
+const SHAPE_TOOLS: {
+  mode: CanvasMode;
+  label: string;
+  kbd: string;
+  icon: typeof SquareIcon;
+}[] = [
   { mode: "rect", label: "Rectangle", kbd: "R", icon: SquareIcon },
   { mode: "ellipse", label: "Ellipse", kbd: "O", icon: EllipseIcon },
   { mode: "arrow", label: "Arrow", kbd: "A", icon: ArrowRight01Icon },
@@ -84,7 +123,12 @@ function ToolButton({
   onMode,
 }: {
   mode: CanvasMode;
-  tool: { mode: CanvasMode; label: string; kbd: string; icon: typeof CursorIcon };
+  tool: {
+    mode: CanvasMode;
+    label: string;
+    kbd: string;
+    icon: typeof CursorIcon;
+  };
   onMode: (m: CanvasMode) => void;
 }) {
   const active = mode === tool.mode;
@@ -200,16 +244,22 @@ export function CanvasHeader({
   };
 
   const isShapeActive = ["rect", "ellipse", "arrow"].includes(mode);
-  const activeShapeTool = SHAPE_TOOLS.find((s) => s.mode === mode) || SHAPE_TOOLS[0];
+  const activeShapeTool =
+    SHAPE_TOOLS.find((s) => s.mode === mode) || SHAPE_TOOLS[0];
 
   const hasModels = models.length > 0;
-  const settleValue = activeModel && hasModels && models.includes(activeModel) ? activeModel : (models[0] ?? "");
+  const settleValue =
+    activeModel && hasModels && models.includes(activeModel)
+      ? activeModel
+      : (models[0] ?? "");
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-2 sm:px-3">
       {/* ── Left: Brand & Combined Menu ─────────────────────────── */}
       <div className="flex items-center gap-1 sm:gap-2">
-        <span className="brand-wordmark pr-1 text-lg font-bold leading-none">Drawva</span>
+        <span className="brand-wordmark pr-1 text-lg font-bold leading-none">
+          Drawva
+        </span>
 
         {/* Compact Main Menu Bar */}
         <DropdownMenu>
@@ -218,7 +268,10 @@ export function CanvasHeader({
               <Button variant="ghost" size="sm" className="gap-1 text-xs px-2">
                 <HugeiconsIcon icon={Menu01Icon} className="size-4" />
                 <span className="hidden sm:inline">Menu</span>
-                <HugeiconsIcon icon={ChevronDownIcon} className="size-3 text-muted-foreground" />
+                <HugeiconsIcon
+                  icon={ChevronDownIcon}
+                  className="size-3 text-muted-foreground"
+                />
               </Button>
             }
           />
@@ -270,7 +323,7 @@ export function CanvasHeader({
                 {isFullscreen ? "Exit Fullscreen" : "Fullscreen Mode"}
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onOpenConnect}>
-                <HugeiconsIcon icon={Share01Icon} />
+                <HugeiconsIcon icon={PeerToPeer01Icon} />
                 Live P2P Sync
               </DropdownMenuItem>
               {onOpenLogs && (
@@ -279,7 +332,10 @@ export function CanvasHeader({
                   AI Request Logs
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem onClick={onClear} className="text-destructive focus:text-destructive">
+              <DropdownMenuItem
+                onClick={onClear}
+                className="text-destructive focus:text-destructive"
+              >
                 <HugeiconsIcon icon={Delete02Icon} />
                 Clear Board
               </DropdownMenuItem>
@@ -288,34 +344,41 @@ export function CanvasHeader({
         </DropdownMenu>
 
         {/* Live P2P Badge */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                variant={syncStatus === "connected" ? "secondary" : "ghost"}
-                size="sm"
-                onClick={onOpenConnect}
-                className="gap-1 px-2 text-xs"
-              >
-                <HugeiconsIcon
-                  icon={syncStatus === "connected" ? Wifi01Icon : Share01Icon}
-                  className={`size-3.5 ${syncStatus === "connected" ? "text-emerald-500" : ""}`}
-                />
-                {syncStatus === "connected" && syncRoomCode ? (
-                  <span className="font-mono font-bold text-xs">{syncRoomCode}</span>
-                ) : (
-                  <span className="hidden md:inline">Connect</span>
-                )}
-                {syncPeerCount > 0 && (
-                  <Badge variant="secondary" className="px-1 py-0 text-[10px]">
-                    {syncPeerCount}
-                  </Badge>
-                )}
-              </Button>
-            }
-          />
-          <TooltipContent>Live Device Connection (P2P)</TooltipContent>
-        </Tooltip>
+        {syncStatus === "connected" ? (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant={"ghost"}
+                  size="sm"
+                  onClick={onOpenConnect}
+                  className="gap-1 px-2 text-xs"
+                >
+                  <HugeiconsIcon
+                    icon={Wifi01Icon}
+                    className={`size-3.5 ${syncStatus === "connected" ? "text-emerald-500" : ""}`}
+                  />
+
+                  <span className="font-mono font-bold text-xs">
+                    {syncRoomCode}
+                  </span>
+
+                  {syncPeerCount > 0 && (
+                    <Badge
+                      variant="secondary"
+                      className="px-1 py-0 text-[10px]"
+                    >
+                      {syncPeerCount}
+                    </Badge>
+                  )}
+                </Button>
+              }
+            />
+            <TooltipContent>Live Device Connected (P2P)</TooltipContent>
+          </Tooltip>
+        ) : (
+          ""
+        )}
       </div>
 
       <Separator orientation="vertical" className="mx-1 h-6 hidden sm:block" />
@@ -343,7 +406,11 @@ export function CanvasHeader({
           />
           <DropdownMenuContent align="center">
             {SHAPE_TOOLS.map((s) => (
-              <DropdownMenuItem key={s.mode} onClick={() => onMode(s.mode)} className="gap-2">
+              <DropdownMenuItem
+                key={s.mode}
+                onClick={() => onMode(s.mode)}
+                className="gap-2"
+              >
                 <HugeiconsIcon icon={s.icon} />
                 <span>{s.label}</span>
                 <span className="kbd ml-auto">{s.kbd}</span>
@@ -359,7 +426,12 @@ export function CanvasHeader({
         <Popover>
           <PopoverTrigger
             render={
-              <Button size="icon-sm" variant="ghost" data-icon="true" aria-label="Colors & Stroke">
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                data-icon="true"
+                aria-label="Colors & Stroke"
+              >
                 <HugeiconsIcon icon={ColorsIcon} />
               </Button>
             }
@@ -382,7 +454,8 @@ export function CanvasHeader({
                   className="size-5 rounded-full border transition-transform hover:scale-110"
                   style={{
                     background: c,
-                    borderColor: color === c ? "var(--foreground)" : "var(--border)",
+                    borderColor:
+                      color === c ? "var(--foreground)" : "var(--border)",
                     outline: color === c ? "2px solid var(--ring)" : "none",
                   }}
                 />
@@ -398,7 +471,9 @@ export function CanvasHeader({
                 max={16}
                 step={1}
                 value={[pen]}
-                onValueChange={(v) => onPen(Number(Array.isArray(v) ? v[0] : v))}
+                onValueChange={(v) =>
+                  onPen(Number(Array.isArray(v) ? v[0] : v))
+                }
               />
             </div>
           </PopoverContent>
@@ -410,7 +485,13 @@ export function CanvasHeader({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button size="icon-sm" variant="ghost" onClick={onUndo} disabled={!canUndo} data-icon="true">
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={onUndo}
+                  disabled={!canUndo}
+                  data-icon="true"
+                >
                   <HugeiconsIcon icon={UndoIcon} />
                 </Button>
               }
@@ -422,7 +503,13 @@ export function CanvasHeader({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button size="icon-sm" variant="ghost" onClick={onRedo} disabled={!canRedo} data-icon="true">
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={onRedo}
+                  disabled={!canRedo}
+                  data-icon="true"
+                >
                   <HugeiconsIcon icon={RedoIcon} />
                 </Button>
               }
@@ -434,7 +521,13 @@ export function CanvasHeader({
           <Tooltip>
             <TooltipTrigger
               render={
-                <Button size="icon-sm" variant="ghost" onClick={onClear} data-icon="true" aria-label="Clear board">
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={onClear}
+                  data-icon="true"
+                  aria-label="Clear board"
+                >
                   <HugeiconsIcon icon={Delete02Icon} />
                 </Button>
               }
@@ -448,7 +541,12 @@ export function CanvasHeader({
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button size="icon-sm" variant="ghost" data-icon="true" aria-label="More tools">
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  data-icon="true"
+                  aria-label="More tools"
+                >
                   <HugeiconsIcon icon={MoreHorizontalIcon} />
                 </Button>
               }
@@ -568,14 +666,17 @@ export function CanvasHeader({
               )}
 
               <label className="hidden sm:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none">
-                <Switch size="sm" checked={autoOn} onCheckedChange={onAutoChange} />
+                <Switch
+                  size="sm"
+                  checked={autoOn}
+                  onCheckedChange={onAutoChange}
+                />
                 Auto
               </label>
 
               {!autoOn && (
                 <Button
                   size="sm"
-                  variant="secondary"
                   onClick={onAskAi}
                   className="gap-1 px-2.5 text-xs"
                 >
@@ -584,7 +685,7 @@ export function CanvasHeader({
                 </Button>
               )}
 
-              {onOpenLogs && (
+              {/* {onOpenLogs && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -595,7 +696,10 @@ export function CanvasHeader({
                         className="gap-1 px-2 text-xs h-8"
                         aria-label="AI generation logs"
                       >
-                        <HugeiconsIcon icon={TerminalIcon} className="size-3.5 text-primary" />
+                        <HugeiconsIcon
+                          icon={TerminalIcon}
+                          className="size-3.5 text-primary"
+                        />
                         <span className="hidden sm:inline">Logs</span>
                         {hasLogs && (
                           <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -603,9 +707,11 @@ export function CanvasHeader({
                       </Button>
                     }
                   />
-                  <TooltipContent>AI Generation Logs & Prompt Inspector</TooltipContent>
+                  <TooltipContent>
+                    AI Generation Logs & Prompt Inspector
+                  </TooltipContent>
                 </Tooltip>
-              )}
+              )} */}
 
               <Tooltip>
                 <TooltipTrigger

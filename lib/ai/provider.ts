@@ -1,9 +1,3 @@
-// ============================================================
-// Drawva AI — Multi-Provider Configuration & Storage
-// Supports OpenAI, Anthropic, Gemini, NVIDIA, Groq, and Custom
-// OpenAI-compatible providers, model caching, and token usage history.
-// ============================================================
-
 export type ProviderType = "openai" | "anthropic" | "gemini" | "nvidia" | "groq" | "custom";
 
 export interface CustomModel {
@@ -120,7 +114,6 @@ function write(key: string, value: unknown): void {
   } catch {}
 }
 
-/** Broadcast a change so other tabs / the header select stay in sync. */
 function notify(): void {
   if (typeof window !== "undefined") {
     window.dispatchEvent(new Event("storage"));
@@ -131,7 +124,6 @@ export function getProviderConfig(): ProviderConfig | null {
   const raw = read<Record<string, unknown> | null>(PROVIDER_KEY, null);
   if (!raw) return null;
 
-  // Migration logic for legacy single-url config without `type`
   if (!raw.type) {
     const legacyBaseUrl = typeof raw.baseUrl === "string" ? raw.baseUrl : "";
     const legacyApiKey = typeof raw.apiKey === "string" ? raw.apiKey : "";

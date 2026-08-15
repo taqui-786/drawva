@@ -5,21 +5,18 @@ import { tileKey } from "./types";
 export class TileCache {
   private tiles = new Map<string, HTMLCanvasElement>();
 
-  /** Port of penecho tile(tx,ty,create) — lazy alloc, key "tx,ty". */
   tile(tx: number, ty: number, create = true): HTMLCanvasElement | null {
     const k = tileKey(tx, ty);
     if (!this.tiles.has(k) && create) {
       const c = document.createElement("canvas");
       c.width = TILE;
       c.height = TILE;
-      // willReadFrequently — Part 2 eraser raycast reads pixels back.
       c.getContext("2d", { willReadFrequently: true });
       this.tiles.set(k, c);
     }
     return this.tiles.get(k) ?? null;
   }
 
-  /** Direct lookup without creation. */
   get(tx: number, ty: number): HTMLCanvasElement | null {
     return this.tiles.get(tileKey(tx, ty)) ?? null;
   }
@@ -28,12 +25,10 @@ export class TileCache {
     return [...this.tiles.keys()];
   }
 
-  /** Raw map write — used by undo/redo restore. */
   set(key: string, canvas: HTMLCanvasElement): void {
     this.tiles.set(key, canvas);
   }
 
-  /** Raw map remove — used by undo/redo restore. */
   delete(key: string): void {
     this.tiles.delete(key);
   }
@@ -42,7 +37,6 @@ export class TileCache {
     this.tiles.clear();
   }
 
-  /** Port of penecho forTiles(x,y,w,h,fn,create). */
   forTiles(
     rect: Rect,
     fn: (canvas: HTMLCanvasElement, tx: number, ty: number) => void,

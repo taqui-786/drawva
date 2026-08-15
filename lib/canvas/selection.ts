@@ -17,7 +17,6 @@ function clipRect(r: Rect): Rect {
   };
 }
 
-/** Capture a world region from the ink tiles into an offscreen canvas. */
 export function captureRegion(engine: CanvasEngine, rect: Rect): HTMLCanvasElement {
   const r = clipRect(rect);
   const canvas = document.createElement("canvas");
@@ -38,7 +37,6 @@ export function captureRegion(engine: CanvasEngine, rect: Rect): HTMLCanvasEleme
       const srcW = Math.min(TILE, r.x + r.w - tx * TILE) - srcX;
       const srcH = Math.min(TILE, r.y + r.h - ty * TILE) - srcY;
       if (srcW <= 0 || srcH <= 0) continue;
-      // Region-relative position of this tile's clipped piece within the snapshot.
       const dstX = Math.max(0, tx * TILE - r.x);
       const dstY = Math.max(0, ty * TILE - r.y);
       ctx.drawImage(c, srcX, srcY, srcW, srcH, dstX, dstY, srcW, srcH);
@@ -47,7 +45,6 @@ export function captureRegion(engine: CanvasEngine, rect: Rect): HTMLCanvasEleme
   return canvas;
 }
 
-/** Erase (destination-out) a world region from the ink tiles. */
 export function eraseRegion(engine: CanvasEngine, rect: Rect): void {
   const r = clipRect(rect);
   const x0 = Math.floor(r.x / TILE);
@@ -71,7 +68,6 @@ export function eraseRegion(engine: CanvasEngine, rect: Rect): void {
   engine.requestRender();
 }
 
-/** Paste an offscreen snapshot into tiles at (x, y). */
 export function pasteRegion(
   engine: CanvasEngine,
   snapshot: HTMLCanvasElement,
@@ -102,14 +98,6 @@ export function pasteRegion(
   engine.requestRender();
 }
 
-/**
- * Scan a small region around the click point and return the bounding box of the
- * ink element directly under the cursor. Distinguishes disconnected strokes
- * inside the search region (cluster detection) so a click on a single pencil
- * line never selects every stroke in a 600×400 window — it only selects the
- * connected component the click landed on. Tight hit-tolerance + 4-connectivity
- * prevents anti-aliased gaps from bridging two separate strokes.
- */
 export function findInkBoundsAtPoint(engine: CanvasEngine, point: Point, hitTolerance = 12): Rect | null {
   let halfW = 600;
   let halfH = 600;
@@ -136,7 +124,6 @@ export function findInkBoundsAtPoint(engine: CanvasEngine, point: Point, hitTole
     const py = Math.round(point.y - region.y);
     if (px < 0 || py < 0 || px >= width || py >= height) return null;
 
-    // Locate the closest ink pixel to the click within the hit tolerance.
     let start = -1;
     let bestDistance = Infinity;
     const xMin = Math.max(0, px - hitTolerance);
@@ -157,7 +144,6 @@ export function findInkBoundsAtPoint(engine: CanvasEngine, point: Point, hitTole
     }
     if (start === -1) return null;
 
-    // Flood-fill the connected component (4-connectivity) starting at the closest pixel.
     const seen = new Uint8Array(width * height);
     const queue: number[] = [start];
     seen[start] = 1;
@@ -195,7 +181,6 @@ export function findInkBoundsAtPoint(engine: CanvasEngine, point: Point, hitTole
 
     if (foundMinX > foundMaxX || foundMinY > foundMaxY) return null;
 
-    // Check if the connected component touched the border of the search region.
     const hitBorder =
       (foundMinX === 0 && region.x > 0) ||
       (foundMaxX === width - 1 && region.x + region.w < SIZE) ||
@@ -220,10 +205,6 @@ export function findInkBoundsAtPoint(engine: CanvasEngine, point: Point, hitTole
   }
 }
 
-/**
- * Rectangle (marquee) selection controller operating on the raster tiles.
- * Select = click an ink element, or drag a rectangular box around an area.
- */
 export class SelectionController {
   private marquering: Point | null = null;
   private current: Point | null = null;
@@ -235,7 +216,6 @@ export class SelectionController {
     engine.onInteractionFrame((ctx) => {
       const unit = 1 / engine.camera.scale;
 
-      // Render marquee dragging rectangle
       if (this.marquering && this.current) {
         const r = rectFromPoints(this.marquering, this.current);
         if (r.w >= 6 || r.h >= 6) {
@@ -247,7 +227,6 @@ export class SelectionController {
         }
       }
 
-      // Render active selection bounding box & floating preview while moving
       if (this.selection && !this.marquering) {
         const sel = this.selection;
         let drawAt: Rect = sel.rect;
@@ -280,7 +259,6 @@ export class SelectionController {
     return this.selection ? { ...this.selection.rect } : null;
   }
 
-  /** Check if a world point is over or near the active selection frame or inside its bounds. */
   hitTest(point: Point, tolerance = 12): boolean {
     if (!this.selection) return false;
     const s = this.selection.rect;
@@ -300,7 +278,6 @@ export class SelectionController {
     );
   }
 
-  /** Directly select element (ink/text/formula/shape) at world point if hit. Returns true if hit & selected. */
   selectElementAtPoint(point: Point): boolean {
     if (this.selection) this.commitSelection();
     const rect = findInkBoundsAtPoint(this.engine, point);
@@ -313,7 +290,6 @@ export class SelectionController {
     return false;
   }
 
-  // --- Marquee Rect Selection ---
   beginMarquee(pointerId: number, world: Point): void {
     void pointerId;
     if (this.selection) this.commitSelection();
@@ -345,7 +321,6 @@ export class SelectionController {
     this.engine.requestInteractionRender(rect);
   }
 
-  // --- Move Gesture ---
   beginMove(pointerId: number, world: Point): void {
     if (!this.selection) return;
     this.moving = { id: pointerId, start: world, offset: { x: 0, y: 0 } };
@@ -353,7 +328,6 @@ export class SelectionController {
   }
 
   private liftSelection(): void {
-    // Lift pixels off the board the first time the drag actually moves.
     if (this.hasErasedOriginal || !this.selection) return;
     eraseRegion(this.engine, this.selection.rect);
     this.hasErasedOriginal = true;
@@ -402,7 +376,6 @@ export class SelectionController {
     return moved;
   }
 
-  /** Commit floating selection into tiles if moved, or leave as-is if un-moved. */
   commitSelection(): void {
     if (!this.selection) return;
     if (this.hasErasedOriginal) {

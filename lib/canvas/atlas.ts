@@ -8,7 +8,7 @@ const MAX_ATLAS_WIDTH = 2048;
 const MAX_ATLAS_HEIGHT = 1536;
 
 export interface AtlasResult {
-  atlasImage: string; // WebP data URL
+  atlasImage: string;
   imageSize: { w: number; h: number };
   visibleRect: Rect;
   sourceRect: Rect;
@@ -16,10 +16,6 @@ export interface AtlasResult {
   imageScale: number;
 }
 
-/**
- * Render a widget directly to canvas context without tainting the canvas.
- * Handles both pure SVG diagrams (Mermaid, DOT, SMILES) and rich HTML (CV, cards, tables).
- */
 export async function renderWidgetToContext(
   widget: WidgetItem,
   q: CanvasRenderingContext2D
@@ -37,7 +33,6 @@ export async function renderWidgetToContext(
     } catch {}
   }
 
-  // Parse HTML string with DOMParser to safely extract SVG and styles without regex XML corruption
   const parser = new DOMParser();
   const doc = parser.parseFromString(widget.html, "text/html");
   const svgEl = doc.querySelector("svg");
@@ -48,7 +43,6 @@ export async function renderWidgetToContext(
       clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
       clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
 
-      // Extract all <style> elements from the document and insert into <defs> in the SVG
       const styles = Array.from(doc.querySelectorAll("style"))
         .map((s) => s.textContent || "")
         .join("\n");
@@ -60,7 +54,6 @@ export async function renderWidgetToContext(
         clone.insertBefore(defs, clone.firstChild);
       }
 
-      // Sanitize foreignObjects to pure SVG <text> elements with exact centered coordinates
       const foreignObjects = Array.from(clone.querySelectorAll("foreignObject"));
       for (const fo of foreignObjects) {
         const foW = parseFloat(fo.getAttribute("width") || "0");
@@ -83,7 +76,6 @@ export async function renderWidgetToContext(
         fo.parentElement?.replaceChild(textEl, fo);
       }
 
-      // Ensure explicit width and height on root SVG
       const vb = clone.viewBox?.baseVal;
       if (vb && vb.width > 0 && vb.height > 0) {
         clone.setAttribute("width", String(vb.width));
@@ -107,7 +99,6 @@ export async function renderWidgetToContext(
     }
   }
 
-  // Case 2: HTML widget or rich formatted document (CV layout, cards, forms, tables)
   try {
     await renderHtmlToContext(widget, q);
   } catch (err) {
@@ -115,10 +106,6 @@ export async function renderWidgetToContext(
   }
 }
 
-/**
- * Accurately renders HTML elements (boxes, borders, backgrounds, typography, list bullets)
- * directly into CanvasRenderingContext2D matching the live canvas scaling and coordinate system.
- */
 async function renderHtmlToContext(
   widget: WidgetItem,
   q: CanvasRenderingContext2D
@@ -155,7 +142,6 @@ async function renderHtmlToContext(
     );
     doc.close();
 
-    // Wrap text nodes in spans for accurate line-wrapping and word-position measurement
     wrapTextNodes(doc.body);
 
     const rootRect = doc.body.getBoundingClientRect();
@@ -182,7 +168,6 @@ async function renderHtmlToContext(
       const style = frame.contentWindow?.getComputedStyle(el) || window.getComputedStyle(el);
       if (style.display === "none") continue;
 
-      // Draw background color if non-transparent
       const bg = style.backgroundColor;
       if (bg && bg !== "transparent" && bg !== "rgba(0, 0, 0, 0)") {
         q.fillStyle = bg;
@@ -196,7 +181,6 @@ async function renderHtmlToContext(
         }
       }
 
-      // Draw borders
       const btW = parseFloat(style.borderTopWidth) || 0;
       const bbW = parseFloat(style.borderBottomWidth) || 0;
       const blW = parseFloat(style.borderLeftWidth) || 0;
@@ -235,7 +219,6 @@ async function renderHtmlToContext(
         q.stroke();
       }
 
-      // If it's a list item, draw bullet
       if (el.tagName === "LI") {
         q.fillStyle = style.color || "#000";
         q.beginPath();
@@ -246,7 +229,6 @@ async function renderHtmlToContext(
         q.fill();
       }
 
-      // Draw word text spans
       if (el.dataset.drawvaWord === "true") {
         const text = el.textContent || "";
         if (text) {
@@ -261,7 +243,6 @@ async function renderHtmlToContext(
       }
     }
 
-    // Render any embedded <svg> elements inside the HTML widget
     const svgs = doc.body.querySelectorAll<SVGSVGElement>("svg");
     for (let j = 0; j < svgs.length; j++) {
       const svgEl = svgs[j];
@@ -293,9 +274,6 @@ async function renderHtmlToContext(
   }
 }
 
-/**
- * Wraps words into spans so we can measure each word's exact wrapped position.
- */
 function wrapTextNodes(parent: Node): void {
   const textNodes: Text[] = [];
   const walk = document.createTreeWalker(parent, NodeFilter.SHOW_TEXT);
@@ -370,11 +348,6 @@ function drawObjects(
   }
 }
 
-/**
- * Build the AI-visible image from the current viewport: white background, then
- * ink tiles, widgets, and living objects packed in, scaled to ≤2048px, exported as a WebP data URL.
- * `changedBox` highlights the latest user ink (drawn at full opacity) over a dimmed context.
- */
 export async function buildAtlas(
   engine: CanvasEngine,
   viewport: Rect,
@@ -402,7 +375,6 @@ export async function buildAtlas(
 
   const hasChangedBox = !!changedBox && (changedBox.w > 0 || changedBox.h > 0);
 
-  // Dim context for everything outside the changed box.
   q.save();
   if (hasChangedBox) q.globalAlpha = 0.42;
   drawTiles(engine, q, sourceRect);
@@ -430,7 +402,6 @@ export async function buildAtlas(
     data = out.toDataURL(includeWidgetTiles ? "image/png" : "image/webp", 0.9);
   } catch (err) {
     console.warn("[buildAtlas] toDataURL fallback:", err);
-    // Fallback: draw only tiles if anything unexpected tainted the canvas
     const fallbackCanvas = document.createElement("canvas");
     fallbackCanvas.width = outW;
     fallbackCanvas.height = outH;
@@ -486,10 +457,6 @@ function intersect(a: Rect, b: Rect): Rect {
   };
 }
 
-/**
- * Create a 2x magnified WebP image crop of the user's latest handwriting region
- * (changedBox) to assist the vision model with character-level OCR & math recognition.
- */
 export async function buildFocusInset(
   engine: CanvasEngine,
   changedBox: Rect | null,
@@ -529,5 +496,3 @@ export async function buildFocusInset(
     return undefined;
   }
 }
-
-

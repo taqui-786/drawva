@@ -46,7 +46,6 @@ function parseCleanErrorMessage(raw: string): string {
   if (!raw) return "AI request failed";
   let clean = raw.trim();
 
-  // Extract inner JSON error message if present (e.g. 400 {"error":{"message":"..."}})
   const jsonBraceIndex = clean.indexOf("{");
   if (jsonBraceIndex >= 0) {
     try {
@@ -74,7 +73,6 @@ function distanceBetweenRects(a: Rect, b: { x: number; y: number; w: number; h: 
   return Math.hypot(dx, dy);
 }
 
-/** Parse the SSE stream from POST /api/canvas/ai. */
 async function readSse(
   res: Response,
   onEvent: (e: AgentEvent) => void
@@ -119,9 +117,6 @@ async function readSse(
 
 export function CanvasApp() {
   const { engine, mountRef } = useCanvas();
-  // Global shared state (Penecho-style): mode/color/pen/zoom/aiStatus/autoOn.
-  // Reading only these fields means CanvasApp re-renders ONLY when they change,
-  // never on every pan/zoom frame (the footer subscribes to zoom on its own).
   const { mode, color, pen, aiStatus, autoOn } = useSnapshot(appState);
   const eraser = 18;
 
@@ -147,8 +142,6 @@ export function CanvasApp() {
   });
   const [connectOpen, setConnectOpen] = useState(false);
 
-  // ---- P2P real-time move/resize sync ----
-  // Drag gestures fire at pointer rate; throttle to ~25 packets/s per item.
   const lastMoveSyncRef = useRef<Record<string, number>>({});
   function broadcastMove(kind: "widget" | "object", packet: Extract<import("@/lib/canvas/sync").SyncPacket, { id: string }>): void {
     const key = `${kind}:${packet.id}`;
@@ -158,7 +151,6 @@ export function CanvasApp() {
     syncManager.current?.broadcast(packet);
   }
 
-  // ---- living object helpers (#3): create + merge-back-to-ink ----
   const addObject = useCallback((item: ObjectItem): void => {
     objects.current?.add(item);
     const { image, ...cleanObject } = item;
@@ -175,7 +167,7 @@ export function CanvasApp() {
     const eng = engine;
     const item = om?.get(id);
     if (!om || !eng || !item) return;
-    history.current?.recordObjects(); // remove-from-history is a board change
+    history.current?.recordObjects();
     if (item.kind === "text") {
       rasterizeText(eng, item.source, { x: item.x, y: item.y }, { color: item.color, fontSize: item.fontSize, maxWidth: item.maxWidth ?? item.w });
     } else if (item.kind === "formula") {
@@ -189,18 +181,16 @@ export function CanvasApp() {
     afterBoardChangeRef.current();
   }
 
-  // ---- AI auto loop (Part 8) ----
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aiAbort = useRef<AbortController | null>(null);
-  const aiSeq = useRef(0); // monotonic request id
-  const aiRevision = useRef(0); // bump on every user ink commit
+  const aiSeq = useRef(0);
+  const aiRevision = useRef(0);
   const inkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
   const lastStrokeTimeRef = useRef<number>(0);
   const refineFocusRef = useRef<{ rect: Rect; widgetId: string } | null>(null);
   const activeEditTargetRef = useRef<string | null>(null);
 
-  // ---- Mobile touch pinch-zoom & 2-finger pan tracking ----
   const activePointersRef = useRef<Map<number, Point>>(new Map());
   const pinchRef = useRef<{
     startCenter: Point;
@@ -223,7 +213,6 @@ export function CanvasApp() {
     return () => el.removeEventListener("touchmove", onTouchMove);
   }, []);
 
-  // ---- AI provider config (localStorage-driven; dialog writes, we react) ----
   const [models, setModels] = useState<string[]>([]);
   const [activeModel, setActiveModelState] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -245,7 +234,6 @@ export function CanvasApp() {
     setActiveModelState(model);
   };
 
-  // ---- live state surfaced in the header badge ----
   const [aiRun, setAiRun] = useState<AiRunState>({
     phase: "idle",
     activeProvider: null,
@@ -273,7 +261,6 @@ export function CanvasApp() {
     const draft = drafts.current;
     if (!engineAtCall || !draft) return;
 
-    // Read the live provider config + active model at request time.
     const config = getProviderConfig();
     const model = getActiveModel() || models[0] || null;
     if (!config) {
@@ -298,7 +285,6 @@ export function CanvasApp() {
     }
 
     setAiStatus("thinking");
-    // Supersede any in-flight request.
     aiAbort.current?.abort();
     const controller = new AbortController();
     aiAbort.current = controller;
@@ -309,7 +295,6 @@ export function CanvasApp() {
     const atlas = await buildAtlas(engineAtCall, viewport, box, wm, objects.current);
     const scene = buildScene(wm, objects.current);
 
-    // Build widgetEdit target if explicit refine focus set OR ink is drawn on/near an existing widget
     let widgetEditTarget: import("@/lib/ai/types").WidgetEditContext | undefined = undefined;
     if (refineFocusRef.current && wm) {
       const targetItem = wm.get(refineFocusRef.current.widgetId);
@@ -326,7 +311,6 @@ export function CanvasApp() {
         };
       }
     } else if (wm && box.w > 0 && box.h > 0 && box.w < 3500 && box.h < 3500) {
-      // Find closest widget within proximity threshold (160px in world coordinates)
       let closestWidget: WidgetItem | null = null;
       let minDistance = Infinity;
       for (const w of wm.all()) {
@@ -401,7 +385,6 @@ export function CanvasApp() {
         });
       }
 
-      // Record full AI request & generation log for debugging / inspection
       const logEntry: AiLogEntry = {
         timestamp: reqTimestamp,
         requestId: payload.requestId,
@@ -428,8 +411,6 @@ export function CanvasApp() {
       setLatestLog(logEntry);
 
       if (Array.isArray(data.commands) && data.commands.length) {
-        // An accepted AI batch can spawn objects/widgets — capture the pre-state
-        // so the accept is a single undoable gesture (Penecho pendingBefore).
         history.current?.recordObjects();
         history.current?.recordWidgets();
         draft.setPending(data.commands as CanvasCommand[]);
@@ -463,9 +444,8 @@ export function CanvasApp() {
         } catch {}
         throw new Error(parseCleanErrorMessage(msg));
       }
-      // Late-response discard: ignore stale replies (request-id guard).
       if (requestId !== aiSeq.current) return;
-      if (aiRevision.current !== revision) return; // user drew again mid-flight
+      if (aiRevision.current !== revision) return;
       if (isStream) {
         await applyReply(await readSse(res, handleAiEvent));
       } else {
@@ -473,7 +453,7 @@ export function CanvasApp() {
         await applyReply(data);
       }
     } catch (err) {
-      if (controller.signal.aborted) return; // superseded — clean drop
+      if (controller.signal.aborted) return;
       setAiStatus("error");
       setAiRun((prev) => ({ ...prev, phase: "error" }));
       const desc = err instanceof Error ? parseCleanErrorMessage(err.message) : "AI request failed";
@@ -538,9 +518,6 @@ export function CanvasApp() {
     void fireAi(box, undefined);
   }
 
-  // ---- undo / redo / clear + autosave + project file (Part 11) ----
-  // #5: diff-based history (Penecho) — the BoardHistory journal records only
-  // touched tiles + widget/object records, not a full-board snapshot per change.
   const undoRef = useRef<() => void>(() => {});
   const redoRef = useRef<() => void>(() => {});
   const [canUndoState, setCanUndo] = useState(false);
@@ -570,7 +547,7 @@ export function CanvasApp() {
 
   async function undo() {
     const tm = tools.current;
-    if (tm) tm.clearSelection(); // drop any stale floating selection (no tile writes)
+    if (tm) tm.clearSelection();
     const h = history.current;
     if (!h || !h.canUndo) return;
     await h.undo();
@@ -601,7 +578,7 @@ export function CanvasApp() {
 
   function clearBoard() {
     if (!engine) return;
-    history.current?.captureWholeBoard(); // Clear is itself an undoable diff
+    history.current?.captureWholeBoard();
     engine.tiles.clear();
     engine.requestRender();
     widgets.current?.clear();
@@ -624,7 +601,6 @@ export function CanvasApp() {
   async function doImportJson(file: File) {
     if (!engine) return;
     try {
-      // A loaded project replaces the whole board — start a fresh history.
       history.current?.reset();
       await importJson(engine, widgets.current, objects.current, file);
       afterBoardChange();
@@ -633,7 +609,6 @@ export function CanvasApp() {
     }
   }
 
-  // ---- engine + tool lifecycle ----
   useEffect(() => {
     if (!engine) return;
     const tm = new ToolManager(engine, () => ({ color: appState.color, pen: appState.pen, eraser }), "hand");
@@ -652,7 +627,7 @@ export function CanvasApp() {
         onDragMove: (id, e) => {
           const g = widgetDrag.current;
           if (!g || g.id !== id) return;
-          history.current?.recordWidgets(); // first real move = before-capture
+          history.current?.recordWidgets();
           const dx = (e.clientX - g.last.x) / engine.camera.scale;
           const dy = (e.clientY - g.last.y) / engine.camera.scale;
           wm.move(id, dx, dy);
@@ -664,7 +639,7 @@ export function CanvasApp() {
           widgetDrag.current = null;
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h });
-          afterBoardChangeRef.current(); // widget move is an undoable change
+          afterBoardChangeRef.current();
         },
         onResizeStart: (id, e) => {
           widgetResize.current = { id, last: { x: e.clientX, y: e.clientY } };
@@ -702,7 +677,6 @@ export function CanvasApp() {
         onAiRefine: (id) => {
           const item = wm.get(id);
           if (!item || !engine) return;
-          // PenEcho-style: scope the next AI pass to the widget's neighbourhood.
           const margin = 600;
           const focused: Rect = {
             x: Math.max(0, item.x - margin),
@@ -719,8 +693,6 @@ export function CanvasApp() {
     });
     widgets.current = wm;
 
-    // Living objects (text/formula/plot) — the #3 divergence fix. These stay
-    // as DOM-chromed attachments with source data instead of baking to pixels.
     const om = new ObjectManager({
       engineContainer: engine.rootElement,
       camera: engine.camera,
@@ -779,16 +751,11 @@ export function CanvasApp() {
     });
     objects.current = om;
 
-    // #5: diff-based undo/redo journal (Penecho recordBefore/save). The engine's
-    // tile-write hook journals the "before" bitmaps lazily; every board change
-    // afterBoardChange() then folds them into a single history entry.
     const boardHistory = new BoardHistory();
     boardHistory.bind(engine, wm, om);
     history.current = boardHistory;
     engine.setTileWriteHook((tx, ty) => boardHistory.recordTileBefore(tx, ty));
 
-    // Route select-tool shell picking/moving through the ToolManager so every
-    // gesture (pan / shell-drag / selection / drawing) shares one router.
     tm.setPicker({
       pick: (w) => {
         const wmHit = wm.hitTest(w);
@@ -808,7 +775,7 @@ export function CanvasApp() {
       },
       translate: (node, dx, dy) => {
         if (node.kind === "widget") {
-          history.current?.recordWidgets(); // first translate = before-capture
+          history.current?.recordWidgets();
           wm.move(node.id, dx, dy);
           const item = wm.get(node.id);
           if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h });
@@ -1096,8 +1063,6 @@ export function CanvasApp() {
     };
   }, [engine]);
 
-  // ---- restore autosave on mount (after managers exist so objects/widgets
-  // come back from JSON source data, not just ink) ----
   useEffect(() => {
     if (!engine) return;
     let cancelled = false;
@@ -1105,7 +1070,7 @@ export function CanvasApp() {
       const saved = await loadAutosave();
       if (saved && !cancelled) {
         await restoreSnapshot(engine, widgets.current, objects.current, saved);
-        history.current?.reset(); // restored board ≠ user's edit history
+        history.current?.reset();
       }
     })();
     return () => {
@@ -1119,7 +1084,6 @@ export function CanvasApp() {
     objects.current?.setMode(mode);
   }, [mode, engine]);
 
-  // Forward wheel gestures occurring inside widget iframes so the canvas still zooms.
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (e.data?.type !== "drawva-widget-wheel") return;
@@ -1143,7 +1107,6 @@ export function CanvasApp() {
     return () => window.removeEventListener("message", onMsg);
   }, [engine]);
 
-  // ---- inject a demo interactive widget (Part 4 manual verification) ----
   const addDemoWidget = () => {
     const wm = widgets.current;
     if (!wm || !engine) return;
@@ -1226,7 +1189,6 @@ export function CanvasApp() {
     draft.accept(engine).then(afterBoardChange).catch(console.error);
   };
 
-  // ---- text editor overlay ----
   const [textOpen, setTextOpen] = useState(false);
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
   const [textValue, setTextValue] = useState("");
@@ -1234,8 +1196,6 @@ export function CanvasApp() {
 
   const commitText = useCallback(() => {
     if (engine && textAnchor && textValue.trim()) {
-      // Create a LIVING text object (not baked ink) so P2P peers receive it via
-      // SYNC_OBJECT_ADD and can re-render + move it — same path as AI write_text.
       const fontSize = Math.max(8, pen * 6);
       const maxWidth = 600;
       const block = renderTextBlock(textValue, color, fontSize, maxWidth);
@@ -1255,20 +1215,19 @@ export function CanvasApp() {
         status: "accepted",
         image: block.canvas,
       });
-      afterBoardChangeRef.current(); // text commit is an undoable change
+      afterBoardChangeRef.current();
     }
     setTextOpen(false);
     setTextValue("");
     setTextAnchor(null);
   }, [engine, textAnchor, textValue, color, pen, addObject]);
 
-  // ---- keyboard shortcuts ----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = (e.target as HTMLElement)?.tagName;
       if (t === "TEXTAREA" || t === "INPUT") return;
       const k = e.key.toLowerCase();
-if (e.shiftKey && k === "h") setMode("highlighter");
+      if (e.shiftKey && k === "h") setMode("highlighter");
       else if (k === "v") setMode("select");
       else if (k === "h") setMode("hand");
       else if (k === "p") setMode("pen");
@@ -1299,13 +1258,11 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  // ---- pointer dispatch ----
   const screenToWorld = (e: React.PointerEvent): Point => {
     const rect = engine!.canvas("screen").getBoundingClientRect();
     return engine!.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
   };
 
-  // Normalize a pointer event into the ToolManager's gesture payload.
   const gestureEvent = (e: React.PointerEvent): ToolGestureEvent => {
     const rect = engine!.canvas("screen").getBoundingClientRect();
     return {
@@ -1322,7 +1279,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
 
     activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-    // Multi-touch pinch gesture on mobile (2+ active touch points)
     if (activePointersRef.current.size >= 2) {
       if (drawingRef.current) {
         drawingRef.current = null;
@@ -1354,8 +1310,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
       return;
     }
 
-    // penecho: capture the pointer for EVERY gesture, so strokes survive moving
-    // over widget iframes or off the canvas element.
     try {
       (e.target as Element).setPointerCapture?.(e.pointerId);
     } catch {}
@@ -1363,7 +1317,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     if (!tm) return;
     const middle = e.button === 1;
     if (middle || mode === "hand") {
-      // Pan owns the pointer for the whole gesture; ToolManager routes it.
       e.preventDefault();
       widgets.current?.setSelected(null);
       objects.current?.setSelected(null);
@@ -1375,7 +1328,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     const isDrawing = ["pen", "highlighter", "eraser", "rect", "ellipse", "arrow"].includes(mode);
     if (isDrawing) {
       drawingRef.current = { x: world.x, y: world.y, w: 0, h: 0 };
-      // New user ink supersedes any pending/in-flight AI.
       if (aiTimer.current) {
         clearTimeout(aiTimer.current);
         aiTimer.current = null;
@@ -1390,7 +1342,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
       requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
-    // Select/hand/pen/shape/etc. all route through the single gesture router.
     tm.begin(gestureEvent(e));
   };
 
@@ -1401,7 +1352,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
       activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     }
 
-    // Active 2-finger touch pinch & pan
     if (activePointersRef.current.size >= 2 && pinchRef.current) {
       const pts = Array.from(activePointersRef.current.values());
       const target = gestureOverlayRef.current || (e.currentTarget as HTMLElement);
@@ -1430,9 +1380,7 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     if (!tm) return;
     const world = screenToWorld(e);
     syncManager.current?.sendCursor(world.x, world.y, mode);
-    // Passive moves with no active gesture still update live marquee/ink previews.
     tm.move(gestureEvent(e));
-    // Expand the live ink bbox during a drawing gesture.
     if (drawingRef.current) {
       const d = drawingRef.current;
       const x1 = Math.min(d.x, world.x);
@@ -1453,8 +1401,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
     if (!tm) return;
     const changed = tm.end(e.pointerId);
     if (changed) afterBoardChange();
-    // On commit of a drawing gesture, record the ink box, bump revision, and
-    // schedule the auto-AI request.
     if (drawingRef.current) {
       if (mode === "eraser") {
         if (aiTimer.current) {
@@ -1569,9 +1515,6 @@ if (e.shiftKey && k === "h") setMode("highlighter");
         hasLogs={!!latestLog}
       />
 
-      {/* Playground: engine root + one deterministic gesture target above it.
-          Widget shells raise themselves only for their interactive chrome
-          (select/hand); the rest of the canvas must always receive input. */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div ref={mountRef} className="absolute inset-0" />
         <div

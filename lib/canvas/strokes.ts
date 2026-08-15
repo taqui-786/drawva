@@ -2,16 +2,11 @@ import { CanvasEngine, unionRect } from "./engine";
 import { SIZE, TILE } from "./constants";
 import type { Point, Rect } from "./types";
 
-/**
- * Low-level stroke raster ops, direct port of penecho persistence.js
- * stroke()/dot()/pressureWidth()/logicalWidth()/drawPreview().
- */
-
 export interface StrokeOptions {
   color: string;
-  pen: number; // css width for the pen tool
-  eraser: number; // css width for the eraser
-  highlighterTop: boolean; // whether highlighter draws alone on a top layer
+  pen: number;
+  eraser: number;
+  highlighterTop: boolean;
 }
 
 export function strokeSegment(
@@ -35,7 +30,6 @@ export function strokeSegment(
 
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
-      // Segment vs tile-intersection quick reject (aabb overlap of the stroke box).
       const tileBox = {
         x: tx * TILE - pad,
         y: ty * TILE - pad,
@@ -115,13 +109,6 @@ function segmentBoxIntersects(a: Point, b: Point, box: { x: number; y: number; w
   return true;
 }
 
-/**
- * Live pen / eraser / highlighter gesture controller.
- * Matches penecho's drawing state machine: pointerdown dots, pointermove strokes
- * a->p, pointerup finalizes. Pen strokes paint directly into the tiles; the
- * eraser also paints (destination-out) and shows a cursor preview on the
- * interaction layer.
- */
 export class StrokeController {
   private active: {
     id: number;
@@ -136,7 +123,6 @@ export class StrokeController {
     private engine: CanvasEngine,
     private opts: () => StrokeOptions
   ) {
-    // Live eraser cursor rendered each frame (survives pan/zoom).
     engine.onInteractionFrame((ctx) => {
       if (!this.eraserPreview) return;
       ctx.beginPath();

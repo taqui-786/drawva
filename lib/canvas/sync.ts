@@ -115,7 +115,6 @@ export class SyncManager {
     return this.isApplyingRemote;
   }
 
-  /** Generate host code and start WebRTC peer server. */
   async hostSession(): Promise<string> {
     this.disconnect();
     const code = generateShortCode();
@@ -159,7 +158,6 @@ export class SyncManager {
     return code;
   }
 
-  /** Join an existing room code. */
   async joinSession(rawCode: string): Promise<void> {
     this.disconnect();
     const code = rawCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -316,9 +314,7 @@ export class SyncManager {
       if (conn.open) {
         try {
           conn.send(safePacket);
-        } catch {
-          // ignore closed connection errors
-        }
+        } catch {}
       }
     }
   }

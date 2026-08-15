@@ -171,11 +171,11 @@
   addEventListener("message", (event) => {
     const data = event.data;
     if (!data || typeof data !== "object") return;
-    if (data.type === "penecho-widget-init") {
+    if (data.type === "drawva-widget-init") {
       if (typeof data.html !== "string" || data.html.length > MAX_HTML_LENGTH) return;
       writeInner(data.html);
-    } else if (data.type === "penecho-widget-state") {
-      inner.contentWindow && inner.contentWindow.postMessage({ type: "penecho-widget-state", selected: !!data.selected, active: !!data.active }, "*");
+    } else if (data.type === "drawva-widget-state") {
+      inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-state", selected: !!data.selected, active: !!data.active }, "*");
     } else if (data.type === "drawva-widget-resize-content") {
       forward({ type: "drawva-widget-resize-content", width: data.width, height: data.height });
     } else if (data.type === "drawva-widget-inner-wheel") {
@@ -208,7 +208,7 @@
     postAnywhere({ type: "drawva-widget-pointerdown" });
   }, true);
 
-  forward({ type: "penecho-widget-host-ready" });
+  forward({ type: "drawva-widget-host-ready" });
 })();
 </script>
 </body>

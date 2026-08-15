@@ -126,7 +126,6 @@ export async function POST(req: Request) {
   return json(validateReply(reply, visibleRect, changedBox, !!widgetEdit));
 }
 
-/** Server-Sent Events response that reports live provider/retry progress. */
 function streamReply(
   aiRequest: AiRequest,
   sceneText: string,

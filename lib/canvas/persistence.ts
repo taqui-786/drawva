@@ -7,16 +7,10 @@ import { renderFormula } from "./formulas";
 import { plotCommand } from "./plotter";
 import { renderWidgetToContext } from "./atlas";
 
-// ============================================================================
-// Persistence: IndexedDB autosave + PNG export + project JSON import/export.
-// Tiles are serialized as PNG dataURLs keyed by "tx,ty". Widgets and living
-// objects as plain JSON (object bitmaps are re-rendered from source on load).
-// ============================================================================
-
 export interface ProjectSnapshot {
   version: 1;
   savedAt: number;
-  tiles: Record<string, string>; // key -> dataURL
+  tiles: Record<string, string>;
   widgets: WidgetItem[];
   objects: ObjectItem[];
 }
@@ -36,9 +30,7 @@ export function serializeSnapshot(
     if (c) {
       try {
         tiles[k] = c.toDataURL("image/png");
-      } catch {
-        // skip unreadable tiles
-      }
+      } catch {}
     }
   }
   return {
@@ -55,7 +47,7 @@ export function serializeSnapshot(
     objects: objects
       ? objects.all().map((o) => {
           const { image, ...rest } = o;
-          void image; // bitmaps are re-rendered from source on restore
+          void image;
           return rest;
         })
       : [],
@@ -98,7 +90,6 @@ export async function restoreSnapshot(
   objects?.sync();
 }
 
-/** Re-rasterize a persisted living object from its source data. */
 export async function renderObject(
   engine: CanvasEngine,
   o: ObjectItem
@@ -135,12 +126,8 @@ export async function renderObject(
   }
 }
 
-// ---- IndexedDB ----
-
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    // Version 2 ensures onupgradeneeded always runs (creating the store if a
-    // stale v1 DB exists without one).
     const req = indexedDB.open(DB_NAME, 2);
     req.onupgradeneeded = () => {
       const db = req.result;
@@ -163,9 +150,7 @@ export async function saveAutosave(snapshot: ProjectSnapshot): Promise<void> {
       };
       tx.onerror = () => reject(tx.error);
     });
-  } catch {
-    // ignore autosave failures (private mode / quota)
-  }
+  } catch {}
 }
 
 export async function loadAutosave(): Promise<ProjectSnapshot | null> {
@@ -184,8 +169,6 @@ export async function loadAutosave(): Promise<ProjectSnapshot | null> {
     return null;
   }
 }
-
-// ---- PNG export ----
 
 export async function exportPng(
   engine: CanvasEngine,
@@ -262,8 +245,6 @@ export async function exportPng(
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }, "image/png");
 }
-
-// ---- Project JSON import/export ----
 
 export function exportJson(
   engine: CanvasEngine,

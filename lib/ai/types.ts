@@ -31,7 +31,7 @@ export interface WidgetEditContext {
 
 export interface AiRequest {
   requestId: string;
-  atlasImage: string; // WebP data URL ≤2048px
+  atlasImage: string;
   visibleRect: AiBox;
   captureRect: AiBox;
   sourceRect: AiBox;
@@ -42,15 +42,10 @@ export interface AiRequest {
   trigger: "manual" | "user_paused";
   uiTheme?: string;
   widgetEdit?: WidgetEditContext;
-  /** Magnified 2x crop of recent handwriting for high-precision OCR/LaTeX. */
   focusInset?: string;
-  /** Provider type (openai, anthropic, gemini, nvidia, custom). */
   providerType?: ProviderType;
-  /** Provider base URL (OpenAI-compatible), sent per request by the client. */
   baseUrl?: string;
-  /** Provider API key, sent per request by the client. Never logged. */
   apiKey?: string;
-  /** Model id the user picked (see lib/ai/provider.ts). */
   model?: string;
 }
 
@@ -71,15 +66,11 @@ export interface AiReply {
   intent: AiIntent;
   message?: string;
   observedText?: string;
-  /** Raw model commands — validate before applying. */
   commands: unknown[];
   attempts: number;
   requestId: string;
-  /** Provider id that actually generated this reply. */
   providerId?: string;
-  /** Token usage for this request. */
   tokenUsage?: TokenUsage;
-  /** Debug and inspection log data. */
   debug?: AiDebugInfo;
 }
 
@@ -108,7 +99,6 @@ export interface AiLogEntry {
   };
 }
 
-/** Zod-validated model output before command normalization. */
 export interface ModelReply {
   intent: AiIntent;
   message?: string;
@@ -122,7 +112,6 @@ export interface SceneJson {
   count: number;
 }
 
-/** Result payload streamed to the client during generation. */
 export type AgentEvent =
   | { type: "provider_start"; provider: string }
   | { type: "provider_failed"; provider: string; error: string }

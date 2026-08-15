@@ -95,7 +95,6 @@ export async function POST(req: Request) {
     }
   }
 
-  // Combine user custom models + fetched models + built-in fallback presets
   const combinedCandidates: string[] = [];
 
   if (customModels.length > 0) {

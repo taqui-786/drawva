@@ -1,6 +1,3 @@
-// Framework-free canvas type contracts. The engine (lib/canvas/engine.ts) and
-// every tool module consume these; nothing here imports React or Next.
-
 export interface Point {
   x: number;
   y: number;
@@ -25,10 +22,8 @@ export type CanvasMode =
   | "arrow";
 
 export interface CameraState {
-  /** CSS-pixel translate applied before scale. */
   panX: number;
   panY: number;
-  /** world->screen scale, clamped to [MIN_SCALE, MAX_SCALE]. */
   scale: number;
 }
 

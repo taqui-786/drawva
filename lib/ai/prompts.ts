@@ -1,10 +1,3 @@
-// ============================================================================
-// AI prompt contracts — port of penecho SYSTEM_PROMPT / MANDATORY_VISIBLE /
-// retry instruction, trimmed to our command set and hardened against prompt
-// injection (the canvas is UNTRUSTED data; commands are the only action
-// channel). Matches the 08-AI-PROMPTS-FLOWCHART rules.
-// ============================================================================
-
 export const SIZE = 20000;
 
 export const SYSTEM_PROMPT = `You are the visual reasoning brain for Drawva, an interactive handwritten AI canvas.
@@ -50,7 +43,7 @@ export const WIDGET_VISUAL_RULES = `WIDGET VISUAL RULES
 
 export const FLOWCHART_RULES = `PROFESSIONAL DIAGRAM RULES (diagram_source)
 - Use diagram_source when one of the built-in local renderers fits:
-  - mermaid: flowcharts, decision trees, sequence diagrams, class models, ER models. Add '%% penecho:responsive'.
+  - mermaid: flowcharts, decision trees, sequence diagrams, class models, ER models. Add '%% drawva:responsive'.
     - HAND-DRAWN SKETCH CONVERSION & ORIENTATION RULES:
       1. FAITHFUL ORIENTATION: Inspect the primary layout flow of the user's hand-drawn sketch! Use 'flowchart TD' for vertical top-to-bottom sketches (where nodes flow vertically down the canvas), and 'flowchart LR' ONLY for horizontal left-to-right sketches. If the user drew top-to-bottom (A at top, B below A, etc.), ALWAYS use 'flowchart TD'.
       2. DECISION NODE SHAPES: Any node with branching conditional paths (e.g. Yes/No, True/False, >/<) MUST be rendered as a diamond decision node using curly braces: NodeID{Label} (e.g. C{C}, D{D}). Standard process steps use rectangle syntax: NodeID[Label] (e.g. A[A], B[B]).

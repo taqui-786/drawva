@@ -13,11 +13,6 @@ import { CanvasEngine } from "@/lib/canvas/engine";
 interface CanvasContextValue {
   engine: CanvasEngine | null;
   ready: boolean;
-  /**
-   * Attach to the div that hosts the engine's stacked canvases. The caller
-   * controls layout (header / playground / footer), so this is decoupled from
-   * any fixed-position overlay.
-   */
   mountRef: (el: HTMLDivElement | null) => void;
 }
 
@@ -63,8 +58,6 @@ export function CanvasProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Re-exported for Part 2+ tools — kept here so the app route can wire pan/zoom
-// without touching the engine file again until the tool modules land.
 export function useEngineRequestRender(): () => void {
   const { engine } = useCanvas();
   return useCallback(() => engine?.requestRender(), [engine]);

@@ -3,16 +3,6 @@ import type { CanvasCommand, DrawPoint } from "./commands";
 import { eraseRegion } from "./selection";
 import { strokeSegment } from "./strokes";
 
-/**
- * AI draft lifecycle. Commands arrive validated; they are held as a "draft"
- * (rendered as a ghost on the interaction/overlay layer), then either
- * ACCEPTED (committed into the ink tiles + push to undo stack) or DISCARDED
- * (dropped, nothing touches the tiles).
- *
- * Renderers for write_text / draw_formula / plot_function / html_widget /
- * diagram_source are pluggable and registered by the React shell (they may
- * create living objects instead of baking pixels).
- */
 export type RenderCommand = (
   engine: CanvasEngine,
   command: CanvasCommand
@@ -22,7 +12,6 @@ export class DraftManager {
   private pending: CanvasCommand[] = [];
   private renderers = new Map<string, RenderCommand>();
 
-  /** Registered by later parts for draw_formula/plot/widgets/diagrams. */
   setRenderer(tool: string, fn: RenderCommand): void {
     this.renderers.set(tool, fn);
   }
@@ -39,15 +28,10 @@ export class DraftManager {
     this.pending = commands;
   }
 
-  /** Drop the current draft without committing anything. */
   discard(): void {
     this.pending = [];
   }
 
-  /**
-   * Commit the validated draft into the board. Raster-able commands are applied
-   * directly to the tiles; the rest go through the registered renderers.
-   */
   async accept(engine: CanvasEngine): Promise<number> {
     let applied = 0;
     for (const c of this.pending) {

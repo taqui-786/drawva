@@ -1,12 +1,6 @@
 import { pasteRegion } from "./selection";
 import type { CanvasEngine } from "./engine";
 
-// ============================================================================
-// MathJax (bundled, pinned 3.2.2) LaTeX → raster. Port of penecho
-// mathJaxImage()/formulaImage(). Produces an offscreen canvas image we bake
-// into the tiles at the command's anchor with fontSize scaling.
-// ============================================================================
-
 let mathjaxPromise: Promise<{ tex2svgPromise: (latex: string) => Promise<Element> }> | null = null;
 
 function loadMathJax() {
@@ -114,7 +108,6 @@ function formulaFallback(latex: string, fontSize: number, color: string): HTMLCa
   return canvas;
 }
 
-/** Bake a rendered formula into the tiles at (x, y). */
 export function bakeFormula(
   engine: CanvasEngine,
   anchorX: number,

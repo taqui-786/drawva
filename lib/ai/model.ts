@@ -1,9 +1,3 @@
-// ============================================================
-// Drawva AI — Multi-Provider Model Factory
-// Maps providerType (openai, anthropic, gemini, nvidia, groq, custom)
-// to the corresponding LangChain chat model instance.
-// ============================================================
-
 import { ChatOpenAI } from "@langchain/openai";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
@@ -11,7 +5,6 @@ import { ChatGroq } from "@langchain/groq";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { ProviderType } from "./provider";
 
-/** Total attempts per request (initial + `MAX_RETRIES - 1` retries). */
 export const MAX_RETRIES = 3;
 
 export interface CreateChatModelOptions {
@@ -19,9 +12,7 @@ export interface CreateChatModelOptions {
   baseUrl?: string;
   apiKey: string;
   model: string;
-  /** Millisecond request timeout. */
   timeoutMs?: number;
-  /** Sampling temperature for structured JSON generation. */
   temperature?: number;
 }
 

@@ -4,7 +4,6 @@ import { LayerStack, type LayerName } from "./layers";
 import { TileCache } from "./tiles";
 import type { Point, Rect } from "./types";
 
-/** Axis-aligned union of two rects (used for dirty-region accumulation). */
 export function unionRect(a: Rect, b: Rect): Rect {
   const x = Math.min(a.x, b.x);
   const y = Math.min(a.y, b.y);
@@ -29,10 +28,6 @@ const DEFAULT_PALETTE: EnginePalette = {
 
 type FrameListener = (engine: CanvasEngine) => void;
 
-/**
- * Framework-free stacked-canvas engine.
- * Direct port of penecho canvas-runtime.js render()/fit()/requestRender().
- */
 export class CanvasEngine {
   readonly camera = new Camera();
   readonly tiles = new TileCache();
@@ -54,15 +49,8 @@ export class CanvasEngine {
   palette: EnginePalette = { ...DEFAULT_PALETTE };
   gridVisible = true;
 
-  /** True while an AI draft/ghost is overlaid (used by draft accept/discard). */
   draftActive = false;
 
-  /**
-   * History journal hook: invoked right before a tile is first written during
-   * an edit session (Penecho's lazy recordBefore). Bound by the React shell to
-   * the BoardHistory journal — intentionally a plain hook so the engine stays
-   * framework-free.
-   */
   onTileWrite: ((tx: number, ty: number) => void) | null = null;
   onStrokeSegment: ((a: Point, b: Point, opts: { erase: boolean; size: number; color: string }) => void) | null = null;
 
@@ -84,12 +72,6 @@ export class CanvasEngine {
     return () => this.postFrame.delete(fn);
   }
 
-  /**
-   * Register a live interaction-layer renderer (pending shapes, marquee,
-   * selection outline, eraser dot). Called every frame after the interaction
-   * layer is cleared, with the world transform already applied. Port of
-   * penecho renderInteractionLayer's state-driven redraw.
-   */
   onInteractionFrame(fn: (ctx: CanvasRenderingContext2D) => void): () => void {
     this.interactionRenderers.add(fn);
     return () => this.interactionRenderers.delete(fn);
@@ -99,17 +81,14 @@ export class CanvasEngine {
     return this.layers.canvas(name);
   }
 
-  /** Notify the history journal of an imminent tile write (recordBefore). */
   noteTileWrite(tx: number, ty: number): void {
     this.onTileWrite?.(tx, ty);
   }
 
-  /** Bind/unbind the history journal hook (assigned from the React shell). */
   setTileWriteHook(fn: ((tx: number, ty: number) => void) | null): void {
     this.onTileWrite = fn;
   }
 
-  /** Bind/unbind live stroke broadcast hook (assigned from React shell). */
   setStrokeSegmentHook(
     fn: ((a: Point, b: Point, opts: { erase: boolean; size: number; color: string }) => void) | null
   ): void {
@@ -120,10 +99,6 @@ export class CanvasEngine {
     return this.layers.ctx(name);
   }
 
-  /**
-   * Port of penecho fit(): set backing-store size to CSS-rect*DPR for every
-   * layer, and re-run initial camera centering exactly once.
-   */
   fit(): void {
     const rect = this.root.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
@@ -133,10 +108,6 @@ export class CanvasEngine {
     this.requestRender();
   }
 
-  /**
-   * Port of penecho requestRender(): single dirty-flag rAF queue. NO persistent
-   * loop — the whiteboard only repaints when something invalidated.
-   */
   requestRender(): void {
     if (this.destroyed || this.renderQueued) return;
     this.renderQueued = true;
@@ -151,10 +122,6 @@ export class CanvasEngine {
     return `${c.panX}|${c.panY}|${c.scale}|${this.dpr}`;
   }
 
-  /**
-   * Port of penecho render() — the paint pipeline, matching layer order:
-   *   screen → ink → interaction (widget shell = DOM, untouched here)
-   */
   private render(): void {
     this.forEachPreFrame();
     this.interactionDirty.length = 0;
@@ -163,7 +130,6 @@ export class CanvasEngine {
     const d = this.dpr;
     const cam = this.camera;
 
-    // --- Screen layer: outside fill, paper, grid, border ---
     const ctx = this.ctx("screen");
     ctx.setTransform(d, 0, 0, d, 0, 0);
     ctx.clearRect(0, 0, rect.width, rect.height);
@@ -212,17 +178,13 @@ export class CanvasEngine {
     ctx.strokeRect(0, 0, SIZE, SIZE);
     ctx.restore();
 
-    // --- Ink layer: redraw only the tiles visible in the viewport ---
     this.renderInkLayer(visible);
-
-    // --- Interaction layer: cleared every frame; tools paint their previews ---
     this.renderInteractionLayer();
     this.paintedCamera = this.cameraKey();
 
     this.forEachPostFrame();
   }
 
-  /** Port of penecho renderInkLayer(). */
   renderInkLayer(region: Rect | null = null): void {
     const d = this.dpr;
     const rect = this.root.getBoundingClientRect();
@@ -246,7 +208,6 @@ export class CanvasEngine {
     inkCtx.restore();
   }
 
-  /** Interaction layer: clear fully (in device pixels), then redraw previews. */
   private renderInteractionLayer(): void {
     const d = this.dpr;
     const rect = this.root.getBoundingClientRect();
@@ -264,12 +225,6 @@ export class CanvasEngine {
     interactionCtx.restore();
   }
 
-  /**
-   * Partial interaction-layer repaint. Pass a world-space rect covering the
-   * OLD and NEW positions of anything that moved; the engine clears only that
-   * region on the next frame and replays the preview renderers clipped to it,
-   * instead of wiping the whole layer. Omit the rect → full repaint.
-   */
   requestInteractionRender(worldRect?: Rect): void {
     if (!worldRect) {
       this.requestRender();
@@ -297,7 +252,6 @@ export class CanvasEngine {
     const dirty = this.interactionDirty;
     this.interactionDirty = [];
     if (!dirty.length) return;
-    // Camera/DPR changed underneath us → a region-only repaint would ghost.
     if (this.cameraKey() !== this.paintedCamera) {
       this.requestRender();
       return;
@@ -338,7 +292,6 @@ export class CanvasEngine {
     this.paintedCamera = this.cameraKey();
   }
 
-  /** Convenience: currently visible screen rect in world coordinates. */
   visibleRect(): Rect {
     return this.camera.visibleWorldRect();
   }

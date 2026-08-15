@@ -1,20 +1,11 @@
 import { SIZE } from "./constants";
 
-// ============================================================================
-// Command contract — port of penecho ai-runtime.js validate()/normalize...
-//
-// Every AI reply is validated on the server, then re-validated on the client
-// before anything touches the canvas. Invalid commands are dropped with a
-// reason; valid ones are normalized (font clamps, coordinate clamping) and
-// returned for rendering.
-// ============================================================================
-
 export const MAX_COMMANDS = 16;
 export const AI_TEXT_MAX_LENGTH = 1000;
 export const MAX_WIDGET_HTML_LENGTH = 200_000;
 export const MAX_WIDGET_COPY_TEXT_LENGTH = 16_000;
 export const MAX_DIAGRAM_SOURCE_BYTES = 100 * 1024;
-export const MAX_PLOT_PIXELS_TOTAL = 12_000_000; // running budget across plots
+export const MAX_PLOT_PIXELS_TOTAL = 12_000_000;
 export const MAX_PLOT_PIXELS_SINGLE = 8_000_000;
 
 export const DIAGRAM_SOURCE_FORMATS = new Set([
@@ -29,7 +20,6 @@ export const DIAGRAM_SOURCE_FORMATS = new Set([
 
 export type DiagramFormat = (typeof DIAGRAM_SOURCE_FORMATS extends Set<infer T> ? T : never);
 
-/** `n(v, min, max)` finite + range helper from penecho. */
 export function n(value: unknown, min = 0, max = SIZE): boolean {
   return typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
 }
@@ -140,7 +130,6 @@ export interface CommandValidationContext {
   plugins: Set<string>;
   visibleRect?: { x: number; y: number; w: number; h: number };
   changedBox?: { x: number; y: number; w: number; h: number };
-  /** In-place widget refinement — skip below-anchoring, keep the AI's position. */
   keepPosition?: boolean;
 }
 
@@ -178,12 +167,6 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
-/**
- * Smart widget/diagram geometry: size tracks the footprint of the user's drawn
- * ink (not the viewport), and the box is anchored STRICTLY BELOW the drawing —
- * never to its left, right, or above — with a gap large enough that the iframe
- * never touches, overlaps, or collapses into the drawn strokes.
- */
 function fitWidgetGeometry(
   cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown },
   visibleRect?: { x: number; y: number; w: number; h: number },
@@ -206,7 +189,6 @@ function fitWidgetGeometry(
   const rawW = Math.round(cmd.w as number);
   const rawH = Math.round(cmd.h as number);
 
-  // Readable floors + viewport-capped ceilings for widgets/diagrams.
   const minW = 320;
   const minH = 200;
   const maxW = Math.max(minW, Math.min(1800, Math.round(viewportW * 0.9)));
@@ -215,7 +197,6 @@ function fitWidgetGeometry(
   let w = rawW;
   let h = rawH;
 
-  // Determine smart width and height: support portrait (e.g. mobile/chatbot) & landscape (e.g. flowcharts)
   if (rawW >= 240 && rawH >= 180 && rawW / rawH >= 0.35 && rawW / rawH <= 3.2) {
     w = clampNum(rawW, minW, maxW);
     h = clampNum(rawH, minH, maxH);
@@ -232,12 +213,9 @@ function fitWidgetGeometry(
     h = clampNum(rawH, minH, maxH);
   }
 
-  // Placement: anchor STRICTLY DIRECTLY BELOW the drawing footprint (clean 24px gap), centered horizontally under it.
   if (reposition && changedBox && changedBox.w > 0 && changedBox.h > 0 && changedBox.w < SIZE * 0.9) {
     const gap = 24;
     y = Math.round(changedBox.y + changedBox.h + gap);
-
-    // Center horizontally directly under the drawing's bounding box.
     const centerX = changedBox.x + changedBox.w / 2;
     x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
   }
@@ -247,10 +225,6 @@ function fitWidgetGeometry(
   return w >= minW && h >= minH ? { x, y, w, h } : null;
 }
 
-/**
- * Validate + normalize a single raw command object. Returns null (with a
- * logged reason) when the command is invalid; otherwise the normalized command.
- */
 export function validateCommand(
   raw: unknown,
   ctx: CommandValidationContext
@@ -473,10 +447,6 @@ export function diagramSourceFits(value: unknown): boolean {
   );
 }
 
-/**
- * Validate a batch of raw commands. Returns the accepted commands (max 16) plus
- * a per-rejected reason log. Mirrors penecho validate() slicing to 16.
- */
 export function validateCommands(
   rawCmds: unknown[],
   ctx: CommandValidationContext
@@ -505,12 +475,10 @@ export function validateCommands(
   }
 
   const widgets = validated.filter((x) => x.tool === "html_widget" || x.tool === "diagram_source");
-  // penecho: when any widget is present, ONLY the first widget survives.
   if (widgets.length) return { commands: [widgets[0]], rejected };
   return { commands: validated, rejected };
 }
 
 export function logReject(reason: string): void {
-  // Reason strings are surfaced by callers for debugging; keep console noise low.
   void reason;
 }

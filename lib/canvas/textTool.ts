@@ -4,16 +4,12 @@ import type { Point } from "./types";
 
 export interface TextStyle {
   color: string;
-  fontSize: number; // world units
-  maxWidth: number; // world units
+  fontSize: number;
+  maxWidth: number;
 }
 
 const FONT_FAMILY = "ui-rounded, system-ui, sans-serif";
 
-/**
- * Split text into paragraphs by explicit newlines (\n), then soft-wrap long
- * paragraphs at spaces to fit within maxWidth while preserving all explicit line breaks.
- */
 export function layoutTextLines(
   text: string,
   ctx: CanvasRenderingContext2D,
@@ -44,10 +40,6 @@ export function layoutTextLines(
   return lines;
 }
 
-/** Lay out multi-line text and paint it onto a standalone canvas (no tiles).
- * Returns the bitmap plus its logical world size. Penecho's logicalWidth()/
- * logicalHeight() equivalent — used to build living text attachments.
- */
 export function renderTextBlock(
   text: string,
   color: string,
@@ -75,10 +67,6 @@ export function renderTextBlock(
   return { canvas: off, w, h };
 }
 
-/**
- * Rasterize multi-line text into the ink tiles, wrapping at maxWidth. Direct
- * equivalent of penecho's textImage() drawn into a tile region.
- */
 export function rasterizeText(
   engine: CanvasEngine,
   text: string,

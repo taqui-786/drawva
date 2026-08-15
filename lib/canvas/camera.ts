@@ -22,9 +22,6 @@ export class Camera {
       Number.isFinite(cssWidth) &&
       Number.isFinite(cssHeight)
     ) {
-      // penecho canvas-runtime.js fit() — initial scale centers SIZE inside the
-      // viewport at ~INITIAL_VIEW_ZOOM (1.5) of the "10 000 units fills the
-      // longer screen edge" zoom level.
       this.state.scale = Math.max(
         MIN_SCALE,
         Math.min(2, (Math.max(cssWidth, cssHeight) / 10_000) * INITIAL_VIEW_ZOOM)
@@ -56,7 +53,6 @@ export class Camera {
     return this.initialized;
   }
 
-  /** Cursor-relative zoom, factor = 1.12|0.89, clamped [0.03, 4] like penecho. */
   zoomAt(clientX: number, clientY: number, deltaY: number): void {
     const factor = deltaY < 0 ? ZOOM_IN_FACTOR : ZOOM_OUT_FACTOR;
     const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, this.state.scale * factor));
@@ -67,7 +63,6 @@ export class Camera {
     this.state.scale = next;
   }
 
-  /** 2-pointer pinch zoom anchored at the gesture center. */
   pinchZoom(
     centerCss: Point,
     startCenterCss: Point,
@@ -94,7 +89,6 @@ export class Camera {
     this.state.panY += dy;
   }
 
-  /** Re-center the board using the initial-fit math (used by the Reset button). */
   reset(): void {
     if (this.viewport.w <= 0 || this.viewport.h <= 0) return;
     this.state.scale = Math.max(
@@ -119,7 +113,6 @@ export class Camera {
     };
   }
 
-  /** World rect currently visible inside the viewport, clamped to [0, SIZE]. */
   visibleWorldRect(): Rect {
     const l = Math.max(0, -this.state.panX / this.state.scale);
     const t = Math.max(0, -this.state.panY / this.state.scale);
@@ -128,11 +121,6 @@ export class Camera {
     return { x: l, y: t, w: Math.max(0, r - l), h: Math.max(0, b - t) };
   }
 
-  /**
-   * Apply penecho's per-layer transform: ctx.setTransform(d,0,0,d,0,0) then
-   * translate(panX,panY) scale(scale). Used by engine render() and any module
-   * that needs to draw in world space via native canvas paths.
-   */
   applyWorldTransform(ctx: CanvasRenderingContext2D, dpr: number): void {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.translate(this.state.panX, this.state.panY);

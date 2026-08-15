@@ -18,8 +18,6 @@ export function CanvasFooter({
   onZoomOut: () => void;
   onReset: () => void;
 }) {
-  // Subscribes ONLY to zoom/center, so pan/zoom frames never re-render
-  // CanvasApp or the header.
   const { zoom, center } = useSnapshot(appState);
 
   return (

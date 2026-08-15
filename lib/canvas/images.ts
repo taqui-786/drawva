@@ -7,11 +7,6 @@ const MAX_SOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_DIMENSION = 2048;
 const MAX_PLACE_WIDTH = 1200;
 
-/**
- * Import a raster image into the board at a world point, scaled so it keeps
- * aspect ratio and fits within MAX_PLACE_WIDTH world units. The image is baked
- * into the ink tiles so it persists, erases, and moves like any ink.
- */
 export async function placeImageAt(
   engine: CanvasEngine,
   file: Blob,
@@ -50,14 +45,12 @@ export async function placeImageAt(
   ctx.drawImage(preview, 0, 0);
   preview.close();
 
-  // Bake directly into tiles using the snapshot path.
   const r = {
     x: Math.max(0, world.x),
     y: Math.max(0, world.y),
     w: Math.min(TILE, w),
     h: Math.min(TILE, h),
   };
-  // Recreate snapshot at world scale: draw the offscreen scaled.
   const snapshot = document.createElement("canvas");
   snapshot.width = Math.max(1, Math.ceil(w));
   snapshot.height = Math.max(1, Math.ceil(h));

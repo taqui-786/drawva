@@ -18,13 +18,6 @@ export interface SceneJson {
   count: number;
 }
 
-/**
- * Compact scene state serializer: the items currently living on the board in
- * read order. Widgets/diagrams and living object attachments are enumerated;
- * ink is represented by the atlas image, not per-stroke so the payload stays
- * small. Because text/formula/plot stay as objects, the AI sees their source
- * (and won't duplicate them) — the core #3 divergence fix.
- */
 export function buildScene(
   widgets: WidgetManager | null,
   objects: ObjectManager | null

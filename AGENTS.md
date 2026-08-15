@@ -102,7 +102,7 @@ Drawva Stack Architecture:
 ### 4. UI Shell & Control Dock (`components/canvas/`)
 
 - `CanvasHeader.tsx`: Floating header bar featuring:
-  - PenEcho-style top status indicator pill (**`Generating…`** with spinner, **`Done · model`**, `Ready`).
+  - Top status indicator pill (**`Generating…`** with spinner, **`Done · model`**, `Ready`).
   - Tool buttons (`V`, `H`, `P`, `Shift+H`, `E`, `T`, `R`, `O`, `A`).
   - Color palette popover and stroke width selector.
   - Document File dropdown (Export PNG / Save JSON / Open JSON).

@@ -1,6 +1,5 @@
 import type { Rect } from "./types";
 
-/** Port of penecho core.js DOM-layer bootstrap: 3 stacked CSS-canvases. */
 export type LayerName = "screen" | "ink" | "interaction";
 
 const LAYER_ORDER: LayerName[] = ["screen", "ink", "interaction"];
@@ -56,7 +55,6 @@ export class LayerStack {
     return [...LAYER_ORDER];
   }
 
-  /** Resize all layers to CSS-rect * DPR, then re-setTransform later in engine. */
   resize(cssWidth: number, cssHeight: number, dpr: number): void {
     const w = Math.max(1, Math.round(cssWidth * dpr));
     const h = Math.max(1, Math.round(cssHeight * dpr));

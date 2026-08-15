@@ -1,8 +1,3 @@
-// Shared world constants — port of penecho core.js constants (SIZE/TILE/...)
-//
-// PenEcho world is a FINITE 20_000 x 20_000 unit board, not an infinite grid.
-// All world-space coordinates are floats in [0, SIZE]. Screen space is CSS px.
-
 export const SIZE = 20_000;
 export const TILE = 512;
 export const INITIAL_VIEW_ZOOM = 1.5;

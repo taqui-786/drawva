@@ -15,11 +15,8 @@ export function cloneCanvas(c: HTMLCanvasElement | null | undefined): HTMLCanvas
 }
 
 export interface TileChange {
-  /** "tx,ty" tile key. */
   k: string;
-  /** Pre-edit bitmap (null if the tile did not exist yet). */
   before: HTMLCanvasElement | null;
-  /** Post-edit bitmap (null if the tile was removed). */
   after: HTMLCanvasElement | null;
 }
 
@@ -36,7 +33,6 @@ function parseKey(k: string): [number, number] {
   return [tx, ty];
 }
 
-/** Objects are stored without their raster (bitmaps are re-rendered from source). */
 function serializeObjects(om: ObjectManager): ObjectItem[] {
   return om.all().map((o) => {
     const { image, ...rest } = o;
@@ -45,20 +41,6 @@ function serializeObjects(om: ObjectManager): ObjectItem[] {
   });
 }
 
-/**
- * Diff-based drawing history — port of penecho persistence.js history.
- *
- * Instead of snapshot-serializing the entire board on every change (#4 →
- * full-snapshot undo, 20 entries), we lazily clone each tile the first time it
- * is written during an edit session (Penecho's recordBefore), then at commit
- * time capture the "after" bitmaps for *those tiles only*. Objects/widgets
- * (which carry just a handful of records) are captured as whole serialized
- * arrays on first mutation. One gesture ⇒ one history entry, capped at 30.
- *
- * Tiles are journaled through `engine.noteTileWrite(tx, ty)`, which the React
- * shell binds to `recordTileBefore`; widgets/objects are journaled through
- * `recordWidgets()` / `recordObjects()` called at gesture start.
- */
 export class BoardHistory {
   private capturedTiles = new Map<string, HTMLCanvasElement | null>();
   private widgetsBefore: WidgetItem[] | null = null;
@@ -88,7 +70,6 @@ export class BoardHistory {
     return this.redoStack.length > 0;
   }
 
-  /** Lazy before-capture: clone a tile the first time it is touched this session. */
   recordTileBefore(tx: number, ty: number): void {
     const k = `${tx},${ty}`;
     if (this.capturedTiles.has(k)) return;
@@ -106,7 +87,6 @@ export class BoardHistory {
     this.objectsBefore = serializeObjects(this.objects);
   }
 
-  /** Penecho save(): collapse journaled changes into one history entry. */
   commit(): void {
     const eng = this.engine;
     if (!eng) return;
@@ -133,7 +113,6 @@ export class BoardHistory {
     if (this.undoStack.length > MAX_HISTORY) this.undoStack.shift();
   }
 
-  /** Record the entire board as the "before" state (used by Clear). */
   captureWholeBoard(): void {
     const eng = this.engine;
     if (!eng) return;
@@ -148,7 +127,6 @@ export class BoardHistory {
   }
 
   async undo(): Promise<boolean> {
-    // Flush any in-progress gesture so it becomes its own undoable entry.
     this.commit();
     const entry = this.undoStack.pop();
     if (!entry) return false;

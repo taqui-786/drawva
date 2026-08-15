@@ -2,12 +2,6 @@ import { pasteRegion } from "./selection";
 import type { CanvasEngine } from "./engine";
 import type { PlotFunctionCommand } from "./commands";
 
-// ============================================================================
-// Safe 2D expression evaluator + axis plotter. Port of penecho ai-runtime.js
-// compileExpression/normalizePlotExpression/plot/plotView/nicePlotStep/...
-// No eval() — a recursive-descent parser over a strict token whitelist.
-// ============================================================================
-
 type EvalFn = (x: number) => number;
 
 export function normalizePlotExpression(source: string): string {
@@ -191,7 +185,6 @@ function plotView(evaluate: EvalFn): View {
   return { xMin: -5, xMax: 5, yMin: -10, yMax: 10 };
 }
 
-/** Rasterize a plot_function command into an offscreen canvas (world units). */
 export function plotCommand(c: PlotFunctionCommand): HTMLCanvasElement {
   const o = document.createElement("canvas");
   o.width = Math.max(1, Math.ceil(c.w));
@@ -352,7 +345,6 @@ export function plotCommand(c: PlotFunctionCommand): HTMLCanvasElement {
   return o;
 }
 
-/** Bake a plot into the tiles at (x, y). */
 export function bakePlot(engine: CanvasEngine, c: PlotFunctionCommand): void {
   pasteRegion(engine, plotCommand(c), c.x, c.y);
 }

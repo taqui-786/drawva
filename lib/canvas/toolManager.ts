@@ -10,46 +10,26 @@ export interface ToolStyle {
   eraser: number;
 }
 
-/** A pointer event normalized for tool routing. */
 export interface ToolGestureEvent {
   pointerId: number;
-  /** World-space position under the pointer. */
   world: Point;
-  /** CSS-pixel position relative to the canvas root. */
   screen: Point;
-  /** 0 = main, 1 = middle, 2 = right. */
   button: number;
   pressure: number;
 }
 
-/** A live DOM shell grabbed by the select tool (widget/object). */
 export interface PickedNode {
   kind: "widget" | "object";
   id: string;
 }
 
-/**
- * Selectable-shell hook (Penecho hit-first rule): the select tool checks for a
- * widget/object under the pointer before falling back to ink/marquee selection.
- */
 export interface ShellPicker {
-  /** Top-most shell at `world`, or null. */
   pick(world: Point): PickedNode | null;
-  /** Highlight (or clear) the shell under the cursor. */
   focus(node: PickedNode | null): void;
-  /** Translate a shell by a world-space delta during a drag. */
   translate(node: PickedNode, dx: number, dy: number, world: Point): void;
-  /** Called when a drag ends to broadcast unthrottled final position. */
   endTranslate?(node: PickedNode): void;
 }
 
-/**
- * Framework-free dispatcher that routes pointer gestures to the correct tool
- * controller based on the active canvas mode (Penecho single-router dispatch).
- * Every gesture — pan, shell drag, selection move, drawing — is owned here, so
- * no gesture state leaks into the React shell. Text/images are DOM-driven and
- * handled by the React shell via the exported helpers.
- */
 export class ToolManager {
   readonly strokes: StrokeController;
   readonly shapes: ShapeController;
@@ -77,7 +57,6 @@ export class ToolManager {
   }
 
   setMode(mode: CanvasMode): void {
-    // Cancel any in-progress shape/selection gesture on mode switch.
     this.shapes.cancel();
     this.selection.clearSelection();
     this.pan = null;
@@ -86,7 +65,6 @@ export class ToolManager {
     this.updateCursor();
   }
 
-  /** Determine CSS cursor style for current tool mode & pointer position. */
   getCursor(world?: Point): string {
     if (this.pan) return "grabbing";
     if (this.nodeDrag) return "grabbing";
@@ -116,14 +94,11 @@ export class ToolManager {
       try {
         const c = this.engine.canvas(name);
         if (c) c.style.cursor = cursor;
-      } catch {
-        // layer might be initializing
-      }
+      } catch {}
     }
   }
 
   begin(ev: ToolGestureEvent): void {
-    // Penecho hit-first priority: pan owns middle-drag and the hand mode.
     if (ev.button === 1 || this.mode === "hand") {
       this.pan = { pointerId: ev.pointerId, last: ev.screen };
       this.updateCursor(ev.world);
@@ -171,7 +146,6 @@ export class ToolManager {
       this.updateCursor(ev.world);
       return;
     }
-    // A floating selection owns the pointer while it is being dragged.
     if (this.selection.isMoving) {
       this.selection.updateMove(ev.world);
       this.updateCursor(ev.world);
@@ -189,8 +163,6 @@ export class ToolManager {
         this.shapes.move(ev.pointerId, ev.world);
         break;
       case "select":
-        // A select-mode empty-ground drag is a rectangle marquee; updateMarquee
-        // is a no-op unless a marquee is actually running.
         this.selection.updateMarquee(ev.world);
         break;
       case "hand":
@@ -200,7 +172,6 @@ export class ToolManager {
     this.updateCursor(ev.world);
   }
 
-  /** Finish a gesture. Returns true if it mutated the board (shell drag/move). */
   end(pointerId: number): boolean {
     let result = false;
     if (this.pan && this.pan.pointerId === pointerId) {
@@ -229,7 +200,6 @@ export class ToolManager {
           this.shapes.end(pointerId);
           break;
         case "select":
-          // Close any rectangle marquee started from select-mode empty ground.
           this.selection.endMarquee();
           break;
         case "hand":
@@ -241,7 +211,6 @@ export class ToolManager {
     return result;
   }
 
-  /** Pointer-cancel: treat like a quick release so no gesture lingers. */
   cancel(pointerId: number): boolean {
     return this.end(pointerId);
   }
@@ -254,14 +223,11 @@ export class ToolManager {
     this.selection.clearSelection();
   }
 
-  /** Penecho-style select: selection-box → shell hit → ink → rectangle marquee. */
   private beginSelect(ev: ToolGestureEvent): void {
-    // 1. Drag an existing selection from inside its box or near its border line.
     if (this.selection.hasSelection && this.selection.hitTest(ev.world)) {
       this.selection.beginMove(ev.pointerId, ev.world);
       return;
     }
-    // 2. Shell hit-first (widgets/objects).
     const picker = this.picker;
     if (picker) {
       const hit = picker.pick(ev.world);
@@ -272,12 +238,10 @@ export class ToolManager {
       }
       picker.focus(null);
     }
-    // 3. Click-select ink under the pointer, then drag to move.
     if (this.selection.selectElementAtPoint(ev.world)) {
       this.selection.beginMove(ev.pointerId, ev.world);
       return;
     }
-    // 4. Empty ground: drag a rectangular marquee to select an area.
     this.selection.beginMarquee(ev.pointerId, ev.world);
   }
 

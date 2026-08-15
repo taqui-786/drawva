@@ -1,15 +1,3 @@
-// ============================================================================
-// Diagram renderer registry — port of penecho flowchart/runtime.js.
-//
-// A diagram_source command carries a trusted source + a sourceFormat. We render
-// the source through a pinned renderer into a **standalone SVG document** that
-// the widget iframe displays. We NEVER inject the raw source as HTML; malformed
-// source produces a clean inline error, never a crash.
-//
-// Format registry: mermaid (primary), dot, bpmn-xml, vega-lite, geojson, smiles,
-// cytoscape-json — other renderers slot into the same registry pattern.
-// ============================================================================
-
 import { DIAGRAM_SOURCE_FORMATS } from "./commands";
 
 export type DiagramFormat = (typeof DIAGRAM_SOURCE_FORMATS extends Set<infer T> ? T : never);
@@ -53,9 +41,9 @@ export function responsiveMermaidSource(
 ): { source: string; direction: string } {
   const source = String(value || "");
   const directive = /^(\s*(?:(?:%%[^\n]*)\n\s*)*)(flowchart|graph)\s+(LR|RL|TB|TD|BT)\b/im.exec(source);
-  if (!directive || /%%\s*penecho:fixed-layout\b/i.test(source)) return { source, direction: "" };
+  if (!directive || /%%\s*drawva:fixed-layout\b/i.test(source)) return { source, direction: "" };
   const connectors = source.match(/-->|---|-\.-?>|==>/g)?.length || 0;
-  const responsive = /%%\s*penecho:responsive\b/i.test(source) || connectors > 10;
+  const responsive = /%%\s*drawva:responsive\b/i.test(source) || connectors > 10;
   if (!responsive) return { source, direction: directive[3].toUpperCase() };
   const original = directive[3].toUpperCase();
   const horizontal = original === "RL" ? "RL" : "LR";
@@ -63,7 +51,7 @@ export function responsiveMermaidSource(
   const direction = width >= height * 1.35 ? horizontal : vertical;
   const innerDirection = direction === horizontal ? "TB" : "LR";
   let responsiveDiagram = source.replace(directive[0], `${directive[1]}${directive[2]} ${direction}`);
-  if (/%%\s*penecho:responsive\b/i.test(source)) {
+  if (/%%\s*drawva:responsive\b/i.test(source)) {
     responsiveDiagram = responsiveDiagram.replace(/^(\s*direction\s+)(LR|RL|TB|TD|BT)\b/gim, `$1${innerDirection}`);
   }
   return { source: responsiveDiagram, direction };
@@ -94,11 +82,6 @@ function errorDocument(message: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:transparent!important;font:14px system-ui;color:#b91c1c}</style></head><body><div>⚠️ ${escaped}</div></body></html>`;
 }
 
-/**
- * Render a diagram source into a self-contained HTML document for the widget
- * iframe. Supports all 7 built-in local formats: mermaid, dot, smiles, vega-lite,
- * bpmn-xml, cytoscape-json, geojson.
- */
 export async function diagramDocument(
   sourceFormat: string,
   source: string,
@@ -109,7 +92,6 @@ export async function diagramDocument(
     return errorDocument(`Unknown diagram format: ${sourceFormat}`);
   }
 
-  // Mermaid server-side pre-render attempt for fastest load
   if (format === "mermaid") {
     const { source: responsive } = responsiveMermaidSource(source, 800, 500);
     try {
