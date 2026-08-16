@@ -18,6 +18,7 @@ import type { AiReply, AiRequest, AgentEvent, TokenUsage, AiDebugInfo } from "./
 export const AgentReplySchema = z.object({
   intent: z.enum(["none", "hint", "continue", "explain", "plot", "correct", "erase", "answer", "typeset"]),
   observedText: z.string().optional(),
+  spatialPlan: z.string().optional(),
   message: z.string().optional(),
   commands: z.array(z.record(z.string(), z.unknown())),
 });
@@ -98,6 +99,7 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     `User prompt (if any): ${req.userPrompt || "(none)"}`,
   ];
   if (req.widgetEdit) {
+    const wb = req.widgetEdit.box;
     parts.push(
       `\n--- REFINEMENT TARGET (widgetEdit) ---`,
       `Target Widget ID: ${req.widgetEdit.id}`,
@@ -105,14 +107,20 @@ function userMessageText(req: AiRequest, sceneText: string): string {
       `Widget Type: ${req.widgetEdit.widgetType}`,
       `Source Format: ${req.widgetEdit.sourceFormat || "(none)"}`,
       `Current Title: ${req.widgetEdit.title || "(none)"}`,
-      `Widget Box: ${JSON.stringify(req.widgetEdit.box)}`,
+      `Widget Box (EXACT position/size to preserve): ${JSON.stringify(wb)}`,
       `Current Baseline Source Code:\n${(req.widgetEdit.source || req.widgetEdit.html || "").slice(0, 4000)}`,
-      `REFINEMENT INSTRUCTION: This request is a one-shot in-place modification of the target widget above. The handwritten text, arrows, and notes near or pointing to this widget are edit instructions. Return exactly ONE updated replacement command (${req.widgetEdit.widgetType}) with pluginId:"${req.widgetEdit.pluginId}", sourceFormat:"${req.widgetEdit.sourceFormat || "mermaid"}", and title:"${req.widgetEdit.title || "Widget"}" that incorporates the new requested nodes/branches/changes while preserving all existing baseline structure and content.`
+      `REFINEMENT INSTRUCTION: This is an IN-PLACE edit of the widget above. The ink/arrows on canvas are edit instructions — apply them to the baseline source code. Return exactly ONE updated replacement command (${req.widgetEdit.widgetType}) with:
+  - pluginId: "${req.widgetEdit.pluginId}"
+  - sourceFormat: "${req.widgetEdit.sourceFormat || "mermaid"}"
+  - title: "${req.widgetEdit.title || "Widget"}"
+  - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}  ← MUST use these exact coordinates (no repositioning)
+  - Incorporate the handwritten edit instructions while preserving all existing content.`
     );
   }
-  parts.push(`Scene JSON:\n${req.scene || sceneText}`, `\nInspect the attached canvas image (if present) and evaluate the prompt.`);
+  parts.push(`Scene JSON:\n${req.scene || sceneText}`, `\nInspect the canvas image, plan your spatial anchor coordinates in spatialPlan, then return matching commands.`);
   return parts.join("\n");
 }
+
 
 function salvageTruncatedJson(clean: string): string {
   let s = clean.trim();
@@ -186,6 +194,7 @@ export function parseJsonResponse(raw: string): AgentReply | null {
 
   const commands: Record<string, unknown>[] = [];
   let observedText: string | undefined;
+  let spatialPlan: string | undefined;
   let message: string | undefined;
   let intent = "continue";
 
@@ -200,6 +209,7 @@ export function parseJsonResponse(raw: string): AgentReply | null {
           if (val.data.commands?.length) commands.push(...val.data.commands);
           if (val.data.message) message = val.data.message;
           if (val.data.observedText) observedText = val.data.observedText;
+          if (val.data.spatialPlan) spatialPlan = val.data.spatialPlan;
           if (val.data.intent) intent = val.data.intent;
         } else if (obj && typeof obj === "object") {
           const rec = obj as Record<string, unknown>;
@@ -216,7 +226,7 @@ export function parseJsonResponse(raw: string): AgentReply | null {
   if (commands.length > 0) {
     const validIntents = ["none", "hint", "continue", "explain", "plot", "correct", "erase", "answer", "typeset"] as const;
     const finalIntent = validIntents.includes(intent as (typeof validIntents)[number]) ? (intent as (typeof validIntents)[number]) : "continue";
-    return { intent: finalIntent, observedText, message, commands };
+    return { intent: finalIntent, observedText, spatialPlan, message, commands };
   }
 
   try {
@@ -365,6 +375,7 @@ async function attemptReply(
         intent: res.intent ?? "answer",
         message: res.message,
         observedText: res.observedText,
+        spatialPlan: res.spatialPlan,
         commands: Array.isArray(res.commands) ? res.commands : [],
       };
     } else {
@@ -404,6 +415,7 @@ async function attemptReply(
     intent: response.intent ?? "answer",
     message: response.message,
     observedText: response.observedText,
+    spatialPlan: response.spatialPlan,
     commands,
     tokenUsage: usage,
     debug: {

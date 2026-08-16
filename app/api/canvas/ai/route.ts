@@ -28,7 +28,8 @@ function validateReply(
   reply: Awaited<ReturnType<typeof runAgent>>,
   visibleRect: { x: number; y: number; w: number; h: number },
   changedBox: { x: number; y: number; w: number; h: number },
-  keepPosition = false
+  keepPosition = false,
+  widgetEditBox?: { x: number; y: number; w: number; h: number }
 ) {
   const ctx = {
     aiColor: "#2679b8",
@@ -38,6 +39,7 @@ function validateReply(
     visibleRect,
     changedBox,
     keepPosition,
+    widgetEditBox,
   };
   const { commands, rejected } = validateCommands(reply.commands, ctx);
   return {
@@ -119,11 +121,11 @@ export async function POST(req: Request) {
   const sceneText = aiRequest.scene || "";
 
   if (p.stream === true) {
-    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, !!widgetEdit);
+    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, !!widgetEdit, widgetEdit?.box);
   }
 
   const reply = await runAgent(aiRequest, sceneText, model);
-  return json(validateReply(reply, visibleRect, changedBox, !!widgetEdit));
+  return json(validateReply(reply, visibleRect, changedBox, !!widgetEdit, widgetEdit?.box));
 }
 
 function streamReply(
@@ -132,7 +134,8 @@ function streamReply(
   model: ReturnType<typeof createChatModel>,
   visibleRect: { x: number; y: number; w: number; h: number },
   changedBox: { x: number; y: number; w: number; h: number },
-  keepPosition = false
+  keepPosition = false,
+  widgetEditBox?: { x: number; y: number; w: number; h: number }
 ): NextResponse {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -153,7 +156,7 @@ function streamReply(
       };
       try {
         const reply = await runAgent(aiRequest, sceneText, model, { onEvent });
-        const payload = validateReply(reply, visibleRect, changedBox, keepPosition);
+        const payload = validateReply(reply, visibleRect, changedBox, keepPosition, widgetEditBox);
         send("result", payload);
       } catch (err) {
         const aborted = err instanceof Error && err.name === "AbortError";

@@ -66,6 +66,7 @@ export interface AiReply {
   intent: AiIntent;
   message?: string;
   observedText?: string;
+  spatialPlan?: string;
   commands: unknown[];
   attempts: number;
   requestId: string;
@@ -93,6 +94,7 @@ export interface AiLogEntry {
     intent?: AiIntent;
     message?: string;
     observedText?: string;
+    spatialPlan?: string;
     commands?: unknown[];
     rejected?: string[];
     raw?: unknown;
@@ -103,6 +105,7 @@ export interface ModelReply {
   intent: AiIntent;
   message?: string;
   observedText?: string;
+  spatialPlan?: string;
   commands: unknown[];
   tokenUsage?: TokenUsage;
 }

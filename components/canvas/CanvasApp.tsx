@@ -1196,8 +1196,11 @@ export function CanvasApp() {
 
   const commitText = useCallback(() => {
     if (engine && textAnchor && textValue.trim()) {
-      const fontSize = Math.max(8, pen * 6);
-      const maxWidth = 600;
+      const scale = Math.max(0.01, engine.camera.scale);
+      const screenFontSize = Math.max(16, pen * 4);
+      const fontSize = Math.max(12, Math.round(screenFontSize / scale));
+      const screenMaxWidth = 600;
+      const maxWidth = Math.max(100, Math.round(screenMaxWidth / scale));
       const block = renderTextBlock(textValue, color, fontSize, maxWidth);
       addObject({
         id: `text-${Date.now()}`,

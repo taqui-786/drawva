@@ -131,6 +131,8 @@ export interface CommandValidationContext {
   visibleRect?: { x: number; y: number; w: number; h: number };
   changedBox?: { x: number; y: number; w: number; h: number };
   keepPosition?: boolean;
+  /** Original widget box — used in refinement mode to snap placement back to the existing widget. */
+  widgetEditBox?: { x: number; y: number; w: number; h: number };
 }
 
 const isFiniteNum = n as (v: unknown, min?: number, max?: number) => boolean;
@@ -178,8 +180,18 @@ function fitWidgetGeometry(
   cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown },
   visibleRect?: { x: number; y: number; w: number; h: number },
   changedBox?: { x: number; y: number; w: number; h: number },
-  reposition = true
+  reposition = true,
+  widgetEditBox?: { x: number; y: number; w: number; h: number }
 ): { x: number; y: number; w: number; h: number } | null {
+  // Refinement mode: snap to the original widget's box — ignore whatever the AI returned.
+  if (!reposition && widgetEditBox && widgetEditBox.w > 0 && widgetEditBox.h > 0) {
+    return {
+      x: Math.round(widgetEditBox.x),
+      y: Math.round(widgetEditBox.y),
+      w: Math.round(widgetEditBox.w),
+      h: Math.round(widgetEditBox.h),
+    };
+  }
   if (
     !isFiniteNum(cmd.x) ||
     !isFiniteNum(cmd.y) ||
@@ -203,6 +215,17 @@ function fitWidgetGeometry(
     const scale = Math.max(MIN_WIDGET_WIDTH / Math.max(1, rawW), MIN_WIDGET_HEIGHT / Math.max(1, rawH));
     rawW = Math.ceil(rawW * scale);
     rawH = Math.ceil(rawH * scale);
+  }
+
+  // If the user drew a reasonably-sized sketch, honour that footprint.
+  // A "sketch-sized" box is one that is smaller than ~60% of the viewport —
+  // anything larger is likely a full-canvas selection, not a hand-drawn sketch.
+  const sketchW = changedBox?.w ?? 0;
+  const sketchH = changedBox?.h ?? 0;
+  const isSketch = sketchW > 0 && sketchH > 0 && sketchW < viewportW * 0.6 && sketchH < viewportH * 0.6;
+  if (isSketch) {
+    rawW = Math.max(rawW, Math.round(sketchW));
+    rawH = Math.max(rawH, Math.round(sketchH));
   }
 
   const maxW = Math.min(MAX_WIDGET_WIDTH, Math.max(1800, Math.round(viewportW * 0.95)));
@@ -298,7 +321,7 @@ export function validateCommand(
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim() : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim() : "";
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox);
       if (
         ctx.widgetSlots <= 0 ||
         typeof c.title !== "string" ||
@@ -338,7 +361,7 @@ export function validateCommand(
       return out;
     }
     case "diagram_source": {
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox);
       const sourceFormat = canonicalDiagramFormat(c.sourceFormat);
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       if (

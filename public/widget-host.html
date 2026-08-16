@@ -142,6 +142,68 @@
           } catch(e) {}
         }
 
+        // ── Snapshot: serialize first SVG to a canvas data URL, post it back ──
+        function postSnapshot(reqId) {
+          try {
+            const svg = document.querySelector('svg');
+            if (!svg) {
+              window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
+              return;
+            }
+            const clone = svg.cloneNode(true);
+            clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+            let svgW = parseFloat(svg.getAttribute('width')) || 0;
+            let svgH = parseFloat(svg.getAttribute('height')) || 0;
+            if ((!svgW || !svgH) && svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
+              svgW = svg.viewBox.baseVal.width;
+              svgH = svg.viewBox.baseVal.height;
+            }
+            if (!svgW || !svgH) {
+              const r = svg.getBoundingClientRect();
+              svgW = r.width || 400;
+              svgH = r.height || 300;
+            }
+            clone.setAttribute('width', String(svgW));
+            clone.setAttribute('height', String(svgH));
+            const serialized = new XMLSerializer().serializeToString(clone);
+            const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const img = new Image();
+            img.onload = function() {
+              try {
+                const scale = Math.min(1, 2048 / Math.max(1, svgW), 2048 / Math.max(1, svgH));
+                const cw = Math.max(1, Math.round(svgW * scale));
+                const ch = Math.max(1, Math.round(svgH * scale));
+                const canvas = document.createElement('canvas');
+                canvas.width = cw;
+                canvas.height = ch;
+                const ctx2d = canvas.getContext('2d');
+                ctx2d.drawImage(img, 0, 0, cw, ch);
+                URL.revokeObjectURL(url);
+                const dataUrl = canvas.toDataURL('image/webp', 0.9);
+                window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: dataUrl, w: svgW, h: svgH }, '*');
+              } catch(e2) {
+                URL.revokeObjectURL(url);
+                window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
+              }
+            };
+            img.onerror = function() {
+              URL.revokeObjectURL(url);
+              window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
+            };
+            img.src = url;
+          } catch(e) {
+            window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
+          }
+        }
+
+        window.addEventListener('message', function(ev) {
+          if (ev.data && ev.data.type === 'drawva-widget-snapshot-request') {
+            postSnapshot(ev.data.reqId);
+          }
+        });
+
         window.addEventListener('DOMContentLoaded', postSize);
         window.addEventListener('load', postSize);
         if (document.fonts && document.fonts.ready) {
@@ -183,6 +245,9 @@
         setTimeout(postSize, 300);
         setTimeout(postSize, 600);
         setTimeout(postSize, 1200);
+        // Auto-snapshot after chart likely rendered
+        setTimeout(function() { postSnapshot('auto'); }, 900);
+        setTimeout(function() { postSnapshot('auto'); }, 2200);
       })();
     <\/script>`;
 
@@ -219,6 +284,12 @@
       });
     } else if (data.type === "drawva-widget-inner-pointerdown") {
       postAnywhere({ type: "drawva-widget-pointerdown" });
+    } else if (data.type === "drawva-widget-snapshot-request") {
+      // Forward snapshot request into the inner iframe
+      inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: data.reqId }, "*");
+    } else if (data.type === "drawva-widget-inner-snapshot") {
+      // Forward snapshot response from inner iframe up to parent
+      postAnywhere({ type: "drawva-widget-snapshot", reqId: data.reqId, dataUrl: data.dataUrl, w: data.w, h: data.h });
     }
   });
 

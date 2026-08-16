@@ -158,8 +158,26 @@ export class WidgetManager {
           break;
         }
       }
+    } else if (e.data?.type === "drawva-widget-snapshot") {
+      // Inner iframe posted a rendered-SVG dataURL back — store it for atlas capture.
+      const { dataUrl } = e.data as { dataUrl: string | null };
+      if (!dataUrl) return;
+      // Find which widget this snapshot belongs to by matching the source iframe.
+      for (const [id, shell] of this.shells) {
+        const iframe = shell.querySelector("iframe");
+        if (iframe && iframe.contentWindow === e.source) {
+          const widget = this.widgets.get(id);
+          if (widget) {
+            const img = new Image();
+            img.onload = () => { widget.cachedImage = img; };
+            img.src = dataUrl;
+          }
+          break;
+        }
+      }
     }
   };
+
 
   add(widget: WidgetItem): void {
     if (this.shells.has(widget.id)) {
@@ -250,7 +268,11 @@ export class WidgetManager {
     }
 
     if (frame) {
-      frame.style.pointerEvents = active || hand || select ? "auto" : "none";
+      const passThrough = !active && !hand && !select;
+      frame.style.pointerEvents = passThrough ? "none" : "auto";
+      // Hide iframe completely when it must not intercept events — CSS pointer-events
+      // alone doesn't reliably block nested browsing-context event capture.
+      frame.style.visibility = passThrough ? "hidden" : "visible";
     }
 
     if (chrome) {
