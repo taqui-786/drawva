@@ -383,25 +383,23 @@ export class WidgetManager {
         if (typeof height === "number" && height > 0) {
           const w = this.widgets.get(widget.id);
           if (w) {
-            const shellH = Math.min(6000, Math.max(120, Math.round(height)));
-            const shellW = typeof width === "number" && width > 0
+            const measuredH = Math.min(6000, Math.max(120, Math.round(height)));
+            const measuredW = typeof width === "number" && width > 0
               ? Math.min(3200, Math.max(220, Math.round(width)))
               : w.w;
 
-            if (!w.userResized) {
-              if (Math.abs(w.w - shellW) > 4 || Math.abs(w.h - shellH) > 4) {
-                w.w = shellW;
-                w.h = shellH;
-                w.contentW = shellW;
-                w.contentH = shellH;
-                this.position(w);
+            // Never shrink an assigned widget size. Only expand if content overflows:
+            const targetContentW = Math.max(w.w, measuredW);
+            const targetContentH = Math.max(w.h, measuredH);
+
+            if (w.contentW !== targetContentW || w.contentH !== targetContentH) {
+              w.contentW = targetContentW;
+              w.contentH = targetContentH;
+              if (!w.userResized) {
+                w.w = targetContentW;
+                w.h = targetContentH;
               }
-            } else {
-              if (w.contentW < shellW || w.contentH < shellH) {
-                w.contentW = Math.max(w.contentW, shellW);
-                w.contentH = Math.max(w.contentH, shellH);
-                this.position(w);
-              }
+              this.position(w);
             }
           }
         }

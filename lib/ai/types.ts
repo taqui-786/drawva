@@ -18,6 +18,13 @@ export type AiIntent =
   | "answer"
   | "typeset";
 
+export type PlacementMode =
+  | "in_place"
+  | "match_sketch"
+  | "below"
+  | "right"
+  | "custom";
+
 export interface WidgetEditContext {
   id: string;
   pluginId: string;

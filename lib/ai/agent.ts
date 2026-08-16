@@ -113,7 +113,8 @@ function userMessageText(req: AiRequest, sceneText: string): string {
   - pluginId: "${req.widgetEdit.pluginId}"
   - sourceFormat: "${req.widgetEdit.sourceFormat || "mermaid"}"
   - title: "${req.widgetEdit.title || "Widget"}"
-  - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}  ← MUST use these exact coordinates (no repositioning)
+  - placement: "in_place"  ← MUST use in_place refinement
+  - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}
   - Incorporate the handwritten edit instructions while preserving all existing content.`
     );
   }

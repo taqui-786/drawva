@@ -310,14 +310,22 @@ export function CanvasApp() {
           box: { x: targetItem.x, y: targetItem.y, w: targetItem.w, h: targetItem.h },
         };
       }
-    } else if (wm && box.w > 0 && box.h > 0 && box.w < 3500 && box.h < 3500) {
+    } else if (wm && box.w > 0 && box.h > 0 && box.w < 6000 && box.h < 6000) {
       let closestWidget: WidgetItem | null = null;
       let minDistance = Infinity;
-      for (const w of wm.all()) {
+      const allWidgets = wm.all();
+      for (const w of allWidgets) {
         const dist = distanceBetweenRects(box, { x: w.x, y: w.y, w: w.w, h: w.h });
-        if (dist <= 450 && dist < minDistance) {
+        if (dist <= 1600 && dist < minDistance) {
           minDistance = dist;
           closestWidget = w;
+        }
+      }
+      if (!closestWidget && allWidgets.length === 1) {
+        const single = allWidgets[0];
+        const dist = distanceBetweenRects(box, { x: single.x, y: single.y, w: single.w, h: single.h });
+        if (dist <= 3000) {
+          closestWidget = single;
         }
       }
       if (closestWidget) {
@@ -818,17 +826,18 @@ export function CanvasApp() {
         id: oldWidget?.id || targetId || `widget-${Date.now()}`,
         kind: "html",
         pluginId: cmd.pluginId,
-        x: cmd.x,
-        y: cmd.y,
-        w: cmd.w,
-        h: cmd.h,
-        contentW: cmd.w,
-        contentH: cmd.h,
+        x: oldWidget ? oldWidget.x : cmd.x,
+        y: oldWidget ? oldWidget.y : cmd.y,
+        w: oldWidget ? oldWidget.w : cmd.w,
+        h: oldWidget ? oldWidget.h : cmd.h,
+        contentW: oldWidget ? oldWidget.contentW : cmd.w,
+        contentH: oldWidget ? oldWidget.contentH : cmd.h,
         title: cmd.title,
         html: cmd.html,
         copyText: cmd.copyText,
         copyLabel: cmd.copyLabel,
         status: "draft",
+        userResized: oldWidget ? (oldWidget.userResized ?? true) : false,
       };
       wm.add(item);
       syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
@@ -917,17 +926,18 @@ export function CanvasApp() {
         id: oldWidget?.id || targetId || `diagram-${Date.now()}`,
         kind: "diagram",
         pluginId: "flowchart",
-        x: cmd.x,
-        y: cmd.y,
-        w: cmd.w,
-        h: cmd.h,
-        contentW: cmd.w,
-        contentH: cmd.h,
+        x: oldWidget ? oldWidget.x : cmd.x,
+        y: oldWidget ? oldWidget.y : cmd.y,
+        w: oldWidget ? oldWidget.w : cmd.w,
+        h: oldWidget ? oldWidget.h : cmd.h,
+        contentW: oldWidget ? oldWidget.contentW : cmd.w,
+        contentH: oldWidget ? oldWidget.contentH : cmd.h,
         title: cmd.title,
         html,
         copyText: cmd.source,
         copyLabel: copyLabel(cmd.sourceFormat),
         status: "draft",
+        userResized: oldWidget ? (oldWidget.userResized ?? true) : false,
       };
       wm.add(item);
       syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });

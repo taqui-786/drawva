@@ -133,6 +133,7 @@ export interface CommandValidationContext {
   keepPosition?: boolean;
   /** Original widget box — used in refinement mode to snap placement back to the existing widget. */
   widgetEditBox?: { x: number; y: number; w: number; h: number };
+  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>;
 }
 
 const isFiniteNum = n as (v: unknown, min?: number, max?: number) => boolean;
@@ -170,21 +171,22 @@ function clampNum(v: number, lo: number, hi: number): number {
 }
 
 const MIN_WIDGET_WIDTH = 480;
-const MIN_WIDGET_HEIGHT = 240;
-const DEFAULT_WIDGET_WIDTH = 620;
-const DEFAULT_WIDGET_HEIGHT = 420;
+const MIN_WIDGET_HEIGHT = 280;
+const DEFAULT_WIDGET_WIDTH = 640;
+const DEFAULT_WIDGET_HEIGHT = 440;
 const MAX_WIDGET_WIDTH = 2800;
 const MAX_WIDGET_HEIGHT = 4500;
 
 function fitWidgetGeometry(
-  cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown },
+  cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown; placement?: unknown },
   visibleRect?: { x: number; y: number; w: number; h: number },
   changedBox?: { x: number; y: number; w: number; h: number },
   reposition = true,
-  widgetEditBox?: { x: number; y: number; w: number; h: number }
+  widgetEditBox?: { x: number; y: number; w: number; h: number },
+  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>
 ): { x: number; y: number; w: number; h: number } | null {
   // Refinement mode: snap to the original widget's box — ignore whatever the AI returned.
-  if (!reposition && widgetEditBox && widgetEditBox.w > 0 && widgetEditBox.h > 0) {
+  if ((!reposition || cmd.placement === "in_place") && widgetEditBox && widgetEditBox.w > 0 && widgetEditBox.h > 0) {
     return {
       x: Math.round(widgetEditBox.x),
       y: Math.round(widgetEditBox.y),
@@ -192,38 +194,27 @@ function fitWidgetGeometry(
       h: Math.round(widgetEditBox.h),
     };
   }
-  if (
-    !isFiniteNum(cmd.x) ||
-    !isFiniteNum(cmd.y) ||
-    !isFiniteNum(cmd.w) ||
-    !isFiniteNum(cmd.h)
-  ) {
-    return null;
-  }
+
   const viewportW = Math.max(visibleRect?.w ?? 2000, 1);
   const viewportH = Math.max(visibleRect?.h ?? 1200, 1);
 
-  let x = Math.round(cmd.x as number);
-  let y = Math.round(cmd.y as number);
-  let rawW = Math.round(cmd.w as number);
-  let rawH = Math.round(cmd.h as number);
+  let rawW = Number(cmd.w);
+  let rawH = Number(cmd.h);
 
-  if (rawW <= 0 || rawH <= 0) {
-    rawW = DEFAULT_WIDGET_WIDTH;
-    rawH = DEFAULT_WIDGET_HEIGHT;
-  } else if (rawW < MIN_WIDGET_WIDTH || rawH < MIN_WIDGET_HEIGHT) {
+  if (!Number.isFinite(rawW) || rawW <= 0) rawW = DEFAULT_WIDGET_WIDTH;
+  if (!Number.isFinite(rawH) || rawH <= 0) rawH = DEFAULT_WIDGET_HEIGHT;
+
+  if (rawW < MIN_WIDGET_WIDTH || rawH < MIN_WIDGET_HEIGHT) {
     const scale = Math.max(MIN_WIDGET_WIDTH / Math.max(1, rawW), MIN_WIDGET_HEIGHT / Math.max(1, rawH));
     rawW = Math.ceil(rawW * scale);
     rawH = Math.ceil(rawH * scale);
   }
 
-  // If the user drew a reasonably-sized sketch, honour that footprint.
-  // A "sketch-sized" box is one that is smaller than ~60% of the viewport —
-  // anything larger is likely a full-canvas selection, not a hand-drawn sketch.
+  // If user drew a sketch on canvas, honour that footprint:
   const sketchW = changedBox?.w ?? 0;
   const sketchH = changedBox?.h ?? 0;
-  const isSketch = sketchW > 0 && sketchH > 0 && sketchW < viewportW * 0.6 && sketchH < viewportH * 0.6;
-  if (isSketch) {
+  const hasSketch = sketchW > 40 && sketchH > 40 && sketchW < viewportW * 0.9 && sketchH < viewportH * 0.9;
+  if (hasSketch) {
     rawW = Math.max(rawW, Math.round(sketchW));
     rawH = Math.max(rawH, Math.round(sketchH));
   }
@@ -234,15 +225,65 @@ function fitWidgetGeometry(
   const w = clampNum(rawW, MIN_WIDGET_WIDTH, maxW);
   const h = clampNum(rawH, MIN_WIDGET_HEIGHT, maxH);
 
-  if (reposition && changedBox && changedBox.w > 0 && changedBox.h > 0 && changedBox.w < SIZE * 0.9) {
-    const gap = 24;
-    y = Math.round(changedBox.y + changedBox.h + gap);
-    const centerX = changedBox.x + changedBox.w / 2;
-    x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
+  const placement = String(cmd.placement || "").toLowerCase();
+  let x = Number(cmd.x);
+  let y = Number(cmd.y);
+
+  const hasValidExplicitCoords =
+    Number.isFinite(x) &&
+    Number.isFinite(y) &&
+    x >= 0 &&
+    y >= 0 &&
+    x < SIZE - w &&
+    y < SIZE - h &&
+    (!visibleRect || (x >= visibleRect.x - 500 && x <= visibleRect.x + visibleRect.w + 500 && y >= visibleRect.y - 500 && y <= visibleRect.y + visibleRect.h + 500));
+
+  if (placement === "match_sketch" && hasSketch && changedBox) {
+    // 1:1 replacement in-place over the drawn sketch:
+    x = Math.round(changedBox.x);
+    y = Math.round(changedBox.y);
+  } else if (placement === "right" && hasSketch && changedBox) {
+    // Companion placement to the right:
+    x = Math.round(changedBox.x + changedBox.w + 32);
+    y = Math.round(changedBox.y);
+  } else if (placement === "below" || reposition || !hasValidExplicitCoords) {
+    if (hasSketch && changedBox) {
+      y = Math.round(changedBox.y + changedBox.h + 24);
+      const centerX = changedBox.x + changedBox.w / 2;
+      x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
+    } else if (visibleRect) {
+      x = clampNum(Math.round(visibleRect.x + visibleRect.w / 2 - w / 2), 0, Math.max(0, SIZE - w));
+      y = clampNum(Math.round(visibleRect.y + visibleRect.h / 2 - h / 2), 0, Math.max(0, SIZE - h));
+    } else {
+      x = Math.round(Number.isFinite(x) ? x : 1000);
+      y = Math.round(Number.isFinite(y) ? y : 1000);
+    }
   }
 
-  x = Math.max(0, Math.min(SIZE - w, x));
-  y = Math.max(0, Math.min(SIZE - h, y));
+  x = Math.max(0, Math.min(SIZE - w, Math.round(x)));
+  y = Math.max(0, Math.min(SIZE - h, Math.round(y)));
+
+  // Simple collision avoidance if placing below/right:
+  if (sceneItems && sceneItems.length > 0 && placement !== "match_sketch") {
+    for (let step = 0; step < 3; step++) {
+      let collided = false;
+      for (const item of sceneItems) {
+        if (item.w <= 0 || item.h <= 0) continue;
+        const overlap =
+          x < item.x + item.w + 16 &&
+          x + w > item.x - 16 &&
+          y < item.y + item.h + 16 &&
+          y + h > item.y - 16;
+        if (overlap) {
+          collided = true;
+          y = Math.min(SIZE - h, item.y + item.h + 24);
+          break;
+        }
+      }
+      if (!collided) break;
+    }
+  }
+
   return { x, y, w, h };
 }
 
@@ -256,19 +297,54 @@ export function validateCommand(
   }
   const c = raw as Record<string, unknown>;
   const tool = String(c.tool || c.type || c.name || "");
+  const placement = String(c.placement || "").toLowerCase();
 
   switch (tool) {
     case "write_text": {
-      if (!n(c.x) || !n(c.y) || typeof c.text !== "string" || !Number.isFinite(c.maxWidth)) return fail("write_text.bad-basic");
+      if (typeof c.text !== "string" || !c.text.trim()) return fail("write_text.empty");
       const text = (c.text as string).slice(0, AI_TEXT_MAX_LENGTH);
       const fontSize = matchedTextFontSize(c.fontSize, text, ctx.scale, ctx.changedBox?.h);
-      const maxWidth = Math.max(fontSize, Math.min(SIZE - (c.x as number), c.maxWidth as number));
       const lineHeight = Math.max(1, Math.min(2.2, Number(c.lineHeight) || 1.35));
-      if (maxWidth < fontSize) return fail("write_text.maxWidth");
-      const y = Math.min(c.y as number, Math.max(0, SIZE - fontSize * lineHeight * 2));
+
+      let x = Number(c.x);
+      let y = Number(c.y);
+      const hasValidCoords =
+        Number.isFinite(x) &&
+        Number.isFinite(y) &&
+        x >= 0 &&
+        y >= 0 &&
+        x < SIZE &&
+        y < SIZE &&
+        (!ctx.visibleRect || (x >= ctx.visibleRect.x - 300 && x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
+
+      if (placement === "right" && ctx.changedBox && ctx.changedBox.w > 0) {
+        x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
+        y = Math.round(ctx.changedBox.y);
+      } else if (!hasValidCoords || placement === "below") {
+        if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
+          x = Math.round(ctx.changedBox.x);
+          y = Math.round(ctx.changedBox.y + ctx.changedBox.h + 24);
+        } else if (ctx.visibleRect) {
+          x = Math.round(ctx.visibleRect.x + 80);
+          y = Math.round(ctx.visibleRect.y + 80);
+        } else {
+          x = Number.isFinite(x) ? Math.round(x) : 1000;
+          y = Number.isFinite(y) ? Math.round(y) : 1000;
+        }
+      }
+
+      let rawMaxWidth = Number(c.maxWidth);
+      if (!Number.isFinite(rawMaxWidth) || rawMaxWidth < fontSize * 3) {
+        const textLen = text.length;
+        rawMaxWidth = textLen < 50 ? 540 : textLen < 150 ? 680 : 820;
+      }
+      const maxWidth = Math.max(fontSize * 3, Math.min(SIZE - x, Math.round(rawMaxWidth)));
+      x = Math.max(0, Math.min(SIZE - maxWidth, x));
+      y = Math.max(0, Math.min(SIZE - fontSize * lineHeight * 2, y));
+
       return {
         tool: "write_text",
-        x: c.x as number,
+        x,
         y,
         text,
         fontSize: Math.round(fontSize),
@@ -278,50 +354,74 @@ export function validateCommand(
       };
     }
     case "draw_formula": {
-      if (!n(c.x) || !n(c.y) || typeof c.latex !== "string") return fail("draw_formula.bad-basic");
+      if (typeof c.latex !== "string" || !c.latex.trim()) return fail("draw_formula.empty");
       const latex = (c.latex as string).slice(0, 500);
       const fontSize = matchedFontSize(c.fontSize, ctx.scale, ctx.changedBox?.h);
-      const estimatedWidth = Math.min(5000, Math.max(fontSize, latex.length * fontSize * 0.72));
+      const estimatedWidth = Math.min(5000, Math.max(fontSize * 2, latex.length * fontSize * 0.72));
+
+      let x = Number(c.x);
+      let y = Number(c.y);
+      const hasValidCoords =
+        Number.isFinite(x) &&
+        Number.isFinite(y) &&
+        x >= 0 &&
+        y >= 0 &&
+        x < SIZE &&
+        y < SIZE &&
+        (!ctx.visibleRect || (x >= ctx.visibleRect.x - 300 && x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
+
+      if (placement === "right" && ctx.changedBox && ctx.changedBox.w > 0) {
+        x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
+        y = Math.round(ctx.changedBox.y);
+      } else if (!hasValidCoords || placement === "below") {
+        if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
+          x = Math.round(ctx.changedBox.x);
+          y = Math.round(ctx.changedBox.y + ctx.changedBox.h + 24);
+        } else if (ctx.visibleRect) {
+          x = Math.round(ctx.visibleRect.x + 80);
+          y = Math.round(ctx.visibleRect.y + 80);
+        } else {
+          x = Number.isFinite(x) ? Math.round(x) : 1000;
+          y = Number.isFinite(y) ? Math.round(y) : 1000;
+        }
+      }
+
+      x = Math.max(0, Math.min(SIZE - estimatedWidth, Math.round(x)));
+      y = Math.max(0, Math.min(SIZE - fontSize * 1.8, Math.round(y)));
+
       return {
         tool: "draw_formula",
-        x: Math.min(c.x as number, Math.max(0, SIZE - estimatedWidth)),
-        y: Math.min(c.y as number, Math.max(0, SIZE - fontSize * 1.8)),
+        x,
+        y,
         latex,
         fontSize: Math.round(fontSize),
         color: ctx.aiColor,
       };
     }
-    case "plot_function":
-      if (
-        !n(c.x) ||
-        !n(c.y) ||
-        !n(c.w, 240, 6000) ||
-        !n(c.h, 180, 6000) ||
-        (c.w as number) * (c.h as number) > MAX_PLOT_PIXELS_SINGLE ||
-        Math.max((c.w as number) / (c.h as number), (c.h as number) / (c.w as number)) > 6 ||
-        (c.x as number) + (c.w as number) > SIZE ||
-        (c.y as number) + (c.h as number) > SIZE ||
-        typeof c.expression !== "string" ||
-        (c.expression as string).length > 180
-      ) {
-        return fail("plot_function.bad-basic");
+    case "plot_function": {
+      if (typeof c.expression !== "string" || !(c.expression as string).trim() || (c.expression as string).length > 180) {
+        return fail("plot_function.bad-expr");
       }
+      const geom = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
+      if (!geom) return fail("plot_function.bad-geom");
+
       return {
         tool: "plot_function",
-        x: c.x as number,
-        y: c.y as number,
-        w: c.w as number,
-        h: c.h as number,
-        expression: c.expression as string,
+        x: geom.x,
+        y: geom.y,
+        w: geom.w,
+        h: geom.h,
+        expression: (c.expression as string).trim(),
         color: ctx.aiColor,
       };
+    }
     case "html_widget": {
       const pluginId = typeof c.pluginId === "string" && c.pluginId.trim() ? c.pluginId.trim() : "general";
       const allowCopy = pluginId !== "image-search";
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim() : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim() : "";
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
       if (
         ctx.widgetSlots <= 0 ||
         typeof c.title !== "string" ||
@@ -361,7 +461,7 @@ export function validateCommand(
       return out;
     }
     case "diagram_source": {
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
       const sourceFormat = canonicalDiagramFormat(c.sourceFormat);
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       if (

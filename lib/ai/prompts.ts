@@ -11,17 +11,14 @@ Before generating commands, plan the single focused action:
    - Math equations → Generate ONLY step-by-step formula derivations (draw_formula).
    - If a diagram_source or html_widget is generated, it MUST be the ONLY command in the reply. Do not mix diagram and text commands in the same response.
 2. SPATIAL & CLEARANCE ANCHORING:
-   - Companion Diagram / Chart: Prefer placing to the RIGHT of the sketch:
-     x = changedBox.x + changedBox.w + 32, y = changedBox.y.
-     If the right side is blocked by existing items, place cleanly BELOW:
-     x = changedBox.x, y = changedBox.y + changedBox.h + 28.
-   - Text Explanations & Math Solutions: Place directly BELOW:
-     x = changedBox.x, y = changedBox.y + changedBox.h + 24.
+   - Hand-drawn chart/sketch replacement: Use placement "match_sketch" (the system automatically matches the user's sketch bounds).
+   - Widget in-place refinement (widgetEdit): Use placement "in_place" (system preserves the target widget's exact position & size).
+   - Text Explanations & Math Solutions: Use placement "below" (placed cleanly below user ink).
+   - Companion Diagram / Chart: Use placement "right" or "below".
    - ANTI-COLLISION: NEVER overlap drawn ink, text boxes, or existing widgets.
- 3. SCALE & TYPOGRAPHY (sketch-matched sizing is mandatory):
-    - **DIAGRAM/WIDGET SIZE MUST MATCH THE USER'S DRAWING**: Use changedBox.w and changedBox.h as your primary size target. Set w = changedBox.w, h = changedBox.h. Do NOT shrink or invent arbitrary sizes smaller than the drawn sketch.
-    - For write_text: fontSize 28..48, maxWidth 520..850 so text flows in 2-4 clean horizontal lines. Never create narrow 1-word columns.
-    - For diagrams/widgets: if no changedBox, use w 480..680, h 360..480 as a fallback. For portrait/phone: w 340..420, h 580..720.
+3. SCALE & TYPOGRAPHY:
+   - For write_text: concise, structured notes.
+   - For diagrams/widgets: focus on generating clean, high-precision diagram/chart code (vega-lite, mermaid, etc.). Sizing & positioning are handled deterministically.
 
 PEDAGOGICAL TEACHING FORMAT:
 - For questions/definitions: Start directly with the answer (e.g. "Demand is..."). Include the core law/formula and 2-3 concise bullet points. No conversational greetings or filler.
@@ -31,15 +28,15 @@ PEDAGOGICAL TEACHING FORMAT:
 export const CODE_SYSTEM_PROMPT_EXTRA = `Return ONLY valid JSON matching this schema:
 {
   "observedText": "string describing user ink",
-  "spatialPlan": "brief note on chosen anchor coordinates (Right or Below) and clearance",
+  "spatialPlan": "brief note on intent and layout",
   "intent": "none|hint|continue|explain|plot|correct|erase|answer|typeset",
   "message": "optional short UI status",
   "commands": [
-    {"tool":"write_text","x":number,"y":number,"text":string,"fontSize":number,"maxWidth":number,"lineHeight":1.35},
-    {"tool":"draw_formula","x":number,"y":number,"latex":string,"fontSize":number},
-    {"tool":"plot_function","x":number,"y":number,"w":number,"h":number,"expression":string},
-    {"tool":"diagram_source","pluginId":"flowchart","x":number,"y":number,"w":number,"h":number,"title":string,"sourceFormat":"mermaid|dot|smiles|vega-lite|bpmn-xml|cytoscape-json|geojson","source":string,"diagramKind":string},
-    {"tool":"html_widget","pluginId":"general|flowchart","x":number,"y":number,"w":number,"h":number,"title":string,"html":string,"refreshSeconds":0,"copyText":string,"copyLabel":string}
+    {"tool":"write_text","text":string,"placement":"below|right","fontSize":number,"maxWidth":number,"lineHeight":1.35},
+    {"tool":"draw_formula","latex":string,"placement":"below|right","fontSize":number},
+    {"tool":"plot_function","expression":string,"placement":"match_sketch|below|right","w":number,"h":number},
+    {"tool":"diagram_source","pluginId":"flowchart","title":string,"sourceFormat":"mermaid|dot|smiles|vega-lite|bpmn-xml|cytoscape-json|geojson","source":string,"placement":"match_sketch|in_place|below|right","diagramKind":string},
+    {"tool":"html_widget","pluginId":"general|flowchart","title":string,"html":string,"placement":"match_sketch|in_place|below|right","refreshSeconds":0,"copyText":string,"copyLabel":string}
   ]
 }`;
 
