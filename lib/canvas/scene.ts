@@ -1,6 +1,7 @@
 import type { Rect } from "./types";
 import type { WidgetManager } from "./widgets";
 import type { ObjectManager } from "./objects";
+import { detectDiagramFormat } from "./diagram";
 
 export interface SceneItemJson {
   kind: string;
@@ -33,7 +34,9 @@ export function buildScene(
         h: w.h,
         title: w.title,
       };
-      if (w.kind === "diagram") item.sourceFormat = w.pluginId;
+      if (w.kind === "diagram") {
+        item.sourceFormat = w.sourceFormat || detectDiagramFormat(w.pluginId, w.copyText, w.title);
+      }
       if (w.copyText && w.copyText.length < 300) item.text = w.copyText.slice(0, 300);
       items.push(item);
     }

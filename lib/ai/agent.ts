@@ -7,6 +7,7 @@ import {
   CODE_SYSTEM_PROMPT_EXTRA,
   FLOWCHART_RULES,
   WIDGET_VISUAL_RULES,
+  WRITE_TEXT_RULES,
   SPATIAL_GESTURE_PROMPT,
   THEME_PERSONAS,
   MANDATORY_VISIBLE_RESPONSE,
@@ -86,7 +87,7 @@ export async function runAgent(
 
 function systemPromptText(uiTheme?: string): string {
   const persona = THEME_PERSONAS[uiTheme || "studio"] || THEME_PERSONAS.studio;
-  return `${SYSTEM_PROMPT}\n\nPersona Focus: ${persona}\n\n${SPATIAL_GESTURE_PROMPT}\n\n${CODE_SYSTEM_PROMPT_EXTRA}\n\n${FLOWCHART_RULES}\n\n${WIDGET_VISUAL_RULES}`;
+  return `${SYSTEM_PROMPT}\n\nPersona Focus: ${persona}\n\n${SPATIAL_GESTURE_PROMPT}\n\n${CODE_SYSTEM_PROMPT_EXTRA}\n\n${WRITE_TEXT_RULES}\n\n${FLOWCHART_RULES}\n\n${WIDGET_VISUAL_RULES}`;
 }
 
 function userMessageText(req: AiRequest, sceneText: string): string {
@@ -100,22 +101,27 @@ function userMessageText(req: AiRequest, sceneText: string): string {
   ];
   if (req.widgetEdit) {
     const wb = req.widgetEdit.box;
+    const format = req.widgetEdit.sourceFormat || (req.widgetEdit.widgetType === "diagram_source" ? "mermaid" : "html");
+    const pluginId = format !== "mermaid" && format !== "html" ? format : (req.widgetEdit.pluginId || "flowchart");
     parts.push(
       `\n--- REFINEMENT TARGET (widgetEdit) ---`,
       `Target Widget ID: ${req.widgetEdit.id}`,
-      `Plugin ID: ${req.widgetEdit.pluginId}`,
+      `Plugin ID: ${pluginId}`,
       `Widget Type: ${req.widgetEdit.widgetType}`,
-      `Source Format: ${req.widgetEdit.sourceFormat || "(none)"}`,
+      `Source Format: ${format}`,
       `Current Title: ${req.widgetEdit.title || "(none)"}`,
       `Widget Box (EXACT position/size to preserve): ${JSON.stringify(wb)}`,
       `Current Baseline Source Code:\n${(req.widgetEdit.source || req.widgetEdit.html || "").slice(0, 4000)}`,
-      `REFINEMENT INSTRUCTION: This is an IN-PLACE edit of the widget above. The ink/arrows on canvas are edit instructions — apply them to the baseline source code. Return exactly ONE updated replacement command (${req.widgetEdit.widgetType}) with:
-  - pluginId: "${req.widgetEdit.pluginId}"
-  - sourceFormat: "${req.widgetEdit.sourceFormat || "mermaid"}"
-  - title: "${req.widgetEdit.title || "Widget"}"
-  - placement: "in_place"  ← MUST use in_place refinement
-  - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}
-  - Incorporate the handwritten edit instructions while preserving all existing content.`
+      `REFINEMENT INSTRUCTION: This is an IN-PLACE edit of the existing widget above. The user's ink / annotations / circled regions on canvas are edit instructions for this widget.
+  - MUST preserve the EXACT sourceFormat ("${format}") and semantic type (DO NOT change chemical SMILES into a flowchart, DO NOT change Vega-Lite charts into flowcharts).
+  - Apply the requested modification (e.g. circle with text "compact" -> update the chemical source code or set diagramKind: "molecular-structure-compact") to the baseline source code while keeping the rest intact.
+  - Return exactly ONE updated replacement command (${req.widgetEdit.widgetType}) with:
+      - tool: "${req.widgetEdit.widgetType}"
+      - pluginId: "${pluginId}"
+      - sourceFormat: "${format}"
+      - title: "${req.widgetEdit.title || "Widget"}"
+      - placement: "in_place"
+      - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}`
     );
   }
   parts.push(`Scene JSON:\n${req.scene || sceneText}`, `\nInspect the canvas image, plan your spatial anchor coordinates in spatialPlan, then return matching commands.`);

@@ -67,7 +67,7 @@ export class ObjectManager {
     this.hostRoot.className = "drawva-object-host";
     this.hostRoot.dataset.mode = this.mode;
     this.hostRoot.style.cssText =
-      "position:absolute;inset:0;pointer-events:none;z-index:1;overflow:hidden;";
+      "position:absolute;inset:0;pointer-events:none;z-index:20;overflow:hidden;";
     this.style = document.createElement("style");
     this.style.textContent = `
       .drawva-object-shell {
@@ -168,6 +168,17 @@ export class ObjectManager {
     return this.selectedId;
   }
 
+  getSelectedGeometry(): ObjectItem | null {
+    if (this.selectedId) {
+      const item = this.items.get(this.selectedId);
+      if (item) return item;
+    }
+    for (const item of this.items.values()) {
+      if (item.status === "draft") return item;
+    }
+    return null;
+  }
+
   setMode(mode: CanvasMode): void {
     this.mode = mode;
     this.hostRoot.dataset.mode = mode;
@@ -184,7 +195,7 @@ export class ObjectManager {
     const isSelected = this.selectedId === id;
     const isHovered = !hand && shell?.dataset.hovered === "true";
     const active = isSelected || isHovered;
-    this.hostRoot.style.zIndex = active || hand || select ? "40" : "1";
+    this.hostRoot.style.zIndex = active || hand || select ? "40" : "20";
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
       shell.style.pointerEvents = active || hand || select ? "auto" : "none";

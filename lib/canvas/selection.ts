@@ -259,6 +259,34 @@ export class SelectionController {
     return this.selection ? { ...this.selection.rect } : null;
   }
 
+  getGeometry(): { x: number; y: number; w: number; h: number; isMarquee: boolean; isMoving: boolean } | null {
+    if (this.marquering && this.current) {
+      const r = rectFromPoints(this.marquering, this.current);
+      return {
+        x: r.x,
+        y: r.y,
+        w: r.w,
+        h: r.h,
+        isMarquee: true,
+        isMoving: false,
+      };
+    }
+    if (this.selection) {
+      const s = this.selection.rect;
+      const x = this.moving ? s.x + this.moving.offset.x : s.x;
+      const y = this.moving ? s.y + this.moving.offset.y : s.y;
+      return {
+        x,
+        y,
+        w: s.w,
+        h: s.h,
+        isMarquee: false,
+        isMoving: this.moving !== null,
+      };
+    }
+    return null;
+  }
+
   hitTest(point: Point, tolerance = 12): boolean {
     if (!this.selection) return false;
     const s = this.selection.rect;

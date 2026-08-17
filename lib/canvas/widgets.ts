@@ -9,6 +9,8 @@ export interface WidgetItem {
   id: string;
   kind: WidgetKind;
   pluginId: string;
+  sourceFormat?: string;
+  diagramKind?: string;
   x: number;
   y: number;
   w: number;
@@ -76,7 +78,7 @@ export class WidgetManager {
     this.hostRoot.className = "drawva-widget-host";
     this.hostRoot.dataset.mode = this.mode;
     this.hostRoot.style.cssText =
-      "position:absolute;inset:0;pointer-events:none;z-index:1;overflow:hidden;";
+      "position:absolute;inset:0;pointer-events:none;z-index:20;overflow:hidden;";
     this.style = document.createElement("style");
     this.style.textContent = `
       .drawva-widget-shell {
@@ -225,6 +227,17 @@ export class WidgetManager {
     return this.selectedId;
   }
 
+  getSelectedGeometry(): WidgetItem | null {
+    if (this.selectedId) {
+      const w = this.widgets.get(this.selectedId);
+      if (w) return w;
+    }
+    for (const w of this.widgets.values()) {
+      if (w.status === "draft") return w;
+    }
+    return null;
+  }
+
   setStatus(id: string, status: WidgetStatus): void {
     const w = this.widgets.get(id);
     if (!w) return;
@@ -255,7 +268,7 @@ export class WidgetManager {
     const active = isDraft || isSelected;
     const frame = shell?.querySelector("iframe") as HTMLIFrameElement | null;
 
-    this.hostRoot.style.zIndex = active || hand || select ? "40" : "1";
+    this.hostRoot.style.zIndex = active || hand || select ? "40" : "20";
 
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
@@ -270,9 +283,6 @@ export class WidgetManager {
     if (frame) {
       const passThrough = !active && !hand && !select;
       frame.style.pointerEvents = passThrough ? "none" : "auto";
-      // Hide iframe completely when it must not intercept events — CSS pointer-events
-      // alone doesn't reliably block nested browsing-context event capture.
-      frame.style.visibility = passThrough ? "hidden" : "visible";
     }
 
     if (chrome) {

@@ -9,13 +9,13 @@ interface FormatRecord {
 }
 
 const FORMATS: FormatRecord[] = [
-  { id: "mermaid", label: "Mermaid", aliases: ["mermaid"] },
+  { id: "mermaid", label: "Mermaid", aliases: ["mermaid", "flowchart", "sequence", "sequencediagram", "classdiagram", "erdiagram", "gantt", "graph"] },
   { id: "dot", label: "Graphviz DOT", aliases: ["dot", "graphviz", "graphviz-dot", "graphviz dot"] },
   { id: "bpmn-xml", label: "BPMN XML", aliases: ["bpmn", "bpmn-xml", "bpmn2", "bpmn-2.0-xml"] },
-  { id: "vega-lite", label: "Vega-Lite JSON", aliases: ["vega-lite", "vegalite", "vega-lite-json"] },
-  { id: "geojson", label: "GeoJSON", aliases: ["geojson", "geo-json"] },
-  { id: "smiles", label: "SMILES", aliases: ["smiles"] },
-  { id: "cytoscape-json", label: "Cytoscape JSON", aliases: ["cytoscape", "cytoscape-json", "cytoscape-elements-json"] },
+  { id: "vega-lite", label: "Vega-Lite JSON", aliases: ["vega-lite", "vegalite", "vega-lite-json", "vega", "chart"] },
+  { id: "geojson", label: "GeoJSON", aliases: ["geojson", "geo-json", "map"] },
+  { id: "smiles", label: "SMILES", aliases: ["smiles", "chemical", "chemistry", "molecule", "molecular"] },
+  { id: "cytoscape-json", label: "Cytoscape JSON", aliases: ["cytoscape", "cytoscape-json", "cytoscape-elements-json", "network"] },
 ];
 
 const aliasMap = new Map<string, string>();
@@ -23,6 +23,47 @@ for (const f of FORMATS) for (const a of f.aliases) aliasMap.set(a, f.id);
 
 export function normalizeFormat(value: unknown): string {
   return aliasMap.get(String(value || "").trim().toLowerCase()) || "";
+}
+
+export function detectDiagramFormat(
+  sourceFormat?: string,
+  source?: string,
+  title?: string
+): DiagramFormat {
+  const norm = normalizeFormat(sourceFormat);
+  const src = String(source || "").trim();
+  const tit = String(title || "").trim();
+
+  // If title or source indicates SMILES / chemical molecule:
+  if (
+    norm === "smiles" ||
+    /smiles|molecule|chemical|c1ccccc1|aspirin|c@/i.test(tit) ||
+    (/^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(src) &&
+      !/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph|digraph|subgraph)/i.test(src) &&
+      (/[cCnNoOpPsS]/.test(src) && (src.includes("=") || src.includes("(") || src.includes("1") || src.includes("@"))))
+  ) {
+    return "smiles";
+  }
+
+  // If JSON structure:
+  if (src.startsWith("{") || src.startsWith("[")) {
+    if (/\"\$schema\"|\"mark\"|\"encoding\"|\"data\"/i.test(src)) return "vega-lite";
+    if (/\"nodes\"|\"edges\"|\"elements\"/i.test(src)) return "cytoscape-json";
+    if (/\"FeatureCollection\"|\"geometry\"|\"coordinates\"/i.test(src)) return "geojson";
+  }
+
+  // If XML structure:
+  if (/<\?xml|<bpmn|<definitions/i.test(src)) return "bpmn-xml";
+
+  // If DOT graph:
+  if (/^\s*(di)?graph\s*(\w+)?\s*\{/i.test(src)) return "dot";
+
+  // If norm is a recognized valid format:
+  if (norm && (DIAGRAM_SOURCE_FORMATS as Set<string>).has(norm)) {
+    return norm as DiagramFormat;
+  }
+
+  return "mermaid";
 }
 
 export function formatLabel(value: unknown): string {
@@ -57,6 +98,22 @@ export function responsiveMermaidSource(
   return { source: responsiveDiagram, direction };
 }
 
+export function sanitizeMermaidSource(raw: string): string {
+  let s = String(raw || "").trim();
+  s = s.replace(/^```(?:mermaid)?\s*/i, "").replace(/\s*```$/, "").trim();
+
+  // Auto-quote unquoted labels containing special characters like parentheses, colons, formulas, etc.
+  s = s.replace(/(\b[A-Za-z0-9_]+)\[([^"\]\r\n][^\]\r\n]*)\]/g, (match, id, label) => {
+    if (/[()\[\]{}":;=<>#]/.test(label)) {
+      const cleanLabel = label.replace(/"/g, "'");
+      return `${id}["${cleanLabel}"]`;
+    }
+    return match;
+  });
+
+  return s;
+}
+
 async function renderMermaid(source: string): Promise<string> {
   const mermaid = (await import("mermaid")).default;
   mermaid.initialize({
@@ -85,15 +142,18 @@ function errorDocument(message: string): string {
 export async function diagramDocument(
   sourceFormat: string,
   source: string,
-  diagramKind?: string
+  diagramKind?: string,
+  title?: string
 ): Promise<string> {
-  const format = normalizeFormat(sourceFormat);
+  const format = detectDiagramFormat(sourceFormat, source, title);
   if (!format) {
     return errorDocument(`Unknown diagram format: ${sourceFormat}`);
   }
 
+  const effectiveSource = format === "mermaid" ? sanitizeMermaidSource(source) : source;
+
   if (format === "mermaid") {
-    const { source: responsive } = responsiveMermaidSource(source, 800, 500);
+    const { source: responsive } = responsiveMermaidSource(effectiveSource, 800, 500);
     try {
       const svg = await renderMermaid(responsive);
       if (svg) {
@@ -104,8 +164,11 @@ export async function diagramDocument(
     }
   }
 
-  const encodedSource = JSON.stringify(source);
-  const isCompact = diagramKind === "molecular-structure-compact";
+  const encodedSource = JSON.stringify(effectiveSource);
+  const isCompact =
+    diagramKind === "molecular-structure-compact" ||
+    diagramKind === "compact" ||
+    /compact/i.test(diagramKind || "");
 
   return `<!doctype html>
 <html>

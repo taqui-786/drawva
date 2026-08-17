@@ -97,7 +97,7 @@ export interface HtmlWidgetCommand {
 export interface DiagramSourceCommand {
   tool: "diagram_source";
   widgetType: "diagram_source";
-  pluginId: "flowchart";
+  pluginId: string;
   x: number;
   y: number;
   w: number;
@@ -246,6 +246,15 @@ function fitWidgetGeometry(
     // Companion placement to the right:
     x = Math.round(changedBox.x + changedBox.w + 32);
     y = Math.round(changedBox.y);
+  } else if (placement === "left" && hasSketch && changedBox) {
+    // Companion placement to the left:
+    x = Math.round(changedBox.x - w - 32);
+    y = Math.round(changedBox.y);
+  } else if (placement === "top" && hasSketch && changedBox) {
+    // Placement above the user's sketch:
+    y = Math.round(changedBox.y - h - 24);
+    const centerX = changedBox.x + changedBox.w / 2;
+    x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
   } else if (placement === "below" || reposition || !hasValidExplicitCoords) {
     if (hasSketch && changedBox) {
       y = Math.round(changedBox.y + changedBox.h + 24);
@@ -306,6 +315,16 @@ export function validateCommand(
       const fontSize = matchedTextFontSize(c.fontSize, text, ctx.scale, ctx.changedBox?.h);
       const lineHeight = Math.max(1, Math.min(2.2, Number(c.lineHeight) || 1.35));
 
+      let rawMaxWidth = Number(c.maxWidth);
+      if (!Number.isFinite(rawMaxWidth) || rawMaxWidth < fontSize * 3) {
+        const textLen = text.length;
+        rawMaxWidth = textLen < 50 ? 540 : textLen < 150 ? 680 : 820;
+      }
+      // const maxWidth = Math.max(fontSize * 3, Math.min(SIZE, Math.round(rawMaxWidth)));
+      const maxWidth = 900; 
+      console.log({maxWidth});
+      
+
       let x = Number(c.x);
       let y = Number(c.y);
       const hasValidCoords =
@@ -320,6 +339,12 @@ export function validateCommand(
       if (placement === "right" && ctx.changedBox && ctx.changedBox.w > 0) {
         x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
         y = Math.round(ctx.changedBox.y);
+      } else if (placement === "left" && ctx.changedBox && ctx.changedBox.w > 0) {
+        x = Math.round(ctx.changedBox.x - maxWidth - 32);
+        y = Math.round(ctx.changedBox.y);
+      } else if (placement === "top" && ctx.changedBox && ctx.changedBox.h > 0) {
+        x = Math.round(ctx.changedBox.x);
+        y = Math.round(ctx.changedBox.y - fontSize * lineHeight * 2 - 24);
       } else if (!hasValidCoords || placement === "below") {
         if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
           x = Math.round(ctx.changedBox.x);
@@ -333,12 +358,6 @@ export function validateCommand(
         }
       }
 
-      let rawMaxWidth = Number(c.maxWidth);
-      if (!Number.isFinite(rawMaxWidth) || rawMaxWidth < fontSize * 3) {
-        const textLen = text.length;
-        rawMaxWidth = textLen < 50 ? 540 : textLen < 150 ? 680 : 820;
-      }
-      const maxWidth = Math.max(fontSize * 3, Math.min(SIZE - x, Math.round(rawMaxWidth)));
       x = Math.max(0, Math.min(SIZE - maxWidth, x));
       y = Math.max(0, Math.min(SIZE - fontSize * lineHeight * 2, y));
 
@@ -373,6 +392,12 @@ export function validateCommand(
       if (placement === "right" && ctx.changedBox && ctx.changedBox.w > 0) {
         x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
         y = Math.round(ctx.changedBox.y);
+      } else if (placement === "left" && ctx.changedBox && ctx.changedBox.w > 0) {
+        x = Math.round(ctx.changedBox.x - estimatedWidth - 32);
+        y = Math.round(ctx.changedBox.y);
+      } else if (placement === "top" && ctx.changedBox && ctx.changedBox.h > 0) {
+        x = Math.round(ctx.changedBox.x);
+        y = Math.round(ctx.changedBox.y - fontSize * 1.8 - 24);
       } else if (!hasValidCoords || placement === "below") {
         if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
           x = Math.round(ctx.changedBox.x);
@@ -462,7 +487,23 @@ export function validateCommand(
     }
     case "diagram_source": {
       const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
-      const sourceFormat = canonicalDiagramFormat(c.sourceFormat);
+      const rawFormat = typeof c.sourceFormat === "string" ? c.sourceFormat : "";
+      const rawSource = typeof c.source === "string" ? c.source : "";
+      const rawTitle = typeof c.title === "string" ? c.title : "";
+      let sourceFormat = canonicalDiagramFormat(rawFormat);
+      if (!sourceFormat || sourceFormat === "mermaid") {
+        if (
+          /smiles|molecule|chemical|c1ccccc1|aspirin|c@/i.test(rawTitle) ||
+          (/^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(rawSource.trim()) &&
+            !/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph|digraph|subgraph)/i.test(rawSource.trim()) &&
+            (/[cCnNoOpPsS]/.test(rawSource) && (rawSource.includes("=") || rawSource.includes("(") || rawSource.includes("1") || rawSource.includes("@"))))
+        ) {
+          sourceFormat = "smiles";
+        }
+      }
+      if (!sourceFormat) {
+        sourceFormat = "mermaid";
+      }
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       if (
         ctx.widgetSlots <= 0 ||
@@ -470,7 +511,6 @@ export function validateCommand(
         typeof c.title !== "string" ||
         !(c.title as string).trim() ||
         (c.title as string).length > 120 ||
-        !sourceFormat ||
         !diagramSourceFits(c.source) ||
         diagramKind.length > 80
       ) {
@@ -479,7 +519,7 @@ export function validateCommand(
       return {
         tool: "diagram_source",
         widgetType: "diagram_source",
-        pluginId: "flowchart",
+        pluginId: typeof c.pluginId === "string" && c.pluginId.trim() ? c.pluginId.trim() : sourceFormat,
         x: Math.round(geometry.x),
         y: Math.round(geometry.y),
         w: Math.round(geometry.w),
@@ -555,9 +595,35 @@ function validWidgetRefreshSeconds(value: unknown): boolean {
 
 export function canonicalDiagramFormat(value: unknown): DiagramFormat | "" {
   const format = String(value || "").trim().toLowerCase();
-  return (DIAGRAM_SOURCE_FORMATS as Set<string>).has(format)
-    ? (format as DiagramFormat)
-    : "";
+  if ((DIAGRAM_SOURCE_FORMATS as Set<string>).has(format)) {
+    return format as DiagramFormat;
+  }
+  const aliasMap: Record<string, DiagramFormat> = {
+    flowchart: "mermaid",
+    sequence: "mermaid",
+    sequencediagram: "mermaid",
+    graph: "mermaid",
+    graphviz: "dot",
+    "graphviz-dot": "dot",
+    "graphviz dot": "dot",
+    bpmn: "bpmn-xml",
+    bpmn2: "bpmn-xml",
+    "bpmn-2.0-xml": "bpmn-xml",
+    vegalite: "vega-lite",
+    "vega-lite-json": "vega-lite",
+    vega: "vega-lite",
+    chart: "vega-lite",
+    "geo-json": "geojson",
+    map: "geojson",
+    chemical: "smiles",
+    chemistry: "smiles",
+    molecule: "smiles",
+    molecular: "smiles",
+    cytoscape: "cytoscape-json",
+    "cytoscape-elements-json": "cytoscape-json",
+    network: "cytoscape-json",
+  };
+  return aliasMap[format] || "";
 }
 
 export function diagramSourceFits(value: unknown): boolean {

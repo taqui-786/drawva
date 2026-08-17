@@ -117,6 +117,19 @@ export class ShapeController {
   get isDrawing(): boolean {
     return this.active !== null;
   }
+
+  getLiveGeometry(): { kind: ShapeKind; x: number; y: number; w: number; h: number } | null {
+    if (!this.active) return null;
+    const a = this.active.start;
+    const b = this.active.current;
+    return {
+      kind: this.active.kind,
+      x: Math.min(a.x, b.x),
+      y: Math.min(a.y, b.y),
+      w: Math.abs(b.x - a.x),
+      h: Math.abs(b.y - a.y),
+    };
+  }
 }
 
 function previewRect(a: Point, b: Point, lineWidth: number): Rect {
