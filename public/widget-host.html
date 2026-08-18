@@ -42,10 +42,20 @@
         let lastW = 0;
 
         function svgSize(svg) {
+          if (!svg) return null;
           const vb = svg.viewBox && svg.viewBox.baseVal;
           if (vb && vb.width > 2 && vb.height > 2) return { w: vb.width, h: vb.height };
           const p = (svg.getAttribute('viewBox') || '').split(/[\\s,]+/).map(Number);
           if (p.length === 4 && p[2] > 2 && p[3] > 2) return { w: p[2], h: p[3] };
+          const wAttr = parseFloat(svg.getAttribute('width') || '');
+          const hAttr = parseFloat(svg.getAttribute('height') || '');
+          if (wAttr > 2 && hAttr > 2 && !String(svg.getAttribute('width') || '').includes('%')) {
+            return { w: wAttr, h: hAttr };
+          }
+          try {
+            const r = svg.getBoundingClientRect();
+            if (r.width > 2 && r.height > 2) return { w: r.width, h: r.height };
+          } catch(e) {}
           return null;
         }
 
@@ -66,14 +76,15 @@
             const stage = document.getElementById('stage');
             if (stage && /^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed')) return;
 
-            const svg = document.querySelector('#stage svg, svg');
+            const svg = document.querySelector('#stage svg, .vega-embed svg, svg');
             const nat = svg && svgSize(svg);
             if (nat) { emitSize(nat.w + 16, nat.h + 16); return; }
 
-            const host = body.querySelector('.vega-embed, canvas, .leaflet-container, .djs-container');
-            if (host) {
-              const r = host.getBoundingClientRect();
-              if (r.width > 2) { emitSize(r.width + 8, r.height + 8); return; }
+            const canvas = document.querySelector('#stage canvas, .vega-embed canvas, canvas');
+            if (canvas) {
+              const cw = canvas.width || canvas.getBoundingClientRect().width;
+              const ch = canvas.height || canvas.getBoundingClientRect().height;
+              if (cw > 2 && ch > 2) { emitSize(cw + 16, ch + 16); return; }
             }
 
             const kids = Array.from(body.children).filter(function(el) {

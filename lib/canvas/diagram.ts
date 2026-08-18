@@ -380,14 +380,6 @@ export async function diagramDocument(
 
   function fitContent() {
     try {
-      const embed = stage.querySelector(".vega-embed");
-      if (embed) {
-        const r = embed.getBoundingClientRect();
-        if (r.width > 2 && r.height > 2) {
-          postNatural(r.width + 16, r.height + 16);
-          return;
-        }
-      }
       const svgEl = stage.querySelector("svg");
       const canvasEl = stage.querySelector("canvas");
       if (svgEl) {
@@ -417,6 +409,15 @@ export async function diagramDocument(
         }
         if (!naturalW) {
           try {
+            const r = svgEl.getBoundingClientRect();
+            if (r.width > 2 && r.height > 2) {
+              naturalW = r.width;
+              naturalH = r.height;
+            }
+          } catch (e) {}
+        }
+        if (!naturalW) {
+          try {
             const b = svgEl.getBBox();
             if (b && b.width > 2 && b.height > 2) {
               naturalW = b.width;
@@ -431,12 +432,15 @@ export async function diagramDocument(
           svgEl.style.height = naturalH + "px";
           svgEl.style.maxWidth = "none";
           postNatural(naturalW + 16, naturalH + 16);
+          return;
         }
-      } else if (canvasEl) {
+      }
+      if (canvasEl) {
         const cw = canvasEl.width || canvasEl.getBoundingClientRect().width;
         const ch = canvasEl.height || canvasEl.getBoundingClientRect().height;
         if (cw > 2 && ch > 2) {
           postNatural(cw + 16, ch + 16);
+          return;
         }
       }
     } catch (e) {}

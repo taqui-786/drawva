@@ -453,6 +453,13 @@ export class WidgetManager {
             if (w.kind === "html" && measuredH > 80 && measuredW > measuredH * 3) {
               measuredW = Math.max(280, Math.round(measuredH));
             }
+            if (
+              Math.abs(measuredW - w.contentW) <= 2 &&
+              Math.abs(measuredH - w.contentH) <= 2 &&
+              (w.userResized || (Math.abs(measuredW - w.w) <= 2 && Math.abs(measuredH - w.h) <= 2))
+            ) {
+              return;
+            }
             w.contentW = measuredW;
             w.contentH = measuredH;
             if (!w.userResized) {
