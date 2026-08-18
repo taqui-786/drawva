@@ -142,7 +142,7 @@ export function LogsDialog({ open, onOpenChange, log, onClearLogs }: LogsDialogP
               <div>
                 <DialogTitle className="text-base font-semibold">AI Request & Generation Logs</DialogTitle>
                 <DialogDescription className="text-xs">
-                  Inspect snapshot image, exact model prompts, and structured LLM responses.
+                  Inspect the atlas sent to the model, exact prompts, and structured LLM responses.
                 </DialogDescription>
               </div>
             </div>
@@ -331,38 +331,14 @@ export function LogsDialog({ open, onOpenChange, log, onClearLogs }: LogsDialogP
                 )}
               </div>
 
-              {/* Focus Inset if present */}
               {log.focusInset && (
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold text-foreground">High-Precision Focus Inset (Handwriting 2x Crop)</span>
-                      <Badge variant="outline" className="text-[10px] h-4">
-                        Cropped ROI
-                      </Badge>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => openImageInNewTab(log.focusInset!)}
-                      className="h-7 text-xs gap-1"
-                    >
-                      <HugeiconsIcon icon={ArrowUpRight01Icon} className="size-3.5" />
-                      <span>Open Full Size</span>
-                    </Button>
-                  </div>
-                  <div
-                    onClick={() => openImageInNewTab(log.focusInset!)}
-                    className="group relative cursor-pointer overflow-hidden rounded-lg border bg-neutral-950 p-2 text-center transition-all hover:border-primary/60"
-                  >
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={log.focusInset}
-                      alt="High-precision focus inset"
-                      className="mx-auto max-h-48 object-contain rounded"
-                    />
-                  </div>
-                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Focus inset is composited into the atlas corner
+                  {log.focusInset.imageRect
+                    ? ` (${Math.round(log.focusInset.imageRect.w)}×${Math.round(log.focusInset.imageRect.h)}px overlay).`
+                    : "."}{" "}
+                  Only this one image is sent to the model.
+                </p>
               )}
 
               {/* Response Summary Cards */}

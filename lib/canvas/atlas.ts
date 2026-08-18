@@ -1,5 +1,5 @@
 import { CanvasEngine } from "./engine";
-import { TILE } from "./constants";
+import { SIZE, TILE } from "./constants";
 import type { Rect } from "./types";
 import { WidgetManager, type WidgetItem } from "./widgets";
 import { ObjectManager, type ObjectItem } from "./objects";
@@ -7,13 +7,28 @@ import { ObjectManager, type ObjectItem } from "./objects";
 const MAX_ATLAS_WIDTH = 2048;
 const MAX_ATLAS_HEIGHT = 1536;
 
+export interface FocusInsetMeta {
+  sourceRect: Rect;
+  imageRect: Rect;
+  imageScale: number;
+  purpose: string;
+}
+
+export interface LatestInputMeta {
+  globalRect: Rect;
+  imageRect: Rect;
+}
+
 export interface AtlasResult {
   atlasImage: string;
   imageSize: { w: number; h: number };
   visibleRect: Rect;
+  captureRect: Rect;
   sourceRect: Rect;
   changedBox: Rect;
   imageScale: number;
+  focusInset: FocusInsetMeta | null;
+  latestInput: LatestInputMeta | null;
 }
 
 export async function renderWidgetToContext(
@@ -354,87 +369,299 @@ export async function buildAtlas(
   changedBox: Rect | null,
   widgets?: WidgetManager | WidgetItem[] | null,
   objects?: ObjectManager | ObjectItem[] | null,
-  includeWidgetTiles = false
+  opts: { captureFullViewport?: boolean } = {}
 ): Promise<AtlasResult> {
-  const sourceRect = clip(viewport);
-  const scale = Math.min(
-    1,
-    MAX_ATLAS_WIDTH / sourceRect.w,
-    MAX_ATLAS_HEIGHT / sourceRect.h
-  );
-  const outW = Math.max(1, Math.min(MAX_ATLAS_WIDTH, Math.ceil(sourceRect.w * scale)));
-  const outH = Math.max(1, Math.min(MAX_ATLAS_HEIGHT, Math.ceil(sourceRect.h * scale)));
+  const visibleRect = clip(viewport);
+  const captureRect = visibleRect;
+  const latest = changedBox && (changedBox.w > 0 || changedBox.h > 0) ? clip(changedBox) : null;
+  const latestInCapture = latest ? intersect(latest, captureRect) : emptyRect();
+  const content = unionRects([
+    visibleInkBounds(engine, captureRect),
+    layerBounds(widgets, captureRect),
+    layerBounds(objects, captureRect),
+    latestInCapture.w > 0 && latestInCapture.h > 0 ? latestInCapture : null,
+  ]);
+  const useFullViewport =
+    opts.captureFullViewport ||
+    Boolean(latest && (latestInCapture.w <= 0 || latestInCapture.h <= 0)) ||
+    !content;
+
+  const camScale = Math.max(0.03, engine.camera.scale || 1);
+  const margin = Math.max(120, Math.min(640, 160 / camScale));
+  let sourceRect = captureRect;
+  if (!useFullViewport && content) {
+    const left = Math.max(captureRect.x, content.x - margin);
+    const top = Math.max(captureRect.y, content.y - margin);
+    const right = Math.min(captureRect.x + captureRect.w, content.x + content.w + margin);
+    const bottom = Math.min(captureRect.y + captureRect.h, content.y + content.h + margin);
+    const cropped = clip({ x: left, y: top, w: right - left, h: bottom - top });
+    if (cropped.w > 0 && cropped.h > 0) sourceRect = cropped;
+  }
+
+  const imageScale =
+    Math.min(1, MAX_ATLAS_WIDTH / Math.max(1, sourceRect.w), MAX_ATLAS_HEIGHT / Math.max(1, sourceRect.h)) *
+    (1 - Number.EPSILON * 4);
+  const imageSize = {
+    w: Math.max(1, Math.min(MAX_ATLAS_WIDTH, Math.ceil(sourceRect.w * imageScale))),
+    h: Math.max(1, Math.min(MAX_ATLAS_HEIGHT, Math.ceil(sourceRect.h * imageScale))),
+  };
   const out = document.createElement("canvas");
-  out.width = outW;
-  out.height = outH;
+  out.width = imageSize.w;
+  out.height = imageSize.h;
   const q = out.getContext("2d")!;
+
+  const latestVisible = latestInCapture.w > 0 && latestInCapture.h > 0
+    ? clip(intersect(latestInCapture, sourceRect))
+    : { ...sourceRect };
 
   q.fillStyle = "#fff";
   q.fillRect(0, 0, out.width, out.height);
-  q.setTransform(scale, 0, 0, scale, -sourceRect.x * scale, -sourceRect.y * scale);
+  q.setTransform(imageScale, 0, 0, imageScale, -sourceRect.x * imageScale, -sourceRect.y * imageScale);
 
-  const hasChangedBox = !!changedBox && (changedBox.w > 0 || changedBox.h > 0);
-
+  const hasFocus = latestVisible.w > 0 && latestVisible.h > 0 && latest !== null;
   q.save();
-  if (hasChangedBox) q.globalAlpha = 0.42;
+  if (hasFocus) q.globalAlpha = 0.42;
   drawTiles(engine, q, sourceRect);
   await drawWidgets(widgets, q, sourceRect);
   drawObjects(objects, q, sourceRect);
   q.restore();
 
-  if (hasChangedBox && changedBox) {
-    const visible = clip(intersect(changedBox, sourceRect));
-    if (visible.w > 0 && visible.h > 0) {
-      q.save();
-      q.beginPath();
-      q.rect(visible.x, visible.y, visible.w, visible.h);
-      q.clip();
-      drawTiles(engine, q, visible);
-      await drawWidgets(widgets, q, visible);
-      drawObjects(objects, q, visible);
-      q.restore();
-    }
+  if (hasFocus) {
+    q.save();
+    q.beginPath();
+    q.rect(latestVisible.x, latestVisible.y, latestVisible.w, latestVisible.h);
+    q.clip();
+    drawTiles(engine, q, latestVisible);
+    await drawWidgets(widgets, q, latestVisible);
+    drawObjects(objects, q, latestVisible);
+    q.restore();
   }
+
+  const focusInset = hasFocus
+    ? drawFocusInset(out, engine, objects, latestVisible, sourceRect, imageScale)
+    : null;
   q.setTransform(1, 0, 0, 1, 0, 0);
 
   let data = "";
   try {
-    data = out.toDataURL(includeWidgetTiles ? "image/png" : "image/webp", 0.9);
+    data = out.toDataURL("image/webp", 0.92);
   } catch (err) {
     console.warn("[buildAtlas] toDataURL fallback:", err);
-    const fallbackCanvas = document.createElement("canvas");
-    fallbackCanvas.width = outW;
-    fallbackCanvas.height = outH;
-    const fq = fallbackCanvas.getContext("2d")!;
-    fq.fillStyle = "#fff";
-    fq.fillRect(0, 0, outW, outH);
-    fq.setTransform(scale, 0, 0, scale, -sourceRect.x * scale, -sourceRect.y * scale);
-    drawTiles(engine, fq, sourceRect);
-    fq.setTransform(1, 0, 0, 1, 0, 0);
-    data = fallbackCanvas.toDataURL("image/webp", 0.9);
+    data = out.toDataURL("image/png");
   }
 
   return {
     atlasImage: data,
-    imageSize: { w: outW, h: outH },
-    visibleRect: { ...viewport },
+    imageSize,
+    visibleRect,
+    captureRect,
     sourceRect,
-    changedBox: changedBox ? clip(intersect(changedBox, sourceRect)) : { x: 0, y: 0, w: 0, h: 0 },
-    imageScale: scale,
+    changedBox: latestVisible,
+    imageScale,
+    focusInset,
+    latestInput: latestInputMetadata(latestVisible, sourceRect, imageScale, imageSize),
   };
 }
 
+export function latestInputMetadata(
+  changedBox: Rect,
+  sourceRect: Rect,
+  imageScale: number,
+  imageSize: { w: number; h: number }
+): LatestInputMeta | null {
+  if (changedBox.w <= 0 || changedBox.h <= 0 || sourceRect.w <= 0 || sourceRect.h <= 0) return null;
+  const left = Math.max(changedBox.x, sourceRect.x);
+  const top = Math.max(changedBox.y, sourceRect.y);
+  const right = Math.min(changedBox.x + changedBox.w, sourceRect.x + sourceRect.w);
+  const bottom = Math.min(changedBox.y + changedBox.h, sourceRect.y + sourceRect.h);
+  if (right <= left || bottom <= top) return null;
+  const x = Math.round((left - sourceRect.x) * imageScale);
+  const y = Math.round((top - sourceRect.y) * imageScale);
+  const imageRight = Math.min(imageSize.w, Math.round((right - sourceRect.x) * imageScale));
+  const imageBottom = Math.min(imageSize.h, Math.round((bottom - sourceRect.y) * imageScale));
+  return {
+    globalRect: clip(changedBox),
+    imageRect: { x, y, w: Math.max(1, imageRight - x), h: Math.max(1, imageBottom - y) },
+  };
+}
+
+function drawFocusInset(
+  out: HTMLCanvasElement,
+  engine: CanvasEngine,
+  objects: ObjectManager | ObjectItem[] | null | undefined,
+  latestBox: Rect,
+  sourceRect: Rect,
+  mainScale: number
+): FocusInsetMeta | null {
+  if (latestBox.w <= 0 || latestBox.h <= 0) return null;
+  const largeInput = latestBox.w > 1800 || latestBox.h > 1200;
+  const padding = largeInput
+    ? Math.max(40, Math.min(120, Math.max(latestBox.w, latestBox.h) * 0.04))
+    : Math.max(50, Math.min(280, Math.max(latestBox.w, latestBox.h) * 0.18));
+  const w = Math.min(sourceRect.w, Math.max(220, latestBox.w + padding * 2));
+  const h = Math.min(sourceRect.h, Math.max(160, latestBox.h + padding * 2));
+  const focusRect = clip({
+    x: Math.max(sourceRect.x, Math.min(sourceRect.x + sourceRect.w - w, latestBox.x + latestBox.w / 2 - w / 2)),
+    y: Math.max(sourceRect.y, Math.min(sourceRect.y + sourceRect.h - h, latestBox.y + latestBox.h / 2 - h / 2)),
+    w,
+    h,
+  });
+  const targetW = largeInput ? Math.min(1500, out.width * 0.72) : 640;
+  const targetH = largeInput ? Math.min(1000, out.height * 0.82) : 420;
+  const focusScale = Math.min(
+    3,
+    targetW / Math.max(1, focusRect.w),
+    targetH / Math.max(1, focusRect.h),
+    Math.max(0.01, (out.width - 24) / Math.max(1, focusRect.w)),
+    Math.max(0.01, (out.height - 24) / Math.max(1, focusRect.h))
+  );
+  const latestPixels = { w: latestBox.w * mainScale, h: latestBox.h * mainScale };
+  if (
+    focusScale <= mainScale * 1.05 ||
+    (!largeInput && focusScale <= mainScale * 1.35 && latestPixels.w >= 180 && latestPixels.h >= 100)
+  ) {
+    return null;
+  }
+
+  const contentW = Math.max(1, Math.ceil(focusRect.w * focusScale));
+  const contentH = Math.max(1, Math.ceil(focusRect.h * focusScale));
+  const latestCenter = {
+    x: (latestBox.x + latestBox.w / 2 - sourceRect.x) * mainScale,
+    y: (latestBox.y + latestBox.h / 2 - sourceRect.y) * mainScale,
+  };
+  const insetPadding = 12;
+  const positions = [
+    { x: insetPadding, y: insetPadding },
+    { x: out.width - contentW - insetPadding, y: insetPadding },
+    { x: insetPadding, y: out.height - contentH - insetPadding },
+    { x: out.width - contentW - insetPadding, y: out.height - contentH - insetPadding },
+  ].filter((p) => p.x >= insetPadding && p.y >= insetPadding);
+  if (!positions.length) return null;
+  const dist = (p: { x: number; y: number }) =>
+    Math.hypot(p.x + contentW / 2 - latestCenter.x, p.y + contentH / 2 - latestCenter.y);
+  const position = positions.sort((a, b) => dist(b) - dist(a))[0];
+
+  const q = out.getContext("2d");
+  if (!q) return null;
+  q.save();
+  q.setTransform(1, 0, 0, 1, 0, 0);
+  q.fillStyle = "#fff";
+  q.fillRect(position.x - 5, position.y - 5, contentW + 10, contentH + 10);
+  q.beginPath();
+  q.rect(position.x, position.y, contentW, contentH);
+  q.clip();
+  q.setTransform(
+    focusScale,
+    0,
+    0,
+    focusScale,
+    position.x - focusRect.x * focusScale,
+    position.y - focusRect.y * focusScale
+  );
+  q.globalAlpha = 0.32;
+  drawTiles(engine, q, focusRect);
+  drawObjects(objects, q, focusRect);
+  q.globalAlpha = 1;
+  q.save();
+  q.beginPath();
+  q.rect(latestBox.x, latestBox.y, latestBox.w, latestBox.h);
+  q.clip();
+  drawTiles(engine, q, latestBox);
+  drawObjects(objects, q, latestBox);
+  q.restore();
+  q.restore();
+  q.save();
+  q.setTransform(1, 0, 0, 1, 0, 0);
+  q.strokeStyle = "#64748b";
+  q.lineWidth = 2;
+  q.strokeRect(position.x - 4, position.y - 4, contentW + 8, contentH + 8);
+  q.restore();
+
+  return {
+    sourceRect: focusRect,
+    imageRect: { x: position.x, y: position.y, w: contentW, h: contentH },
+    imageScale: focusScale,
+    purpose: "magnified duplicate of latestInput for handwriting transcription only",
+  };
+}
+
+function visibleInkBounds(engine: CanvasEngine, visible: Rect): Rect | null {
+  let bounds: Rect | null = null;
+  for (const key of engine.tiles.keys()) {
+    const [tx, ty] = key.split(",").map(Number);
+    const tileBox = { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE };
+    const part = intersect(tileBox, visible);
+    if (part.w <= 0 || part.h <= 0) continue;
+    const canvas = engine.tiles.get(tx, ty);
+    if (!canvas) continue;
+    const ink = tileInkBox(canvas);
+    if (!ink) continue;
+    const found = intersect({ x: tileBox.x + ink.x, y: tileBox.y + ink.y, w: ink.w, h: ink.h }, visible);
+    if (found.w <= 0 || found.h <= 0) continue;
+    bounds = bounds ? union(bounds, found) : found;
+  }
+  return bounds;
+}
+
+function tileInkBox(c: HTMLCanvasElement): Rect | null {
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return null;
+  let data: ImageData;
+  try {
+    data = ctx.getImageData(0, 0, c.width, c.height);
+  } catch {
+    return null;
+  }
+  const d = data.data;
+  let x0 = c.width;
+  let y0 = c.height;
+  let x1 = -1;
+  let y1 = -1;
+  for (let y = 0; y < c.height; y++) {
+    for (let x = 0; x < c.width; x++) {
+      const i = (y * c.width + x) * 4;
+      if (d[i + 3] && !(d[i] > 248 && d[i + 1] > 248 && d[i + 2] > 248)) {
+        if (x < x0) x0 = x;
+        if (y < y0) y0 = y;
+        if (x > x1) x1 = x;
+        if (y > y1) y1 = y;
+      }
+    }
+  }
+  return x1 < 0 ? null : { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+
+function layerBounds(
+  layer: WidgetManager | WidgetItem[] | ObjectManager | ObjectItem[] | null | undefined,
+  visible: Rect
+): Rect | null {
+  if (!layer) return null;
+  const items = Array.isArray(layer) ? layer : layer.all();
+  let bounds: Rect | null = null;
+  for (const item of items) {
+    const hit = intersect({ x: item.x, y: item.y, w: item.w, h: item.h }, visible);
+    if (hit.w <= 0 || hit.h <= 0) continue;
+    bounds = bounds ? union(bounds, hit) : hit;
+  }
+  return bounds;
+}
+
 function drawTiles(engine: CanvasEngine, q: CanvasRenderingContext2D, rect: Rect): void {
+  const maxIdx = Math.ceil(SIZE / TILE) - 1;
   const x0 = Math.max(0, Math.floor(rect.x / TILE));
   const y0 = Math.max(0, Math.floor(rect.y / TILE));
-  const x1 = Math.max(x0, Math.floor((rect.x + rect.w) / TILE));
-  const y1 = Math.max(y0, Math.floor((rect.y + rect.h) / TILE));
+  const x1 = Math.min(maxIdx, Math.floor((rect.x + rect.w) / TILE));
+  const y1 = Math.min(maxIdx, Math.floor((rect.y + rect.h) / TILE));
   for (let ty = y0; ty <= y1; ty++) {
     for (let tx = x0; tx <= x1; tx++) {
       const c = engine.tiles.get(tx, ty);
       if (c) q.drawImage(c, tx * TILE, ty * TILE);
     }
   }
+}
+
+function emptyRect(): Rect {
+  return { x: 0, y: 0, w: 0, h: 0 };
 }
 
 function clip(r: Rect): Rect {
@@ -457,42 +684,22 @@ function intersect(a: Rect, b: Rect): Rect {
   };
 }
 
-export async function buildFocusInset(
-  engine: CanvasEngine,
-  changedBox: Rect | null,
-  widgets?: WidgetManager | WidgetItem[] | null,
-  objects?: ObjectManager | ObjectItem[] | null
-): Promise<string | undefined> {
-  if (!changedBox || changedBox.w <= 0 || changedBox.h <= 0) return undefined;
-  if (changedBox.w > 600 || changedBox.h > 600) return undefined;
+function union(a: Rect, b: Rect): Rect {
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  return {
+    x,
+    y,
+    w: Math.max(a.x + a.w, b.x + b.w) - x,
+    h: Math.max(a.y + a.h, b.y + b.h) - y,
+  };
+}
 
-  const pad = 32;
-  const box = clip({
-    x: changedBox.x - pad,
-    y: changedBox.y - pad,
-    w: changedBox.w + pad * 2,
-    h: changedBox.h + pad * 2,
-  });
-
-  const out = document.createElement("canvas");
-  const scale = 2;
-  out.width = Math.max(1, Math.ceil(box.w * scale));
-  out.height = Math.max(1, Math.ceil(box.h * scale));
-  const q = out.getContext("2d");
-  if (!q) return undefined;
-
-  q.fillStyle = "#ffffff";
-  q.fillRect(0, 0, out.width, out.height);
-  q.setTransform(scale, 0, 0, scale, -box.x * scale, -box.y * scale);
-  drawTiles(engine, q, box);
-  await drawWidgets(widgets, q, box);
-  drawObjects(objects, q, box);
-  q.setTransform(1, 0, 0, 1, 0, 0);
-
-  try {
-    return out.toDataURL("image/webp", 0.95);
-  } catch (err) {
-    console.warn("[buildFocusInset] toDataURL failed:", err);
-    return undefined;
+function unionRects(rects: Array<Rect | null | undefined>): Rect | null {
+  let bounds: Rect | null = null;
+  for (const r of rects) {
+    if (!r || r.w <= 0 || r.h <= 0) continue;
+    bounds = bounds ? union(bounds, r) : r;
   }
+  return bounds;
 }

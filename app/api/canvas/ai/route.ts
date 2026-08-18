@@ -112,16 +112,25 @@ export async function POST(req: Request) {
     p.widgetEdit && typeof p.widgetEdit === "object"
       ? (p.widgetEdit as import("@/lib/ai/types").WidgetEditContext)
       : undefined;
-  const focusInset = typeof p.focusInset === "string" ? p.focusInset : undefined;
+  const focusInset =
+    p.focusInset && typeof p.focusInset === "object" && !Array.isArray(p.focusInset)
+      ? (p.focusInset as import("@/lib/ai/types").FocusInsetMeta)
+      : null;
+  const latestInput =
+    p.latestInput && typeof p.latestInput === "object" && !Array.isArray(p.latestInput)
+      ? (p.latestInput as import("@/lib/ai/types").LatestInputMeta)
+      : undefined;
 
   const aiRequest: AiRequest = {
     requestId,
     atlasImage,
     focusInset,
+    latestInput,
     visibleRect,
     sourceRect,
-    captureRect: visibleRect,
+    captureRect: clampBox(p.captureRect || visibleRect),
     changedBox,
+    imageScale: typeof p.imageScale === "number" && Number.isFinite(p.imageScale) ? p.imageScale : undefined,
     imageSize: {
       w: Number((p.imageSize as { w?: unknown })?.w) || 0,
       h: Number((p.imageSize as { h?: unknown })?.h) || 0,

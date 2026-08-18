@@ -194,6 +194,67 @@ function inView(
   return box.x >= view.x && box.y >= view.y && box.x + box.w <= view.x + view.w && box.y + box.h <= view.y + view.h;
 }
 
+type Side = "below" | "right" | "left" | "top";
+
+function slotFor(
+  anchor: { x: number; y: number; w: number; h: number },
+  w: number,
+  h: number,
+  dir: Side,
+  gap = 24
+): { x: number; y: number } {
+  const cx = anchor.x + anchor.w / 2;
+  const alignedX = clampNum(cx - w / 2, 0, SIZE - w);
+  if (dir === "right") return { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) };
+  if (dir === "left") return { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) };
+  if (dir === "top") return { x: alignedX, y: Math.round(anchor.y - h - gap) };
+  return { x: alignedX, y: Math.round(anchor.y + anchor.h + gap) };
+}
+
+function roomOnSide(
+  anchor: { x: number; y: number; w: number; h: number },
+  w: number,
+  h: number,
+  dir: Side,
+  view?: { x: number; y: number; w: number; h: number },
+  items?: Array<{ x: number; y: number; w: number; h: number }>
+): number {
+  const p = slotFor(anchor, w, h, dir);
+  const box = { x: clampNum(p.x, 0, SIZE - w), y: clampNum(p.y, 0, SIZE - h), w, h };
+  if (!inView(box, view)) return -1;
+  if ((items || []).some((it) => overlaps(box, it))) return -1;
+  if (!view) return w * h;
+  if (dir === "right") return view.x + view.w - (anchor.x + anchor.w);
+  if (dir === "left") return anchor.x - view.x;
+  if (dir === "top") return anchor.y - view.y;
+  return view.y + view.h - (anchor.y + anchor.h);
+}
+
+/** Prefer the LLM side; if none, pick the roomiest in-view empty side. */
+function pickPreferredSide(
+  requested: string,
+  anchor: { x: number; y: number; w: number; h: number },
+  w: number,
+  h: number,
+  view?: { x: number; y: number; w: number; h: number },
+  items?: Array<{ x: number; y: number; w: number; h: number }>,
+  fallback: Side = "below"
+): Side {
+  if (requested === "right" || requested === "left" || requested === "top" || requested === "below") {
+    return requested;
+  }
+  let best: Side = fallback;
+  let bestScore = -1;
+  for (const dir of ["right", "below", "left", "top"] as Side[]) {
+    const score = roomOnSide(anchor, w, h, dir, view, items);
+    if (score > bestScore) {
+      bestScore = score;
+      best = dir;
+    }
+  }
+  return bestScore >= 0 ? best : fallback;
+}
+
 /** below → right → left → top. Last resort is below even if it overflows the view. */
 function placeAroundAnchor(
   anchor: { x: number; y: number; w: number; h: number },
@@ -203,16 +264,13 @@ function placeAroundAnchor(
   items?: Array<{ x: number; y: number; w: number; h: number }>,
   preferred = "below"
 ): { x: number; y: number } {
-  const gap = 24;
-  const cx = anchor.x + anchor.w / 2;
-  const alignedX = clampNum(cx - w / 2, 0, SIZE - w);
   const slots: Record<string, { x: number; y: number }> = {
-    below: { x: alignedX, y: Math.round(anchor.y + anchor.h + gap) },
-    right: { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) },
-    left: { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) },
-    top: { x: alignedX, y: Math.round(anchor.y - h - gap) },
+    below: slotFor(anchor, w, h, "below"),
+    right: slotFor(anchor, w, h, "right"),
+    left: slotFor(anchor, w, h, "left"),
+    top: slotFor(anchor, w, h, "top"),
   };
-  const order =
+  const order: Side[] =
     preferred === "right"
       ? ["right", "below", "left", "top"]
       : preferred === "left"
@@ -236,6 +294,15 @@ function placeAroundAnchor(
     return { x: box.x, y: box.y };
   }
   return slots.below;
+}
+
+function inferTextPlacement(placement: string, text: string): string {
+  if (placement === "right" || placement === "left" || placement === "top" || placement === "below") {
+    return placement;
+  }
+  const chars = Array.from(String(text).replace(/\s/g, "")).length;
+  if (chars > 0 && chars <= 8) return "right";
+  return "";
 }
 
 const MIN_WIDGET_WIDTH = 240;
@@ -320,14 +387,8 @@ function fitWidgetGeometry(
     x = Math.round(changedBox.x);
     y = Math.round(changedBox.y);
   } else if (hasAnchor && changedBox && (placement === "below" || placement === "right" || placement === "left" || placement === "top" || reposition || !hasValidExplicitCoords)) {
-    const near = placeAroundAnchor(
-      changedBox,
-      w,
-      h,
-      visibleRect,
-      sceneItems,
-      placement === "right" || placement === "left" || placement === "top" ? placement : "below"
-    );
+    const preferred = pickPreferredSide(placement, changedBox, w, h, visibleRect, sceneItems, "below");
+    const near = placeAroundAnchor(changedBox, w, h, visibleRect, sceneItems, preferred);
     x = near.x;
     y = near.y;
   } else if (placement === "below" || reposition || !hasValidExplicitCoords) {
@@ -398,19 +459,27 @@ export function validateCommand(
             x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
 
       if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
-        if (placement === "right") {
-          x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
-          y = Math.round(ctx.changedBox.y);
-        } else if (placement === "left") {
-          x = Math.round(ctx.changedBox.x - maxWidth - 32);
-          y = Math.round(ctx.changedBox.y);
-        } else if (placement === "top") {
-          x = Math.round(ctx.changedBox.x);
-          y = Math.round(ctx.changedBox.y - fontSize * lineHeight * 3 - 24);
-        } else {
-          x = Math.round(ctx.changedBox.x);
-          y = Math.round(ctx.changedBox.y + ctx.changedBox.h + 24);
-        }
+        const lines = Math.min(8, Math.max(2, text.split("\n").length + 1));
+        const blockH = Math.round(fontSize * lineHeight * lines);
+        const preferred = pickPreferredSide(
+          inferTextPlacement(placement, text),
+          ctx.changedBox,
+          maxWidth,
+          blockH,
+          ctx.visibleRect,
+          ctx.sceneItems,
+          "below"
+        );
+        const near = placeAroundAnchor(
+          ctx.changedBox,
+          maxWidth,
+          blockH,
+          ctx.visibleRect,
+          ctx.sceneItems,
+          preferred
+        );
+        x = near.x;
+        y = near.y;
       } else if (!hasValidCoords) {
         if (ctx.visibleRect) {
           x = Math.round(ctx.visibleRect.x + ctx.visibleRect.w / 2 - maxWidth / 2);
@@ -452,20 +521,29 @@ export function validateCommand(
         y < SIZE &&
         (!ctx.visibleRect || (x >= ctx.visibleRect.x - 300 && x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
 
-      if (placement === "right" && ctx.changedBox && ctx.changedBox.w > 0) {
-        x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
-        y = Math.round(ctx.changedBox.y);
-      } else if (placement === "left" && ctx.changedBox && ctx.changedBox.w > 0) {
-        x = Math.round(ctx.changedBox.x - estimatedWidth - 32);
-        y = Math.round(ctx.changedBox.y);
-      } else if (placement === "top" && ctx.changedBox && ctx.changedBox.h > 0) {
-        x = Math.round(ctx.changedBox.x);
-        y = Math.round(ctx.changedBox.y - fontSize * 1.8 - 24);
-      } else if (!hasValidCoords || placement === "below") {
-        if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
-          x = Math.round(ctx.changedBox.x);
-          y = Math.round(ctx.changedBox.y + ctx.changedBox.h + 24);
-        } else if (ctx.visibleRect) {
+      if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0 && (placement === "right" || placement === "left" || placement === "top" || placement === "below" || !hasValidCoords)) {
+        const formulaH = Math.round(fontSize * 1.8);
+        const preferred = pickPreferredSide(
+          inferTextPlacement(placement, latex),
+          ctx.changedBox,
+          estimatedWidth,
+          formulaH,
+          ctx.visibleRect,
+          ctx.sceneItems,
+          "below"
+        );
+        const near = placeAroundAnchor(
+          ctx.changedBox,
+          estimatedWidth,
+          formulaH,
+          ctx.visibleRect,
+          ctx.sceneItems,
+          preferred
+        );
+        x = near.x;
+        y = near.y;
+      } else if (!hasValidCoords) {
+        if (ctx.visibleRect) {
           x = Math.round(ctx.visibleRect.x + 80);
           y = Math.round(ctx.visibleRect.y + 80);
         } else {

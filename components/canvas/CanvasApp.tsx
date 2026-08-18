@@ -30,7 +30,7 @@ import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
 import { diagramDocument, copyLabel, detectDiagramFormat, normalizeFormat, estimateDiagramDimensions } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
-import { buildAtlas, buildFocusInset } from "@/lib/canvas/atlas";
+import { buildAtlas } from "@/lib/canvas/atlas";
 import { unionRect } from "@/lib/canvas/engine";
 import { buildScene } from "@/lib/canvas/scene";
 import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
@@ -316,7 +316,6 @@ export function CanvasApp() {
     const revision = aiRevision.current;
 
     const viewport = engineAtCall.camera.visibleWorldRect();
-    const atlas = await buildAtlas(engineAtCall, viewport, box, wm, objects.current);
     const scene = buildScene(wm, objects.current);
 
     let widgetEditTarget: import("@/lib/ai/types").WidgetEditContext | undefined = undefined;
@@ -386,18 +385,20 @@ export function CanvasApp() {
       }
     }
 
-    const focusInset = await buildFocusInset(engineAtCall, effectiveBox, wm, objects.current);
+    const atlas = await buildAtlas(engineAtCall, viewport, effectiveBox, wm, objects.current);
 
     const reqTimestamp = Date.now();
     const payload: AiRequest = {
       requestId: `req-${requestId}`,
       atlasImage: atlas.atlasImage,
-      focusInset,
-      visibleRect: viewport,
-      captureRect: viewport,
+      focusInset: atlas.focusInset,
+      visibleRect: atlas.visibleRect,
+      captureRect: atlas.captureRect,
       sourceRect: atlas.sourceRect,
-      changedBox: effectiveBox,
+      changedBox: atlas.changedBox,
       imageSize: atlas.imageSize,
+      imageScale: atlas.imageScale,
+      latestInput: atlas.latestInput,
       userPrompt,
       scene: JSON.stringify(scene),
       trigger: userPrompt ? "manual" : "user_paused",

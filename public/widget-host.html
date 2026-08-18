@@ -251,6 +251,8 @@
       });
     } else if (data.type === "drawva-widget-inner-pointerdown") {
       postAnywhere({ type: "drawva-widget-pointerdown" });
+    } else if (data.type === "drawva-widget-updated") {
+      inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: "updated" }, "*");
     } else if (data.type === "drawva-widget-snapshot-request") {
       // Forward snapshot request into the inner iframe
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: data.reqId }, "*");

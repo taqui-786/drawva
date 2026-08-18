@@ -6,6 +6,9 @@ import {
   AI_TIMEOUT_MS,
   CODE_SYSTEM_PROMPT_EXTRA,
   FLOWCHART_RULES,
+  HTML_WIDGET_RULES,
+  PLUGIN_ROUTING_PROMPT,
+  WIDGET_RENDERING_POLICY,
   WIDGET_VISUAL_RULES,
   WRITE_TEXT_RULES,
   SPATIAL_GESTURE_PROMPT,
@@ -87,45 +90,102 @@ export async function runAgent(
 
 function systemPromptText(uiTheme?: string): string {
   const persona = THEME_PERSONAS[uiTheme || "studio"] || THEME_PERSONAS.studio;
-  return `${SYSTEM_PROMPT}\n\nPersona Focus: ${persona}\n\n${SPATIAL_GESTURE_PROMPT}\n\n${CODE_SYSTEM_PROMPT_EXTRA}\n\n${WRITE_TEXT_RULES}\n\n${FLOWCHART_RULES}\n\n${WIDGET_VISUAL_RULES}`;
+  return [
+    SYSTEM_PROMPT,
+    `Persona Focus: ${persona}`,
+    SPATIAL_GESTURE_PROMPT,
+    PLUGIN_ROUTING_PROMPT,
+    CODE_SYSTEM_PROMPT_EXTRA,
+    WRITE_TEXT_RULES,
+    FLOWCHART_RULES,
+    HTML_WIDGET_RULES,
+    WIDGET_RENDERING_POLICY,
+    WIDGET_VISUAL_RULES,
+  ].join("\n\n");
+}
+
+function widgetGeometryForViewport(visibleRect?: { w: number; h: number }) {
+  const bucket = (value: number) => Math.ceil(Math.min(20000, Math.max(1, value || 1)) / 1000) * 1000;
+  const viewportW = bucket(visibleRect?.w ?? 2000);
+  const viewportH = bucket(visibleRect?.h ?? 1200);
+  return {
+    basis: "half-of-current-visible-viewport",
+    viewportBucket: { w: viewportW, h: viewportH, rounding: "ceil-to-1000-before-halving" },
+    min: { w: 240, h: 160 },
+    max: { w: Math.max(240, Math.round(viewportW / 2)), h: Math.max(160, Math.round(viewportH / 2)) },
+    sizingPolicy:
+      "The bounds are not targets. Choose dimensions appropriate to content volume, aspect ratio, layout, and readable typography; neither maximize nor minimize by default.",
+  };
 }
 
 function userMessageText(req: AiRequest, sceneText: string): string {
-  const parts = [
-    `Request id: ${req.requestId}`,
-    `Trigger: ${req.trigger}`,
-    `visibleRect: ${JSON.stringify(req.visibleRect)}`,
-    `changedBox (latest user ink): ${JSON.stringify(req.changedBox)}`,
-    `sourceRect: ${JSON.stringify(req.sourceRect)}`,
-    `User prompt (if any): ${req.userPrompt || "(none)"}`,
-  ];
-  if (req.widgetEdit) {
-    const wb = req.widgetEdit.box;
-    const format = req.widgetEdit.sourceFormat || (req.widgetEdit.widgetType === "diagram_source" ? "mermaid" : "html");
-    const pluginId = format !== "mermaid" && format !== "html" ? format : (req.widgetEdit.pluginId || "flowchart");
-    parts.push(
-      `\n--- REFINEMENT TARGET (widgetEdit) ---`,
-      `Target Widget ID: ${req.widgetEdit.id}`,
-      `Plugin ID: ${pluginId}`,
-      `Widget Type: ${req.widgetEdit.widgetType}`,
-      `Source Format: ${format}`,
-      `Current Title: ${req.widgetEdit.title || "(none)"}`,
-      `Widget Box (EXACT position/size to preserve): ${JSON.stringify(wb)}`,
-      `Current Baseline Source Code:\n${(req.widgetEdit.source || req.widgetEdit.html || "").slice(0, 4000)}`,
-      `REFINEMENT INSTRUCTION: Target widget context (widgetEdit) is provided above.
-  - Evaluate if the user's ink / annotations are edit instructions for this widget (e.g. circled region on the widget, arrow pointing to it, crossed out node, or inline annotation like "compact" or "add X").
-  - IF the ink IS an edit instruction for this widget: preserve its EXACT sourceFormat ("${format}") and semantic type, apply the requested modification to the baseline source code, and return ONE replacement command (${req.widgetEdit.widgetType}) with:
-      - tool: "${req.widgetEdit.widgetType}"
-      - pluginId: "${pluginId}"
-      - sourceFormat: "${format}"
-      - title: "${req.widgetEdit.title || "Widget"}"
-      - placement: "in_place"
-      - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}
-  - IF the user's ink is a NEW independent sketch, topic, or diagram request that does NOT modify or reference the target widget: DO NOT edit the target widget. Generate a NEW item for the user's ink using placement "match_sketch", "below", or "right".`
-    );
+  const widgetEdit = req.widgetEdit;
+  const format = widgetEdit
+    ? widgetEdit.sourceFormat || (widgetEdit.widgetType === "diagram_source" ? "mermaid" : "html")
+    : "";
+  const pluginId = widgetEdit
+    ? format !== "mermaid" && format !== "html"
+      ? format
+      : widgetEdit.pluginId || "flowchart"
+    : "";
+
+  const modelInput: Record<string, unknown> = {
+    requestId: req.requestId,
+    trigger: req.trigger,
+    userAction: req.trigger === "manual" ? "answer" : "auto",
+    actionMeaning: {
+      auto: "respond naturally to the newest meaningful handwriting or spatial editing gesture",
+      answer: "directly answer the newest question or spatial request",
+    }[req.trigger === "manual" ? "answer" : "auto"],
+    languagePolicy: "respond in English",
+    uiTheme: req.uiTheme || "studio",
+    persona: THEME_PERSONAS[req.uiTheme || "studio"] || THEME_PERSONAS.studio,
+    personaPolicy:
+      "Use persona to guide technical emphasis, reasoning method, examples, terminology, answer structure, and tone. It must not override user intent, response language, factual rigor, or safety requirements.",
+    canvasSize: { w: 20000, h: 20000 },
+    visibleRect: req.visibleRect,
+    captureRect: req.captureRect,
+    sourceRect: req.sourceRect,
+    imageSize: req.imageSize,
+    imageScale: req.imageScale ?? null,
+    latestInput: req.latestInput || { globalRect: req.changedBox, imageRect: null },
+    changedBox: req.changedBox,
+    focusInset: req.focusInset || null,
+    widgetGeometry: widgetGeometryForViewport(req.visibleRect),
+    userPrompt: req.userPrompt || null,
+    scene: safeJson(req.scene || sceneText),
+    note: widgetEdit
+      ? "widgetEdit is authoritative. For nearby ink, read it as the modification instruction. The attached image is the only visual; focusInset, when present, is a magnified corner overlay for transcription only."
+      : "The attached image is the only visual. latestInput.imageRect is the authoritative attention region. focusInset, when present, is a magnified duplicate composited into a corner of that same image for handwriting transcription only. Use placement tokens; the client computes exact x/y and avoids collisions.",
+  };
+
+  if (widgetEdit) {
+    const wb = widgetEdit.box;
+    modelInput.widgetEdit = {
+      id: widgetEdit.id,
+      pluginId,
+      widgetType: widgetEdit.widgetType,
+      title: widgetEdit.title || "",
+      sourceFormat: format,
+      box: wb,
+      source: (widgetEdit.source || widgetEdit.html || "").slice(0, 4000),
+    };
+    modelInput.widgetEditPolicy =
+      widgetEdit.widgetType === "diagram_source"
+        ? `This is a one-shot replacement of exactly the supplied diagram_source target. Other viewport widgets are background only. The supplied complete source and sourceFormat are authoritative. latestInput.imageRect is the newest edit instruction. Return one complete diagram_source with pluginId "${pluginId}" and sourceFormat "${format}", never HTML, a patch, diff, target id, explanation, or second command. Placement MUST be "in_place". Preserve all baseline content, terminology, direction, grouping and layout except for the smallest complete changes required by that newest instruction. The client preserves outer id and geometry. If the ink is a NEW independent sketch that does not modify this widget, do not edit it — generate a NEW item with placement "match_sketch", "below", or "right".`
+        : `This is a one-shot replacement of exactly the supplied html_widget target. Other viewport widgets are background only. The supplied source/copyText and complete HTML are the existing semantic and visual baselines. latestInput.imageRect is the newest edit instruction. Return one complete html_widget for the same plugin, never a patch, diff, target id, explanation, or second command. Placement MUST be "in_place". Preserve baseline content, professional source format, visual style, rendering library and internal layout except for the smallest complete changes. If the ink is a NEW independent sketch that does not modify this widget, do not edit it — generate a NEW item with placement "match_sketch", "below", or "right".`;
   }
-  parts.push(`Scene JSON:\n${req.scene || sceneText}`, `\nInspect the canvas image, plan your spatial anchor coordinates in spatialPlan, then return matching commands.`);
-  return parts.join("\n");
+
+  return JSON.stringify(modelInput);
+}
+
+function safeJson(value: string): unknown {
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
 }
 
 
@@ -355,9 +415,6 @@ async function attemptReply(
   ];
   if (req.atlasImage) {
     contentParts.push({ type: "image_url", image_url: { url: req.atlasImage, detail: "high" } });
-  }
-  if (req.focusInset) {
-    contentParts.push({ type: "image_url", image_url: { url: req.focusInset, detail: "high" } });
   }
   const userMsg = new HumanMessage({ content: contentParts });
 

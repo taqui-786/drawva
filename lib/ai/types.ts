@@ -23,7 +23,28 @@ export type PlacementMode =
   | "match_sketch"
   | "below"
   | "right"
+  | "left"
+  | "top"
   | "custom";
+
+export interface FocusInsetMeta {
+  sourceRect: AiBox;
+  imageRect: AiBox;
+  imageScale: number;
+  purpose: string;
+}
+
+export interface LatestInputMeta {
+  globalRect: AiBox;
+  imageRect: AiBox;
+}
+
+export interface WidgetGeometryHint {
+  basis: string;
+  min: { w: number; h: number };
+  max: { w: number; h: number };
+  sizingPolicy: string;
+}
 
 export interface WidgetEditContext {
   id: string;
@@ -44,12 +65,14 @@ export interface AiRequest {
   sourceRect: AiBox;
   changedBox: AiBox;
   imageSize: { w: number; h: number };
+  imageScale?: number;
+  latestInput?: LatestInputMeta | null;
   userPrompt?: string;
   scene?: string;
   trigger: "manual" | "user_paused";
   uiTheme?: string;
   widgetEdit?: WidgetEditContext;
-  focusInset?: string;
+  focusInset?: FocusInsetMeta | null;
   providerType?: ProviderType;
   baseUrl?: string;
   apiKey?: string;
@@ -91,7 +114,7 @@ export interface AiLogEntry {
   status: "success" | "error";
   errorMessage?: string;
   atlasImage: string;
-  focusInset?: string;
+  focusInset?: FocusInsetMeta | null;
   systemPrompt: string;
   userPromptText: string;
   userPromptRaw?: string;
