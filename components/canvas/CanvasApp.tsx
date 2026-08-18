@@ -345,16 +345,9 @@ export function CanvasApp() {
       const allWidgets = wm.all();
       for (const w of allWidgets) {
         const dist = distanceBetweenRects(box, { x: w.x, y: w.y, w: w.w, h: w.h });
-        if (dist <= 1600 && dist < minDistance) {
+        if (dist <= 120 && dist < minDistance) {
           minDistance = dist;
           closestWidget = w;
-        }
-      }
-      if (!closestWidget && allWidgets.length === 1) {
-        const single = allWidgets[0];
-        const dist = distanceBetweenRects(box, { x: single.x, y: single.y, w: single.w, h: single.h });
-        if (dist <= 3000) {
-          closestWidget = single;
         }
       }
       if (closestWidget) {

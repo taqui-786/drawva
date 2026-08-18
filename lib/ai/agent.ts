@@ -112,16 +112,16 @@ function userMessageText(req: AiRequest, sceneText: string): string {
       `Current Title: ${req.widgetEdit.title || "(none)"}`,
       `Widget Box (EXACT position/size to preserve): ${JSON.stringify(wb)}`,
       `Current Baseline Source Code:\n${(req.widgetEdit.source || req.widgetEdit.html || "").slice(0, 4000)}`,
-      `REFINEMENT INSTRUCTION: This is an IN-PLACE edit of the existing widget above. The user's ink / annotations / circled regions on canvas are edit instructions for this widget.
-  - MUST preserve the EXACT sourceFormat ("${format}") and semantic type (DO NOT change chemical SMILES into a flowchart, DO NOT change Vega-Lite charts into flowcharts).
-  - Apply the requested modification (e.g. circle with text "compact" -> update the chemical source code or set diagramKind: "molecular-structure-compact") to the baseline source code while keeping the rest intact.
-  - Return exactly ONE updated replacement command (${req.widgetEdit.widgetType}) with:
+      `REFINEMENT INSTRUCTION: Target widget context (widgetEdit) is provided above.
+  - Evaluate if the user's ink / annotations are edit instructions for this widget (e.g. circled region on the widget, arrow pointing to it, crossed out node, or inline annotation like "compact" or "add X").
+  - IF the ink IS an edit instruction for this widget: preserve its EXACT sourceFormat ("${format}") and semantic type, apply the requested modification to the baseline source code, and return ONE replacement command (${req.widgetEdit.widgetType}) with:
       - tool: "${req.widgetEdit.widgetType}"
       - pluginId: "${pluginId}"
       - sourceFormat: "${format}"
       - title: "${req.widgetEdit.title || "Widget"}"
       - placement: "in_place"
-      - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}`
+      - x: ${wb.x}, y: ${wb.y}, w: ${wb.w}, h: ${wb.h}
+  - IF the user's ink is a NEW independent sketch, topic, or diagram request that does NOT modify or reference the target widget: DO NOT edit the target widget. Generate a NEW item for the user's ink using placement "match_sketch", "below", or "right".`
     );
   }
   parts.push(`Scene JSON:\n${req.scene || sceneText}`, `\nInspect the canvas image, plan your spatial anchor coordinates in spatialPlan, then return matching commands.`);
@@ -411,7 +411,11 @@ async function attemptReply(
   if (req.widgetEdit) {
     const targetType = req.widgetEdit.widgetType;
     const matched = commands.filter(
-      (c) => typeof c === "object" && c !== null && (c as { tool?: string }).tool === targetType
+      (c) =>
+        typeof c === "object" &&
+        c !== null &&
+        (c as { tool?: string }).tool === targetType &&
+        (c as { placement?: string }).placement === "in_place"
     );
     if (matched.length > 0) {
       commands = [matched[0]];

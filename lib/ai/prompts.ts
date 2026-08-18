@@ -87,7 +87,7 @@ export const FLOWCHART_RULES = `PROFESSIONAL DIAGRAM RULES (diagram_source)
   - When refining an existing widget (widgetEdit is provided), you MUST PRESERVE the exact sourceFormat and pluginId of the target widget.
   - NEVER convert a chemical structure (SMILES) to a flowchart, or a Vega-Lite chart to a Mermaid diagram.
   - If the user draws a circle around a part and writes an instruction (e.g. "compact", "add OH", "zoom in"), apply that edit directly to the original widget source code.
-  - Placement MUST be "in_place".
+  - Placement MUST be "in_place" when performing an in-place edit on the target widget. If generating a new item, use placement "match_sketch", "below", or "right".
 - HARD RULE: When returning diagram_source or html_widget, it MUST be the ONLY command in the reply. Never mix a diagram with write_text or draw_formula in the same response.`;
 
 export const MANDATORY_VISIBLE_RESPONSE = `Every request represents confirmed user input; you MUST return at least one displayable command. Infer a concise response from visible content or changedBox. Before finishing, verify that commands contains at least one renderable command.`;
