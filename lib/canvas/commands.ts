@@ -1,4 +1,5 @@
 import { SIZE } from "./constants";
+import { extractHtmlDimensions } from "./widgets";
 
 export const MAX_COMMANDS = 16;
 export const AI_TEXT_MAX_LENGTH = 1000;
@@ -177,6 +178,66 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
+function overlaps(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number },
+  pad = 16
+): boolean {
+  return a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad;
+}
+
+function inView(
+  box: { x: number; y: number; w: number; h: number },
+  view?: { x: number; y: number; w: number; h: number }
+): boolean {
+  if (!view) return true;
+  return box.x >= view.x && box.y >= view.y && box.x + box.w <= view.x + view.w && box.y + box.h <= view.y + view.h;
+}
+
+/** below → right → left → top. Last resort is below even if it overflows the view. */
+function placeAroundAnchor(
+  anchor: { x: number; y: number; w: number; h: number },
+  w: number,
+  h: number,
+  view?: { x: number; y: number; w: number; h: number },
+  items?: Array<{ x: number; y: number; w: number; h: number }>,
+  preferred = "below"
+): { x: number; y: number } {
+  const gap = 24;
+  const cx = anchor.x + anchor.w / 2;
+  const alignedX = clampNum(cx - w / 2, 0, SIZE - w);
+  const slots: Record<string, { x: number; y: number }> = {
+    below: { x: alignedX, y: Math.round(anchor.y + anchor.h + gap) },
+    right: { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) },
+    left: { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) },
+    top: { x: alignedX, y: Math.round(anchor.y - h - gap) },
+  };
+  const order =
+    preferred === "right"
+      ? ["right", "below", "left", "top"]
+      : preferred === "left"
+        ? ["left", "below", "right", "top"]
+        : preferred === "top"
+          ? ["top", "below", "right", "left"]
+          : ["below", "right", "left", "top"];
+  const blockers = (items || []).filter(
+    (it) => Math.abs(it.x - anchor.x) > 2 || Math.abs(it.y - anchor.y) > 2
+  );
+  for (const dir of order) {
+    const p = slots[dir];
+    const box = {
+      x: clampNum(p.x, 0, SIZE - w),
+      y: clampNum(p.y, 0, SIZE - h),
+      w,
+      h,
+    };
+    if (!inView(box, view)) continue;
+    if (blockers.some((it) => overlaps(box, it))) continue;
+    return { x: box.x, y: box.y };
+  }
+  return slots.below;
+}
+
 const MIN_WIDGET_WIDTH = 240;
 const MIN_WIDGET_HEIGHT = 160;
 const DEFAULT_WIDGET_WIDTH = 540;
@@ -219,11 +280,20 @@ function fitWidgetGeometry(
     rawH = Math.ceil(rawH * scale);
   }
 
-  // Only force sketch dimensions if user explicitly asked to replace the sketch in-place:
+  // Anchor even on a single text line (h≈22). Ignore full-viewport dumps.
   const sketchW = changedBox?.w ?? 0;
   const sketchH = changedBox?.h ?? 0;
-  const hasSketch = sketchW > 40 && sketchH > 40 && sketchW < viewportW * 0.9 && sketchH < viewportH * 0.9;
-  if (hasSketch && (placement === "match_sketch" || placement === "in_place")) {
+  const hasAnchor = sketchW > 8 && sketchH > 8 && sketchW < viewportW * 0.85 && sketchH < viewportH * 0.85;
+  const matchSketch = placement === "match_sketch" || placement === "in_place";
+  if (!matchSketch) {
+    const copiesInk = hasAnchor && Math.abs(rawW - sketchW) < 48 && Math.abs(rawH - sketchH) < 48;
+    const huge = rawW > Math.max(1400, viewportW * 0.75) || rawH > Math.max(1000, viewportH * 0.75);
+    if (copiesInk || huge) {
+      rawW = DEFAULT_WIDGET_WIDTH;
+      rawH = DEFAULT_WIDGET_HEIGHT;
+    }
+  }
+  if (hasAnchor && matchSketch) {
     rawW = Math.max(rawW, Math.round(sketchW));
     rawH = Math.max(rawH, Math.round(sketchH));
   }
@@ -246,29 +316,22 @@ function fitWidgetGeometry(
     y < SIZE - h &&
     (!visibleRect || (x >= visibleRect.x - 500 && x <= visibleRect.x + visibleRect.w + 500 && y >= visibleRect.y - 500 && y <= visibleRect.y + visibleRect.h + 500));
 
-  if (placement === "match_sketch" && hasSketch && changedBox) {
-    // 1:1 replacement in-place over the drawn sketch:
+  if (placement === "match_sketch" && hasAnchor && changedBox) {
     x = Math.round(changedBox.x);
     y = Math.round(changedBox.y);
-  } else if (placement === "right" && hasSketch && changedBox) {
-    // Companion placement to the right:
-    x = Math.round(changedBox.x + changedBox.w + 32);
-    y = Math.round(changedBox.y);
-  } else if (placement === "left" && hasSketch && changedBox) {
-    // Companion placement to the left:
-    x = Math.round(changedBox.x - w - 32);
-    y = Math.round(changedBox.y);
-  } else if (placement === "top" && hasSketch && changedBox) {
-    // Placement above the user's sketch:
-    y = Math.round(changedBox.y - h - 24);
-    const centerX = changedBox.x + changedBox.w / 2;
-    x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
+  } else if (hasAnchor && changedBox && (placement === "below" || placement === "right" || placement === "left" || placement === "top" || reposition || !hasValidExplicitCoords)) {
+    const near = placeAroundAnchor(
+      changedBox,
+      w,
+      h,
+      visibleRect,
+      sceneItems,
+      placement === "right" || placement === "left" || placement === "top" ? placement : "below"
+    );
+    x = near.x;
+    y = near.y;
   } else if (placement === "below" || reposition || !hasValidExplicitCoords) {
-    if (hasSketch && changedBox) {
-      y = Math.round(changedBox.y + changedBox.h + 24);
-      const centerX = changedBox.x + changedBox.w / 2;
-      x = clampNum(Math.round(centerX - w / 2), 0, Math.max(0, SIZE - w));
-    } else if (visibleRect) {
+    if (visibleRect) {
       x = clampNum(Math.round(visibleRect.x + visibleRect.w / 2 - w / 2), 0, Math.max(0, SIZE - w));
       y = clampNum(Math.round(visibleRect.y + visibleRect.h / 2 - h / 2), 0, Math.max(0, SIZE - h));
     } else {
@@ -279,27 +342,6 @@ function fitWidgetGeometry(
 
   x = Math.max(0, Math.min(SIZE - w, Math.round(x)));
   y = Math.max(0, Math.min(SIZE - h, Math.round(y)));
-
-  // Simple collision avoidance if placing below/right:
-  if (sceneItems && sceneItems.length > 0 && placement !== "match_sketch") {
-    for (let step = 0; step < 3; step++) {
-      let collided = false;
-      for (const item of sceneItems) {
-        if (item.w <= 0 || item.h <= 0) continue;
-        const overlap =
-          x < item.x + item.w + 16 &&
-          x + w > item.x - 16 &&
-          y < item.y + item.h + 16 &&
-          y + h > item.y - 16;
-        if (overlap) {
-          collided = true;
-          y = Math.min(SIZE - h, item.y + item.h + 24);
-          break;
-        }
-      }
-      if (!collided) break;
-    }
-  }
 
   return { x, y, w, h };
 }
@@ -467,6 +509,11 @@ export function validateCommand(
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim() : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim() : "";
+      const estimated = typeof c.html === "string" ? extractHtmlDimensions(c.html) : null;
+      if (estimated && String(c.placement || "").toLowerCase() !== "match_sketch") {
+        c.w = estimated.width;
+        c.h = estimated.height;
+      }
       const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
       if (
         ctx.widgetSlots <= 0 ||

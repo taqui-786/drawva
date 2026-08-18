@@ -41,106 +41,60 @@
         let lastH = 0;
         let lastW = 0;
 
+        function svgSize(svg) {
+          const vb = svg.viewBox && svg.viewBox.baseVal;
+          if (vb && vb.width > 2 && vb.height > 2) return { w: vb.width, h: vb.height };
+          const p = (svg.getAttribute('viewBox') || '').split(/[\\s,]+/).map(Number);
+          if (p.length === 4 && p[2] > 2 && p[3] > 2) return { w: p[2], h: p[3] };
+          return null;
+        }
+
+        function emitSize(width, height) {
+          const w = Math.min(3200, Math.max(80, Math.ceil(width)));
+          const h = Math.min(6000, Math.max(60, Math.ceil(height)));
+          if (Math.abs(h - lastH) > 2 || Math.abs(w - lastW) > 2) {
+            lastW = w;
+            lastH = h;
+            window.parent.postMessage({ type: 'drawva-widget-resize-content', width: w, height: h }, '*');
+          }
+        }
+
         function postSize() {
           try {
             const body = document.body;
-            const docEl = document.documentElement;
-            if (!body || !docEl) return;
+            if (!body) return;
+            const stage = document.getElementById('stage');
+            if (stage && /^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed')) return;
 
-            const bodyRect = body.getBoundingClientRect();
-            let maxRight = 0;
-            let maxBottom = 0;
+            const svg = document.querySelector('#stage svg, svg');
+            const nat = svg && svgSize(svg);
+            if (nat) { emitSize(nat.w + 16, nat.h + 16); return; }
 
-            // 1. Measure SVG elements accurately using their viewBox / getBBox
-            const svgs = body.querySelectorAll('svg');
-            for (let i = 0; i < svgs.length; i++) {
-              const svg = svgs[i];
-              try {
-                let svgW = 0, svgH = 0;
-                const g = svg.querySelector('g');
-                if (g && g.getBBox) {
-                  const gb = g.getBBox();
-                  if (gb && gb.width > 10 && gb.height > 10) {
-                    svgW = gb.width + (gb.x > 0 ? gb.x : 0);
-                    svgH = gb.height + (gb.y > 0 ? gb.y : 0);
-                  }
-                }
-                if ((!svgW || !svgH) && svg.viewBox && svg.viewBox.baseVal) {
-                  svgW = svg.viewBox.baseVal.width;
-                  svgH = svg.viewBox.baseVal.height;
-                }
-                if (!svgW && svg.getAttribute('viewBox')) {
-                  const vb = svg.getAttribute('viewBox').split(/[\\s,]+/).map(Number);
-                  if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) {
-                    svgW = vb[2];
-                    svgH = vb[3];
-                  }
-                }
-
-                if (svgW > 10 && svgH > 10) {
-                  const svgRect = svg.getBoundingClientRect();
-                  const svgTop = svgRect.top - bodyRect.top;
-                  const svgLeft = svgRect.left - bodyRect.left;
-                  const renderedW = svgRect.width > 0 ? svgRect.width : svgW;
-                  const aspect = svgH / svgW;
-                  const renderedH = Math.min(svgRect.height > 0 ? svgRect.height : svgH, renderedW * aspect);
-
-                  if (svgLeft + renderedW > maxRight) maxRight = svgLeft + renderedW;
-                  if (svgTop + renderedH > maxBottom) maxBottom = svgTop + renderedH;
-                }
-              } catch(e) {}
+            const host = body.querySelector('.vega-embed, canvas, .leaflet-container, .djs-container');
+            if (host) {
+              const r = host.getBoundingClientRect();
+              if (r.width > 2) { emitSize(r.width + 8, r.height + 8); return; }
             }
 
-            // 2. Measure visible HTML content elements
-            const allElements = body.querySelectorAll('h1, h2, h3, h4, h5, h6, p, span, a, label, button, input, select, textarea, img, canvas, table, tr, td, th, pre, code, ul, ol, li, form, section, article, .card, [class*="card"], [class*="container"], [class*="box"], [style*="border"]');
-            for (let i = 0; i < allElements.length; i++) {
-              const el = allElements[i];
-              if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK' || el.tagName === 'META') continue;
-              const rect = el.getBoundingClientRect();
-              if (rect.width > 0 && rect.height > 0) {
-                const r = rect.right - bodyRect.left;
-                const b = rect.bottom - bodyRect.top;
-                const isFullStretchBlock = (rect.width >= bodyRect.width - 8) && (el.tagName === 'DIV' || el.tagName === 'SECTION' || el.tagName === 'BODY');
-                if (r > maxRight && !isFullStretchBlock) {
-                  maxRight = r;
-                }
-                if (b > maxBottom) {
-                  maxBottom = b;
-                }
-              }
-            }
-
-            // 3. Check first container explicit widths if applicable
-            const contentElements = Array.from(body.children).filter(function(el) {
-              return el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE' && el.tagName !== 'LINK' && el.tagName !== 'META';
+            const kids = Array.from(body.children).filter(function(el) {
+              return el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE' && el.tagName !== 'LINK';
             });
-            const first = contentElements[0] || body.firstElementChild;
-            if (first) {
-              const firstStyle = window.getComputedStyle(first);
-              const hasMaxWidth = firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && !firstStyle.maxWidth.endsWith('%');
-              const hasExplicitWidth = firstStyle.width && !firstStyle.width.endsWith('%') && firstStyle.width !== 'auto';
-
-              if (hasMaxWidth || hasExplicitWidth) {
-                const firstRect = first.getBoundingClientRect();
-                if (firstRect.width > maxRight) maxRight = firstRect.width;
-              }
+            if (!kids.length) return;
+            const vw = document.documentElement.clientWidth || 0;
+            const pad = 8;
+            let maxW = 0, maxB = 0;
+            for (const el of kids) {
+              const r = el.getBoundingClientRect();
+              maxB = Math.max(maxB, r.bottom);
+              if (r.width > 1 && !(vw > 0 && r.width >= vw - 16)) maxW = Math.max(maxW, r.width);
             }
-
-            const contentH = maxBottom > 0 ? maxBottom : Math.ceil(body.scrollHeight || (first ? first.getBoundingClientRect().height : 0) || 0);
-            const contentW = maxRight > 0 ? maxRight : Math.ceil(body.scrollWidth || (first ? first.getBoundingClientRect().width : 0) || 0);
-
-            let targetW = Math.min(3200, Math.max(220, Math.ceil(contentW + 20)));
-            let targetH = Math.min(6000, Math.max(120, Math.ceil(contentH + 20)));
-
-            if (Math.abs(targetH - lastH) > 4 || Math.abs(targetW - lastW) > 4) {
-              lastH = targetH;
-              lastW = targetW;
-              window.parent.postMessage({
-                type: 'drawva-widget-resize-content',
-                width: targetW,
-                height: targetH
-              }, '*');
+            const firstStyle = window.getComputedStyle(kids[0]);
+            const maxWpx = parseFloat(firstStyle.maxWidth);
+            if (firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && !firstStyle.maxWidth.endsWith('%') && maxWpx > 80) {
+              maxW = maxWpx;
             }
+            if (maxW < 80) maxW = body.querySelector('input, button, textarea, select, form') ? 360 : 280;
+            emitSize(maxW + pad * 2, maxB + pad);
           } catch(e) {}
         }
 
@@ -221,7 +175,7 @@
         if (typeof MutationObserver !== 'undefined' && document.body) {
           try {
             const mo = new MutationObserver(postSize);
-            mo.observe(document.body, { childList: true, subtree: true, attributes: true, characterData: true });
+            mo.observe(document.body, { childList: true, subtree: true });
           } catch(e) {}
         }
 
@@ -253,7 +207,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:6px 8px 12px 8px;box-sizing:border-box;width:100%!important;height:auto!important;min-height:0!important}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;height:auto;min-height:0}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:100%;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;

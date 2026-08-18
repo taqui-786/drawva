@@ -60,18 +60,33 @@ export function extractHtmlDimensions(html: string): { width: number; height: nu
   if (vb) {
     const w = parseFloat(vb[3]);
     const h = parseFloat(vb[4]);
-    if (w > 30 && h > 30) {
-      return { width: Math.round(w + 32), height: Math.round(h + 32) };
+    if (w > 20 && h > 20) {
+      return { width: Math.round(w + 16), height: Math.round(h + 16) };
     }
   }
-  const wStyle = html.match(/(?:max-width|width)\s*:\s*(\d+)px/i);
-  const hStyle = html.match(/(?:max-height|min-height|height)\s*:\s*(\d+)px/i);
-  if (wStyle && hStyle) {
-    const w = parseInt(wStyle[1], 10);
-    const h = parseInt(hStyle[1], 10);
-    if (w >= 120 && h >= 80) {
-      return { width: Math.min(1400, Math.max(220, w + 24)), height: Math.min(1400, Math.max(120, h + 24)) };
+  const svgTag = html.match(/<svg\b[^>]*>/i);
+  if (svgTag) {
+    const wMatch = svgTag[0].match(/\bwidth=["']([\d.]+)(?:px)?["']/i);
+    const hMatch = svgTag[0].match(/\bheight=["']([\d.]+)(?:px)?["']/i);
+    if (wMatch && hMatch) {
+      const w = parseFloat(wMatch[1]);
+      const h = parseFloat(hMatch[1]);
+      if (w > 20 && h > 20) {
+        return { width: Math.round(w + 16), height: Math.round(h + 16) };
+      }
     }
+  }
+  const maxW = html.match(/max-width\s*:\s*(\d+)px/i);
+  const minH = html.match(/(?:min-height|height)\s*:\s*(\d+)px/i);
+  if (maxW) {
+    const w = parseInt(maxW[1], 10);
+    if (w >= 200 && w <= 900) {
+      const h = minH ? parseInt(minH[1], 10) : Math.round(w * 1.3);
+      return { width: w + 16, height: Math.min(1400, Math.max(200, h + 16)) };
+    }
+  }
+  if (/<(?:form|input|button|textarea|select)\b/i.test(html)) {
+    return { width: 360, height: 480 };
   }
   if (/counter|clock|stopwatch|timer|toggle|badge|pill/i.test(html) && html.length < 2500) {
     return { width: 320, height: 220 };
@@ -378,21 +393,24 @@ export class WidgetManager {
   private mount(widget: WidgetItem): void {
     const shell = document.createElement("div");
     shell.dataset.hovered = "false";
+    shell.dataset.ready = "false";
     shell.className = "drawva-widget-shell";
     shell.style.cssText =
       "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;opacity:0;transition:opacity 0.12s ease;";
 
+    let revealed = false;
     const reveal = () => {
-      if (shell.style.opacity !== "1") {
-        shell.style.opacity = "1";
-      }
+      if (revealed) return;
+      revealed = true;
+      shell.dataset.ready = "true";
+      shell.style.opacity = "1";
     };
 
-    if (widget.userResized) {
+    const readyImmediately = widget.userResized || widget.status === "accepted";
+    if (readyImmediately) {
       reveal();
-    } else {
-      setTimeout(reveal, 80);
     }
+    const fallbackReveal = readyImmediately ? 0 : window.setTimeout(reveal, 900);
 
     const body = document.createElement("div");
     body.className = "drawva-widget-body";
@@ -425,22 +443,25 @@ export class WidgetManager {
         if (typeof height === "number" && height > 0) {
           const w = this.widgets.get(widget.id);
           if (w) {
-            const measuredH = Math.min(6000, Math.max(120, Math.round(height)));
-            const measuredW =
+            const measuredH = Math.min(6000, Math.max(60, Math.round(height)));
+            let measuredW =
               typeof width === "number" && width > 0
-                ? Math.min(3200, Math.max(220, Math.round(width)))
+                ? Math.min(3200, Math.max(80, Math.round(width)))
                 : w.contentW;
-
+            if (w.kind === "html" && measuredW < 280) measuredW = Math.max(w.contentW, 360);
+            if (w.kind === "html" && measuredH < 80 && measuredW > measuredH * 5) return;
+            if (w.kind === "html" && measuredH > 80 && measuredW > measuredH * 3) {
+              measuredW = Math.max(280, Math.round(measuredH));
+            }
             w.contentW = measuredW;
             w.contentH = measuredH;
-
             if (!w.userResized) {
-              if (w.w > 0 && measuredW > 0) {
-                w.h = Math.max(120, Math.round(w.w * (measuredH / measuredW)));
-              }
+              w.w = measuredW;
+              w.h = measuredH;
             }
             this.position(w);
-            reveal();
+            if (fallbackReveal) window.clearTimeout(fallbackReveal);
+            requestAnimationFrame(() => requestAnimationFrame(reveal));
           }
         }
       }
@@ -586,12 +607,13 @@ export class WidgetManager {
     const viewportH = rect.height;
     const relativeX = cam.panX + widget.x * cam.scale;
     const relativeY = cam.panY + widget.y * cam.scale;
-    const scaleX = (cam.scale * widget.w) / widget.contentW;
-    const scaleY = (cam.scale * widget.h) / widget.contentH;
+    const contentW = Math.max(1, widget.contentW);
+    const contentH = Math.max(1, widget.contentH);
+    const s = cam.scale * Math.min(widget.w / contentW, widget.h / contentH);
 
-    shell.style.width = `${widget.contentW}px`;
-    shell.style.height = `${widget.contentH}px`;
-    shell.style.transform = `translate3d(${relativeX}px,${relativeY}px,0) scale(${scaleX},${scaleY})`;
+    shell.style.width = `${contentW}px`;
+    shell.style.height = `${contentH}px`;
+    shell.style.transform = `translate3d(${relativeX}px,${relativeY}px,0) scale(${s},${s})`;
 
     const offscreen =
       relativeX > viewportW ||

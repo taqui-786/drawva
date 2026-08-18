@@ -27,7 +27,7 @@ import { LogsDialog } from "./LogsDialog";
 import { CanvasFooter } from "./CanvasFooter";
 import { WidgetManager, type WidgetItem, extractHtmlDimensions } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
-import { diagramDocument, copyLabel, detectDiagramFormat, normalizeFormat } from "@/lib/canvas/diagram";
+import { diagramDocument, copyLabel, detectDiagramFormat, normalizeFormat, estimateDiagramDimensions } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { buildAtlas, buildFocusInset } from "@/lib/canvas/atlas";
@@ -536,7 +536,26 @@ export function CanvasApp() {
   }
 
   function askAi() {
-    let box = inkBoxRef.current;
+    const selected = objects.current?.getSelectedGeometry() || widgets.current?.getSelectedGeometry();
+    let box = selected
+      ? { x: selected.x, y: selected.y, w: selected.w, h: selected.h }
+      : inkBoxRef.current;
+    if ((!box || box.w <= 0 || box.h <= 0) && engine) {
+      const view = engine.camera.visibleWorldRect();
+      const cx = view.x + view.w / 2;
+      const cy = view.y + view.h / 2;
+      let best: { x: number; y: number; w: number; h: number } | null = null;
+      let bestD = Infinity;
+      for (const o of objects.current?.all() ?? []) {
+        if (o.x + o.w < view.x || o.x > view.x + view.w || o.y + o.h < view.y || o.y > view.y + view.h) continue;
+        const d = Math.hypot(o.x + o.w / 2 - cx, o.y + o.h / 2 - cy);
+        if (d < bestD) {
+          bestD = d;
+          best = o;
+        }
+      }
+      if (best) box = { x: best.x, y: best.y, w: best.w, h: best.h };
+    }
     if (!box || box.w <= 0 || box.h <= 0) {
       const visible = engine?.camera.visibleWorldRect();
       if (visible && engine) {
@@ -982,11 +1001,15 @@ export function CanvasApp() {
       }
       if (oldWidget) {
         wm.remove(oldWidget.id);
+      } else {
+        for (const w of wm.all()) {
+          if (w.status === "draft" && w.kind === "html") wm.remove(w.id);
+        }
       }
       activeEditTargetRef.current = null;
       const estimated = extractHtmlDimensions(cmd.html);
-      const initialW = oldWidget ? oldWidget.w : (estimated ? estimated.width : cmd.w);
-      const initialH = oldWidget ? oldWidget.h : (estimated ? estimated.height : cmd.h);
+      const initialW = oldWidget ? oldWidget.w : Math.round(estimated?.width || cmd.w);
+      const initialH = oldWidget ? oldWidget.h : Math.round(estimated?.height || cmd.h);
 
       const item: WidgetItem = {
         id: oldWidget?.id || targetId || `widget-${Date.now()}`,
@@ -1094,8 +1117,12 @@ export function CanvasApp() {
       activeEditTargetRef.current = null;
       const res = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
       const html = typeof res === "string" ? res : res.html;
-      const initialW = oldWidget ? oldWidget.w : (typeof res === "object" && res.width ? res.width : cmd.w);
-      const initialH = oldWidget ? oldWidget.h : (typeof res === "object" && res.height ? res.height : cmd.h);
+      const estimated =
+        typeof res === "object" && res.width && res.height
+          ? { width: res.width, height: res.height }
+          : estimateDiagramDimensions(cmd.sourceFormat, cmd.source, cmd.diagramKind);
+      const initialW = oldWidget ? oldWidget.w : Math.round(estimated.width || cmd.w);
+      const initialH = oldWidget ? oldWidget.h : Math.round(estimated.height || cmd.h);
 
       const item: WidgetItem = {
         id: oldWidget?.id || targetId || `diagram-${Date.now()}`,
@@ -1316,18 +1343,20 @@ export function CanvasApp() {
     const wm = widgets.current;
     if (!wm || !engine) return;
     const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
+    const demoHtml = `<!doctype html><html><head><style>body{font-family:system-ui;padding:24px;background:#f3f4f6;margin:0}button{font-size:28px;padding:12px 20px;border-radius:8px;border:0;background:#2679b8;color:#fff;cursor:pointer}</style></head><body><h2>Mini Counter</h2><button id="b">0</button><script>let n=0;document.getElementById('b').onclick=()=>{document.getElementById('b').textContent=++n};<\/script></body></html>`;
+    const estimated = extractHtmlDimensions(demoHtml) || { width: 320, height: 220 };
     wm.add({
       id: `demo-${Date.now()}`,
       kind: "html",
       pluginId: "general",
       x: Math.max(0, c.x),
       y: Math.max(0, c.y),
-      w: 700,
-      h: 420,
-      contentW: 1200,
-      contentH: 800,
+      w: estimated.width,
+      h: estimated.height,
+      contentW: estimated.width,
+      contentH: estimated.height,
       title: "Counter",
-      html: `<!doctype html><html><head><style>body{font-family:system-ui;padding:24px;background:#f3f4f6;margin:0}button{font-size:28px;padding:12px 20px;border-radius:8px;border:0;background:#2679b8;color:#fff;cursor:pointer}</style></head><body><h2>Mini Counter</h2><button id="b">0</button><script>let n=0;document.getElementById('b').onclick=()=>{document.getElementById('b').textContent=++n};<\/script></body></html>`,
+      html: demoHtml,
       status: "draft",
     });
     setMode("select");
@@ -1423,7 +1452,9 @@ export function CanvasApp() {
         status: "accepted",
         image: block.canvas,
       });
+      inkBoxRef.current = { x: textAnchor.x, y: textAnchor.y, w: block.w, h: block.h };
       afterBoardChangeRef.current();
+      if (appState.autoOn) scheduleAi(inkBoxRef.current);
     }
     setTextOpen(false);
     setTextValue("");
