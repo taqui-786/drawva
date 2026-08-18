@@ -143,16 +143,16 @@ function matchedFontSize(
   scale: number,
   changedBoxHeight?: number
 ): number {
-  const screenReadable = 42 / Math.max(0.03, scale);
+  const screenReadable = Math.round(28 / Math.max(0.05, Math.min(3, scale)));
   let size = Number(value);
-  if (!Number.isFinite(size) || size < 90) {
+  if (!Number.isFinite(size) || size <= 0) {
     if (changedBoxHeight && changedBoxHeight > 40) {
-      size = Math.max(120, Math.min(450, Math.round(changedBoxHeight * 0.75)));
+      size = Math.max(24, Math.min(180, Math.round(changedBoxHeight * 0.6)));
     } else {
-      size = 160;
+      size = screenReadable;
     }
   }
-  return Math.max(48, Math.min(650, Math.max(size, screenReadable)));
+  return Math.max(16, Math.min(240, Math.max(size, screenReadable)));
 }
 
 function matchedTextFontSize(
@@ -161,19 +161,26 @@ function matchedTextFontSize(
   scale: number,
   changedBoxHeight?: number
 ): number {
-  const size = matchedFontSize(value, scale, changedBoxHeight);
   const characters = Array.from(String(text).replace(/\s/g, "")).length;
-  return characters < 10 ? size : Math.max(24, size * 0.5);
+  if (characters < 10) {
+    return matchedFontSize(value, scale, changedBoxHeight);
+  }
+  const screenReadable = Math.round(20 / Math.max(0.05, Math.min(2.5, scale)));
+  let size = Number(value);
+  if (!Number.isFinite(size) || size <= 0) {
+    size = screenReadable;
+  }
+  return Math.max(14, Math.min(100, Math.max(size, screenReadable)));
 }
 
 function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
-const MIN_WIDGET_WIDTH = 480;
-const MIN_WIDGET_HEIGHT = 280;
-const DEFAULT_WIDGET_WIDTH = 640;
-const DEFAULT_WIDGET_HEIGHT = 440;
+const MIN_WIDGET_WIDTH = 240;
+const MIN_WIDGET_HEIGHT = 160;
+const DEFAULT_WIDGET_WIDTH = 540;
+const DEFAULT_WIDGET_HEIGHT = 360;
 const MAX_WIDGET_WIDTH = 2800;
 const MAX_WIDGET_HEIGHT = 4500;
 
@@ -185,8 +192,10 @@ function fitWidgetGeometry(
   widgetEditBox?: { x: number; y: number; w: number; h: number },
   sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>
 ): { x: number; y: number; w: number; h: number } | null {
+  const placement = String(cmd.placement || "").toLowerCase();
+
   // Refinement mode: snap to the original widget's box — ignore whatever the AI returned.
-  if ((!reposition || cmd.placement === "in_place") && widgetEditBox && widgetEditBox.w > 0 && widgetEditBox.h > 0) {
+  if ((!reposition || placement === "in_place") && widgetEditBox && widgetEditBox.w > 0 && widgetEditBox.h > 0) {
     return {
       x: Math.round(widgetEditBox.x),
       y: Math.round(widgetEditBox.y),
@@ -210,11 +219,11 @@ function fitWidgetGeometry(
     rawH = Math.ceil(rawH * scale);
   }
 
-  // If user drew a sketch on canvas, honour that footprint:
+  // Only force sketch dimensions if user explicitly asked to replace the sketch in-place:
   const sketchW = changedBox?.w ?? 0;
   const sketchH = changedBox?.h ?? 0;
   const hasSketch = sketchW > 40 && sketchH > 40 && sketchW < viewportW * 0.9 && sketchH < viewportH * 0.9;
-  if (hasSketch) {
+  if (hasSketch && (placement === "match_sketch" || placement === "in_place")) {
     rawW = Math.max(rawW, Math.round(sketchW));
     rawH = Math.max(rawH, Math.round(sketchH));
   }
@@ -225,7 +234,6 @@ function fitWidgetGeometry(
   const w = clampNum(rawW, MIN_WIDGET_WIDTH, maxW);
   const h = clampNum(rawH, MIN_WIDGET_HEIGHT, maxH);
 
-  const placement = String(cmd.placement || "").toLowerCase();
   let x = Number(cmd.x);
   let y = Number(cmd.y);
 
@@ -315,15 +323,24 @@ export function validateCommand(
       const fontSize = matchedTextFontSize(c.fontSize, text, ctx.scale, ctx.changedBox?.h);
       const lineHeight = Math.max(1, Math.min(2.2, Number(c.lineHeight) || 1.35));
 
-      let rawMaxWidth = Number(c.maxWidth);
-      if (!Number.isFinite(rawMaxWidth) || rawMaxWidth < fontSize * 3) {
-        const textLen = text.length;
-        rawMaxWidth = textLen < 50 ? 540 : textLen < 150 ? 680 : 820;
+      const screenMaxWidth = 650;
+      const worldScreenMaxWidth = Math.round(screenMaxWidth / Math.max(0.05, ctx.scale));
+      const minCharsWidth = Math.round(fontSize * 28);
+      let calculatedMaxWidth = Math.max(minCharsWidth, worldScreenMaxWidth);
+
+      if (ctx.changedBox && ctx.changedBox.w > 40) {
+        calculatedMaxWidth = Math.max(calculatedMaxWidth, Math.round(ctx.changedBox.w));
       }
-      // const maxWidth = Math.max(fontSize * 3, Math.min(SIZE, Math.round(rawMaxWidth)));
-      const maxWidth = 900; 
-      console.log({maxWidth});
-      
+
+      if (Number.isFinite(Number(c.maxWidth)) && Number(c.maxWidth) >= minCharsWidth) {
+        calculatedMaxWidth = Math.max(calculatedMaxWidth, Number(c.maxWidth));
+      }
+
+      const viewportW = ctx.visibleRect?.w ?? 2000;
+      const maxWidth = Math.max(
+        280,
+        Math.min(Math.round(viewportW * 0.9), Math.min(3200, calculatedMaxWidth))
+      );
 
       let x = Number(c.x);
       let y = Number(c.y);
@@ -334,32 +351,36 @@ export function validateCommand(
         y >= 0 &&
         x < SIZE &&
         y < SIZE &&
-        (!ctx.visibleRect || (x >= ctx.visibleRect.x - 300 && x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
+        (!ctx.visibleRect ||
+          (x >= ctx.visibleRect.x - 300 &&
+            x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
 
-      if (placement === "right" && ctx.changedBox && ctx.changedBox.w > 0) {
-        x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
-        y = Math.round(ctx.changedBox.y);
-      } else if (placement === "left" && ctx.changedBox && ctx.changedBox.w > 0) {
-        x = Math.round(ctx.changedBox.x - maxWidth - 32);
-        y = Math.round(ctx.changedBox.y);
-      } else if (placement === "top" && ctx.changedBox && ctx.changedBox.h > 0) {
-        x = Math.round(ctx.changedBox.x);
-        y = Math.round(ctx.changedBox.y - fontSize * lineHeight * 2 - 24);
-      } else if (!hasValidCoords || placement === "below") {
-        if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
+      if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
+        if (placement === "right") {
+          x = Math.round(ctx.changedBox.x + ctx.changedBox.w + 32);
+          y = Math.round(ctx.changedBox.y);
+        } else if (placement === "left") {
+          x = Math.round(ctx.changedBox.x - maxWidth - 32);
+          y = Math.round(ctx.changedBox.y);
+        } else if (placement === "top") {
+          x = Math.round(ctx.changedBox.x);
+          y = Math.round(ctx.changedBox.y - fontSize * lineHeight * 3 - 24);
+        } else {
           x = Math.round(ctx.changedBox.x);
           y = Math.round(ctx.changedBox.y + ctx.changedBox.h + 24);
-        } else if (ctx.visibleRect) {
-          x = Math.round(ctx.visibleRect.x + 80);
-          y = Math.round(ctx.visibleRect.y + 80);
+        }
+      } else if (!hasValidCoords) {
+        if (ctx.visibleRect) {
+          x = Math.round(ctx.visibleRect.x + ctx.visibleRect.w / 2 - maxWidth / 2);
+          y = Math.round(ctx.visibleRect.y + ctx.visibleRect.h / 2 - 100);
         } else {
-          x = Number.isFinite(x) ? Math.round(x) : 1000;
-          y = Number.isFinite(y) ? Math.round(y) : 1000;
+          x = 1000;
+          y = 1000;
         }
       }
 
-      x = Math.max(0, Math.min(SIZE - maxWidth, x));
-      y = Math.max(0, Math.min(SIZE - fontSize * lineHeight * 2, y));
+      x = Math.max(0, Math.min(SIZE - maxWidth, Math.round(x)));
+      y = Math.max(0, Math.min(SIZE - fontSize * lineHeight * 2, Math.round(y)));
 
       return {
         tool: "write_text",

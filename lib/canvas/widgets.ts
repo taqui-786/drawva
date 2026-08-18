@@ -54,6 +54,31 @@ const DRAG_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" wi
 const COPY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path d="M3 5.25C3.41421 5.25 3.75 5.58579 3.75 6V15C3.75 16.6709 3.75128 17.8488 3.87109 18.7402C3.98805 19.6102 4.20568 20.0943 4.55566 20.4443C4.90565 20.7943 5.38983 21.0119 6.25977 21.1289C7.15123 21.2487 8.32908 21.25 10 21.25H17C17.4142 21.25 17.75 21.5858 17.75 22C17.75 22.4142 17.4142 22.75 17 22.75H10C8.37129 22.75 7.07426 22.7517 6.05957 22.6152C5.02332 22.4759 4.17025 22.18 3.49512 21.5049C2.81999 20.8298 2.52409 19.9767 2.38477 18.9404C2.24834 17.9257 2.25 16.6287 2.25 15V6C2.25 5.58579 2.58579 5.25 3 5.25ZM14 1.25C15.6287 1.25 16.9257 1.24834 17.9404 1.38477C18.9767 1.52409 19.8298 1.81999 20.5049 2.49512C21.18 3.17025 21.4759 4.02332 21.6152 5.05957C21.7517 6.07426 21.75 7.37129 21.75 9V11C21.75 12.6287 21.7517 13.9257 21.6152 14.9404C21.4759 15.9767 21.18 16.8298 20.5049 17.5049C19.8298 18.18 18.9767 18.4759 17.9404 18.6152C16.9257 18.7517 15.6287 18.75 14 18.75C12.3713 18.75 11.0743 18.7517 10.0596 18.6152C9.02332 18.4759 8.17025 18.18 7.49512 17.5049C6.81998 16.8298 6.52409 15.9767 6.38477 14.9404C6.24834 13.9257 6.25 12.6287 6.25 11V9C6.25 7.37129 6.24834 6.07426 6.38477 5.05957C6.52409 4.02332 6.81998 3.17025 7.49512 2.49512C8.17025 1.81998 9.02332 1.52409 10.0596 1.38477C11.0743 1.24834 12.3713 1.25 14 1.25ZM14 2.75C12.3291 2.75 11.1512 2.75128 10.2598 2.87109C9.38983 2.98805 8.90565 3.20568 8.55566 3.55566C8.20568 3.90565 7.98805 4.38983 7.87109 5.25977C7.75128 6.15123 7.75 7.32908 7.75 9V11C7.75 12.6709 7.75128 13.8488 7.87109 14.7402C7.98805 15.6102 8.20568 16.0943 8.55566 16.4443C8.90565 16.7943 9.38983 17.0119 10.2598 17.1289C11.1512 17.2487 12.3291 17.25 14 17.25C15.6709 17.25 16.8488 17.2487 17.7402 17.1289C18.6102 17.0119 19.0943 16.7943 19.4443 16.4443C19.7943 16.0943 20.0119 15.6102 20.1289 14.7402C20.2487 13.8488 20.25 12.6709 20.25 11V9C20.25 7.32908 20.2487 6.15123 20.1289 5.25977C20.0119 4.38983 19.7943 3.90565 19.4443 3.55566C19.0943 3.20568 18.6102 2.98805 17.7402 2.87109C16.8488 2.75128 15.6709 2.75 14 2.75Z" fill="currentColor"></path></svg>`;
 const RESIZE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path d="M16.435 18.7485C16.245 18.7485 16.055 18.6785 15.905 18.5285C15.615 18.2385 15.615 17.7585 15.905 17.4685L17.905 15.4685C18.195 15.1785 18.675 15.1785 18.965 15.4685C19.255 15.7585 19.255 16.2385 18.965 16.5285L16.965 18.5285C16.815 18.6785 16.625 18.7485 16.435 18.7485ZM11.435 18.7485C11.245 18.7485 11.055 18.6785 10.905 18.5285C10.615 18.2385 10.615 17.7585 10.905 17.4685L17.905 10.4685C18.195 10.1785 18.675 10.1785 18.965 10.4685C19.255 10.7585 19.255 11.2385 18.965 11.5285L11.965 18.5285C11.815 18.6785 11.625 18.7485 11.435 18.7485ZM6.435 18.7485C6.245 18.7485 6.055 18.6785 5.905 18.5285C5.615 18.2385 5.615 17.7585 5.905 17.4685L17.905 5.46848C18.195 5.17848 18.675 5.17848 18.965 5.46848C19.255 5.75848 19.255 6.23848 18.965 6.52848L6.965 18.5285C6.815 18.6785 6.625 18.7485 6.435 18.7485Z" fill="currentColor"></path></svg>`;
 
+export function extractHtmlDimensions(html: string): { width: number; height: number } | null {
+  if (!html) return null;
+  const vb = html.match(/<svg[^>]*viewBox=["']\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*["']/i);
+  if (vb) {
+    const w = parseFloat(vb[3]);
+    const h = parseFloat(vb[4]);
+    if (w > 30 && h > 30) {
+      return { width: Math.round(w + 32), height: Math.round(h + 32) };
+    }
+  }
+  const wStyle = html.match(/(?:max-width|width)\s*:\s*(\d+)px/i);
+  const hStyle = html.match(/(?:max-height|min-height|height)\s*:\s*(\d+)px/i);
+  if (wStyle && hStyle) {
+    const w = parseInt(wStyle[1], 10);
+    const h = parseInt(hStyle[1], 10);
+    if (w >= 120 && h >= 80) {
+      return { width: Math.min(1400, Math.max(220, w + 24)), height: Math.min(1400, Math.max(120, h + 24)) };
+    }
+  }
+  if (/counter|clock|stopwatch|timer|toggle|badge|pill/i.test(html) && html.length < 2500) {
+    return { width: 320, height: 220 };
+  }
+  return null;
+}
+
 export class WidgetManager {
   private widgets = new Map<string, WidgetItem>();
   private shells = new Map<string, HTMLElement>();
@@ -351,16 +376,23 @@ export class WidgetManager {
   }
 
   private mount(widget: WidgetItem): void {
-    if (this.shells.has(widget.id)) return;
-
-    const shell = document.createElement("section");
-    shell.dataset.widgetId = widget.id;
-    shell.dataset.status = widget.status;
-    shell.dataset.selected = "false";
+    const shell = document.createElement("div");
     shell.dataset.hovered = "false";
     shell.className = "drawva-widget-shell";
     shell.style.cssText =
-      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;";
+      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;opacity:0;transition:opacity 0.12s ease;";
+
+    const reveal = () => {
+      if (shell.style.opacity !== "1") {
+        shell.style.opacity = "1";
+      }
+    };
+
+    if (widget.userResized) {
+      reveal();
+    } else {
+      setTimeout(reveal, 80);
+    }
 
     const body = document.createElement("div");
     body.className = "drawva-widget-body";
@@ -394,23 +426,21 @@ export class WidgetManager {
           const w = this.widgets.get(widget.id);
           if (w) {
             const measuredH = Math.min(6000, Math.max(120, Math.round(height)));
-            const measuredW = typeof width === "number" && width > 0
-              ? Math.min(3200, Math.max(220, Math.round(width)))
-              : w.w;
+            const measuredW =
+              typeof width === "number" && width > 0
+                ? Math.min(3200, Math.max(220, Math.round(width)))
+                : w.contentW;
 
-            // Never shrink an assigned widget size. Only expand if content overflows:
-            const targetContentW = Math.max(w.w, measuredW);
-            const targetContentH = Math.max(w.h, measuredH);
+            w.contentW = measuredW;
+            w.contentH = measuredH;
 
-            if (w.contentW !== targetContentW || w.contentH !== targetContentH) {
-              w.contentW = targetContentW;
-              w.contentH = targetContentH;
-              if (!w.userResized) {
-                w.w = targetContentW;
-                w.h = targetContentH;
+            if (!w.userResized) {
+              if (w.w > 0 && measuredW > 0) {
+                w.h = Math.max(120, Math.round(w.w * (measuredH / measuredW)));
               }
-              this.position(w);
             }
+            this.position(w);
+            reveal();
           }
         }
       }

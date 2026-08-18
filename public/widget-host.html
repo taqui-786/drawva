@@ -110,25 +110,27 @@
               }
             }
 
-            // 3. Check first container explicit widths
+            // 3. Check first container explicit widths if applicable
             const contentElements = Array.from(body.children).filter(function(el) {
               return el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE' && el.tagName !== 'LINK' && el.tagName !== 'META';
             });
-            const first = contentElements[0] || body.firstElementChild || body;
-            const firstStyle = window.getComputedStyle(first);
-            const hasMaxWidth = firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && !firstStyle.maxWidth.endsWith('%');
-            const hasExplicitWidth = firstStyle.width && !firstStyle.width.endsWith('%') && firstStyle.width !== 'auto';
+            const first = contentElements[0] || body.firstElementChild;
+            if (first) {
+              const firstStyle = window.getComputedStyle(first);
+              const hasMaxWidth = firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && !firstStyle.maxWidth.endsWith('%');
+              const hasExplicitWidth = firstStyle.width && !firstStyle.width.endsWith('%') && firstStyle.width !== 'auto';
 
-            if (hasMaxWidth || hasExplicitWidth) {
-              const firstRect = first.getBoundingClientRect();
-              if (firstRect.width > maxRight) maxRight = firstRect.width;
+              if (hasMaxWidth || hasExplicitWidth) {
+                const firstRect = first.getBoundingClientRect();
+                if (firstRect.width > maxRight) maxRight = firstRect.width;
+              }
             }
 
-            const contentH = Math.max(maxBottom, Math.ceil(first.getBoundingClientRect().height || 0));
-            const contentW = Math.max(maxRight, Math.ceil(first.getBoundingClientRect().width || 0));
+            const contentH = maxBottom > 0 ? maxBottom : Math.ceil(body.scrollHeight || (first ? first.getBoundingClientRect().height : 0) || 0);
+            const contentW = maxRight > 0 ? maxRight : Math.ceil(body.scrollWidth || (first ? first.getBoundingClientRect().width : 0) || 0);
 
-            let targetW = Math.min(3200, Math.max(220, Math.ceil(contentW + 16)));
-            let targetH = Math.min(6000, Math.max(120, Math.ceil(contentH + 16)));
+            let targetW = Math.min(3200, Math.max(220, Math.ceil(contentW + 20)));
+            let targetH = Math.min(6000, Math.max(120, Math.ceil(contentH + 20)));
 
             if (Math.abs(targetH - lastH) > 4 || Math.abs(targetW - lastW) > 4) {
               lastH = targetH;

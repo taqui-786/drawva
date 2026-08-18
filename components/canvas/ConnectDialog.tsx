@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,7 +17,7 @@ import {
   Tick01Icon,
   Wifi01Icon,
   Loading02Icon,
-  Share01Icon,
+  PeerToPeer01Icon,
   QrCodeIcon,
 } from "@hugeicons/core-free-icons";
 import { toast } from "sonner";
@@ -50,6 +50,22 @@ export function ConnectDialog({
   const [inputCode, setInputCode] = useState("");
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(false);
+  const joinToastIdRef = useRef<string | number | null>(null);
+
+  useEffect(() => {
+    if (!joinToastIdRef.current) return;
+
+    if (status === "connected") {
+      toast.success("Connected to session!", { id: joinToastIdRef.current });
+      joinToastIdRef.current = null;
+      onOpenChange(false);
+    } else if (status === "error") {
+      toast.error(errorMessage || "Failed to connect to session", { id: joinToastIdRef.current });
+      joinToastIdRef.current = null;
+    }
+  }, [status, errorMessage, onOpenChange]);
+
+  const isJoining = status === "connecting" || (loading && tab === "join");
 
   const handleHost = async () => {
     setLoading(true);
@@ -69,16 +85,33 @@ export function ConnectDialog({
       toast.error("Please enter a 6-digit connect code");
       return;
     }
+    const toastId = toast.loading("Connecting to session…");
+    joinToastIdRef.current = toastId;
     setLoading(true);
+
     try {
       await onJoin(inputCode);
-      toast.success("Connecting to session…");
+      if (status === "connected" && joinToastIdRef.current === toastId) {
+        toast.success("Connected to session!", { id: toastId });
+        joinToastIdRef.current = null;
+        onOpenChange(false);
+      }
     } catch (err: unknown) {
       const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "Failed to join session";
-      toast.error(msg);
+      toast.error(msg, { id: toastId });
+      joinToastIdRef.current = null;
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDisconnect = () => {
+    if (joinToastIdRef.current) {
+      toast.dismiss(joinToastIdRef.current);
+      joinToastIdRef.current = null;
+    }
+    setLoading(false);
+    onDisconnect();
   };
 
   const handleCopyCode = () => {
@@ -98,7 +131,7 @@ export function ConnectDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-lg">
-            <HugeiconsIcon icon={Share01Icon} className="size-5 text-primary" />
+            <HugeiconsIcon icon={PeerToPeer01Icon} className="size-5 text-primary" />
             Live Device Connection
           </DialogTitle>
           <DialogDescription>
@@ -111,12 +144,12 @@ export function ConnectDialog({
           <div className="flex items-center justify-between rounded-lg border bg-muted/40 p-3">
             <div className="flex items-center gap-2">
               {isConnected ? (
-                <Badge variant="default" className="gap-1 bg-emerald-600 hover:bg-emerald-700">
+                <Badge variant="default" className="gap-1">
                   <HugeiconsIcon icon={Wifi01Icon} className="size-3.5" />
                   Connected P2P
                 </Badge>
               ) : isHosting ? (
-                <Badge variant="outline" className="gap-1 border-primary text-primary">
+                <Badge variant="outline" className="gap-1 ">
                   <HugeiconsIcon icon={Loading02Icon} className="size-3.5 animate-spin" />
                   Hosting Session
                 </Badge>
@@ -144,7 +177,7 @@ export function ConnectDialog({
                 variant="destructive"
                 size="sm"
                 className="h-7 text-xs"
-                onClick={onDisconnect}
+                onClick={handleDisconnect}
               >
                 Disconnect
               </Button>
@@ -243,10 +276,10 @@ export function ConnectDialog({
             </div>
             <Button
               onClick={handleJoin}
-              disabled={loading || !inputCode.trim()}
+              disabled={isJoining || !inputCode.trim()}
               className="gap-2"
             >
-              {loading ? (
+              {isJoining ? (
                 <HugeiconsIcon icon={Loading02Icon} className="animate-spin" />
               ) : (
                 <HugeiconsIcon icon={Wifi01Icon} />

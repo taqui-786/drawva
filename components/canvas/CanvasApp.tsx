@@ -25,7 +25,7 @@ import { CanvasHeader, type AiRunState } from "./CanvasHeader";
 import { SettingsDialog } from "./SettingsDialog";
 import { LogsDialog } from "./LogsDialog";
 import { CanvasFooter } from "./CanvasFooter";
-import { WidgetManager, type WidgetItem } from "@/lib/canvas/widgets";
+import { WidgetManager, type WidgetItem, extractHtmlDimensions } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
 import { diagramDocument, copyLabel, detectDiagramFormat, normalizeFormat } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
@@ -900,6 +900,18 @@ export function CanvasApp() {
           afterBoardChangeRef.current();
           syncGeometryRef.current();
         },
+        onAccept: (id) => {
+          history.current?.recordObjects();
+          om.setStatus(id, "accepted");
+          const item = om.get(id);
+          if (item) {
+            const { image, ...cleanObject } = item;
+            void image;
+            syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: cleanObject });
+          }
+          afterBoardChangeRef.current();
+          syncGeometryRef.current();
+        },
         onMerge: (id) => mergeObjectToInk(id),
       },
     });
@@ -972,6 +984,10 @@ export function CanvasApp() {
         wm.remove(oldWidget.id);
       }
       activeEditTargetRef.current = null;
+      const estimated = extractHtmlDimensions(cmd.html);
+      const initialW = oldWidget ? oldWidget.w : (estimated ? estimated.width : cmd.w);
+      const initialH = oldWidget ? oldWidget.h : (estimated ? estimated.height : cmd.h);
+
       const item: WidgetItem = {
         id: oldWidget?.id || targetId || `widget-${Date.now()}`,
         kind: "html",
@@ -980,10 +996,10 @@ export function CanvasApp() {
         diagramKind: cmd.diagramKind,
         x: oldWidget ? oldWidget.x : cmd.x,
         y: oldWidget ? oldWidget.y : cmd.y,
-        w: oldWidget ? oldWidget.w : cmd.w,
-        h: oldWidget ? oldWidget.h : cmd.h,
-        contentW: oldWidget ? oldWidget.contentW : cmd.w,
-        contentH: oldWidget ? oldWidget.contentH : cmd.h,
+        w: initialW,
+        h: initialH,
+        contentW: oldWidget ? oldWidget.contentW : initialW,
+        contentH: oldWidget ? oldWidget.contentH : initialH,
         title: cmd.title,
         html: cmd.html,
         copyText: cmd.copyText,
@@ -1011,9 +1027,10 @@ export function CanvasApp() {
         color: cmd.color,
         fontSize: cmd.fontSize,
         maxWidth: cmd.maxWidth,
-        status: "accepted",
+        status: "draft",
         image: block.canvas,
       });
+      setMode("select");
     });
     draft.setRenderer("draw_formula", async (_eng, cmd) => {
       if (cmd.tool !== "draw_formula") return;
@@ -1031,9 +1048,10 @@ export function CanvasApp() {
           source: cmd.latex,
           color: cmd.color,
           fontSize: cmd.fontSize,
-          status: "accepted",
+          status: "draft",
           image: rendered.canvas,
         });
+        setMode("select");
       }
     });
     draft.setRenderer("plot_function", (_eng, cmd) => {
@@ -1052,9 +1070,10 @@ export function CanvasApp() {
           source: cmd.expression,
           color: cmd.color,
           fontSize: 0,
-          status: "accepted",
+          status: "draft",
           image: canvas,
         });
+        setMode("select");
       }
     });
     draft.setRenderer("diagram_source", async (_eng, cmd) => {
@@ -1073,7 +1092,11 @@ export function CanvasApp() {
         wm.remove(oldWidget.id);
       }
       activeEditTargetRef.current = null;
-      const html = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
+      const res = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
+      const html = typeof res === "string" ? res : res.html;
+      const initialW = oldWidget ? oldWidget.w : (typeof res === "object" && res.width ? res.width : cmd.w);
+      const initialH = oldWidget ? oldWidget.h : (typeof res === "object" && res.height ? res.height : cmd.h);
+
       const item: WidgetItem = {
         id: oldWidget?.id || targetId || `diagram-${Date.now()}`,
         kind: "diagram",
@@ -1082,10 +1105,10 @@ export function CanvasApp() {
         diagramKind: cmd.diagramKind,
         x: oldWidget ? oldWidget.x : cmd.x,
         y: oldWidget ? oldWidget.y : cmd.y,
-        w: oldWidget ? oldWidget.w : cmd.w,
-        h: oldWidget ? oldWidget.h : cmd.h,
-        contentW: oldWidget ? oldWidget.contentW : cmd.w,
-        contentH: oldWidget ? oldWidget.contentH : cmd.h,
+        w: initialW,
+        h: initialH,
+        contentW: oldWidget ? oldWidget.contentW : initialW,
+        contentH: oldWidget ? oldWidget.contentH : initialH,
         title: cmd.title,
         html,
         copyText: cmd.source,
@@ -1118,6 +1141,12 @@ export function CanvasApp() {
     sm.setHandlers({
       onStatusChange: (status, roomCode, peerCount, error) => {
         setSyncState({ status, roomCode, peerCount, error });
+      },
+      onPeerConnect: (_peerId, isHost) => {
+        if (isHost) {
+          toast.success("User connected to session!");
+          setConnectOpen(false);
+        }
       },
       onRequestInitialState: () => {
         if (!engine) return null;

@@ -42,6 +42,7 @@ export interface SyncHandlers {
   onRemoteWidgetRemove?: (id: string) => void;
   onRemoteClear?: () => void;
   onStatusChange?: (status: SyncStatus, code: string | null, peerCount: number, errorMsg?: string) => void;
+  onPeerConnect?: (peerId: string, isHost: boolean) => void;
   onRequestInitialState?: () => ProjectSnapshot | null;
 }
 
@@ -203,6 +204,7 @@ export class SyncManager {
       this.connections.set(conn.peer, conn);
       this.status = "connected";
       this.notifyStatus();
+      this.handlers.onPeerConnect?.(conn.peer, isHost);
 
       if (isHost) {
         const snapshot = this.handlers.onRequestInitialState?.();

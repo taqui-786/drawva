@@ -139,15 +139,68 @@ function errorDocument(message: string): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;display:flex;align-items:center;justify-content:center;background:transparent!important;font:14px system-ui;color:#b91c1c}</style></head><body><div>⚠️ ${escaped}</div></body></html>`;
 }
 
+export function extractSvgDimensions(svg: string): { width: number; height: number } | null {
+  if (!svg) return null;
+  const vbMatch = svg.match(/viewBox=["']\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*["']/i);
+  if (vbMatch) {
+    const w = parseFloat(vbMatch[3]);
+    const h = parseFloat(vbMatch[4]);
+    if (w > 20 && h > 20) {
+      return { width: Math.round(w + 32), height: Math.round(h + 32) };
+    }
+  }
+  const wMatch = svg.match(/width=["']([\d.]+)px?["']/i);
+  const hMatch = svg.match(/height=["']([\d.]+)px?["']/i);
+  if (wMatch && hMatch) {
+    const w = parseFloat(wMatch[1]);
+    const h = parseFloat(hMatch[1]);
+    if (w > 20 && h > 20) {
+      return { width: Math.round(w + 32), height: Math.round(h + 32) };
+    }
+  }
+  return null;
+}
+
+export function estimateDiagramDimensions(
+  format: string,
+  source: string,
+  diagramKind?: string
+): { width: number; height: number } | null {
+  if (format === "vega-lite") {
+    try {
+      const spec = typeof source === "string" ? JSON.parse(source) : source;
+      if (spec && typeof spec.width === "number" && typeof spec.height === "number") {
+        return { width: Math.round(spec.width + 100), height: Math.round(spec.height + 90) };
+      }
+    } catch {}
+    return { width: 640, height: 380 };
+  }
+
+  if (format === "smiles") {
+    const isCompact = diagramKind === "molecular-structure-compact" || diagramKind === "compact" || /compact/i.test(diagramKind || "");
+    return isCompact ? { width: 340, height: 240 } : { width: 440, height: 320 };
+  }
+
+  if (format === "dot") {
+    return { width: 580, height: 360 };
+  }
+
+  if (format === "bpmn-xml" || format === "cytoscape-json" || format === "geojson") {
+    return { width: 680, height: 440 };
+  }
+
+  return null;
+}
+
 export async function diagramDocument(
   sourceFormat: string,
   source: string,
   diagramKind?: string,
   title?: string
-): Promise<string> {
+): Promise<{ html: string; width?: number; height?: number }> {
   const format = detectDiagramFormat(sourceFormat, source, title);
   if (!format) {
-    return errorDocument(`Unknown diagram format: ${sourceFormat}`);
+    return { html: errorDocument(`Unknown diagram format: ${sourceFormat}`) };
   }
 
   const effectiveSource = format === "mermaid" ? sanitizeMermaidSource(source) : source;
@@ -157,28 +210,31 @@ export async function diagramDocument(
     try {
       const svg = await renderMermaid(responsive);
       if (svg) {
-        return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent!important;box-sizing:border-box}#stage{width:100%;height:100%;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:12px}#stage svg{width:100%;height:100%;max-width:100%;max-height:100%;display:block;margin:auto}</style></head><body><div id="stage">${svg}</div><script>function fitServerSvg(){try{const s=document.querySelector("#stage svg");if(s){let w=0,h=0;try{const g=s.querySelector("g");if(g&&g.getBBox){const b=g.getBBox();if(b&&b.width>20&&b.height>20){w=b.width;h=b.height}}}catch(e){}if(!w&&s.viewBox&&s.viewBox.baseVal){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}if(w>20&&h>20){const tw=Math.min(3200,Math.max(220,Math.ceil(w+48)));const th=Math.min(5000,Math.max(120,Math.ceil(h+48)));window.parent?.postMessage({type:"drawva-widget-resize-content",width:tw,height:th},"*")}}}catch(e){}}window.addEventListener("DOMContentLoaded",fitServerSvg);setTimeout(fitServerSvg,50);</script></body></html>`;
+        const dims = extractSvgDimensions(svg);
+        const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:100%;height:auto;min-height:0;overflow:hidden;background:transparent!important;box-sizing:border-box}#stage{width:100%;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:8px}#stage svg{width:100%;height:auto;max-width:100%;display:block;margin:auto}</style></head><body><div id="stage">${svg}</div><script>function fitServerSvg(){try{const s=document.querySelector("#stage svg");if(s){let w=0,h=0;try{const g=s.querySelector("g");if(g&&g.getBBox){const b=g.getBBox();if(b&&b.width>20&&b.height>20){w=b.width+(b.x>0?b.x:0);h=b.height+(b.y>0?b.y:0)}}}catch(e){}if(!w&&s.viewBox&&s.viewBox.baseVal){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}if(w>20&&h>20){const tw=Math.min(3200,Math.max(220,Math.ceil(w+32)));const th=Math.min(5000,Math.max(120,Math.ceil(h+32)));window.parent?.postMessage({type:"drawva-widget-resize-content",width:tw,height:th},"*")}}}catch(e){}}window.addEventListener("DOMContentLoaded",fitServerSvg);setTimeout(fitServerSvg,50);setTimeout(fitServerSvg,300);</script></body></html>`;
+        return { html, width: dims?.width, height: dims?.height };
       }
     } catch (e) {
       console.warn("[Diagram Renderer] Mermaid pre-render failed, using fallback:", e);
     }
   }
 
+  const dims = estimateDiagramDimensions(format, effectiveSource, diagramKind);
   const encodedSource = JSON.stringify(effectiveSource);
   const isCompact =
     diagramKind === "molecular-structure-compact" ||
     diagramKind === "compact" ||
     /compact/i.test(diagramKind || "");
 
-  return `<!doctype html>
+  const html = `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: transparent !important; font-family: system-ui, -apple-system, sans-serif; }
-    #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 16px; background: transparent !important; }
-    #stage svg, #stage canvas { max-width: 100%; max-height: 100%; width: 100%; height: 100%; }
+    html, body { margin: 0; padding: 0; width: 100%; height: auto; min-height: 0; overflow: hidden; background: transparent !important; font-family: system-ui, -apple-system, sans-serif; }
+    #stage { width: 100%; height: auto; min-height: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 10px; background: transparent !important; }
+    #stage svg, #stage canvas { max-width: 100%; height: auto; }
     .err-msg { color: #b91c1c; font-size: 14px; text-align: center; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; }
   </style>
 </head>
@@ -240,8 +296,12 @@ export async function diagramDocument(
         import("https://cdn.jsdelivr.net/npm/vega-lite@5.19.0/+esm"),
         import("https://cdn.jsdelivr.net/npm/vega-embed@6.26.0/+esm")
       ]);
-      const spec = typeof source === "string" ? JSON.parse(source) : source;
-      await vegaEmbed(stage, spec, { actions: false, responsive: true });
+      const rawSpec = typeof source === "string" ? JSON.parse(source) : source;
+      const spec = { ...rawSpec };
+      if (!spec.width) spec.width = 640;
+      if (!spec.height) spec.height = 380;
+      await vegaEmbed(stage, spec, { actions: false });
+      setTimeout(fitContent, 100);
       fitContent();
     } else if (format === "bpmn-xml") {
       const { default: BpmnJS } = await import("https://cdn.jsdelivr.net/npm/bpmn-js@17.11.1/+esm");
@@ -283,6 +343,7 @@ export async function diagramDocument(
   function fitContent() {
     try {
       const svgEl = stage.querySelector("svg");
+      const canvasEl = stage.querySelector("canvas");
       if (svgEl) {
         let naturalW = 0;
         let naturalH = 0;
@@ -291,20 +352,34 @@ export async function diagramDocument(
           if (innerG && innerG.getBBox) {
             const gb = innerG.getBBox();
             if (gb && gb.width > 20 && gb.height > 20) {
-              naturalW = gb.width;
-              naturalH = gb.height;
+              naturalW = gb.width + (gb.x > 0 ? gb.x : 0);
+              naturalH = gb.height + (gb.y > 0 ? gb.y : 0);
             }
           }
         } catch (e) {}
 
-        if (!naturalW && svgEl.viewBox && svgEl.viewBox.baseVal) {
+        if (!naturalW && svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width > 0) {
           naturalW = svgEl.viewBox.baseVal.width;
           naturalH = svgEl.viewBox.baseVal.height;
         }
 
+        if (!naturalW) {
+          const r = svgEl.getBoundingClientRect();
+          naturalW = r.width;
+          naturalH = r.height;
+        }
+
         if (naturalW > 20 && naturalH > 20) {
-          const w = Math.min(3200, Math.max(220, Math.ceil(naturalW + 48)));
-          const h = Math.min(5000, Math.max(120, Math.ceil(naturalH + 48)));
+          const w = Math.min(3200, Math.max(220, Math.ceil(naturalW + 24)));
+          const h = Math.min(5000, Math.max(120, Math.ceil(naturalH + 24)));
+          window.parent?.postMessage({ type: "drawva-widget-resize-content", width: w, height: h }, "*");
+        }
+      } else if (canvasEl) {
+        const cw = canvasEl.width || canvasEl.getBoundingClientRect().width;
+        const ch = canvasEl.height || canvasEl.getBoundingClientRect().height;
+        if (cw > 20 && ch > 20) {
+          const w = Math.min(3200, Math.max(220, Math.ceil(cw + 24)));
+          const h = Math.min(5000, Math.max(120, Math.ceil(ch + 24)));
           window.parent?.postMessage({ type: "drawva-widget-resize-content", width: w, height: h }, "*");
         }
       }
@@ -314,6 +389,8 @@ export async function diagramDocument(
 </script>
 </body>
 </html>`;
+
+  return { html, width: dims?.width, height: dims?.height };
 }
 
 function escapeHtml(str: string): string {
