@@ -68,6 +68,30 @@ export function eraseRegion(engine: CanvasEngine, rect: Rect): void {
   engine.requestRender();
 }
 
+export function snapshotToDataUrl(canvas: HTMLCanvasElement): string {
+  try {
+    return canvas.toDataURL("image/webp", 0.82);
+  } catch {
+    return canvas.toDataURL("image/png");
+  }
+}
+
+export async function pasteDataUrl(engine: CanvasEngine, dataUrl: string, x: number, y: number): Promise<void> {
+  if (!dataUrl) return;
+  const img = new Image();
+  img.src = dataUrl;
+  await img.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, img.width);
+  canvas.height = Math.max(1, img.height);
+  canvas.getContext("2d")!.drawImage(img, 0, 0);
+  pasteRegion(engine, canvas, x, y);
+}
+
+export type InkSyncOp =
+  | { kind: "erase"; rect: Rect }
+  | { kind: "move"; from: Rect; to: Rect; dataUrl: string };
+
 export function pasteRegion(
   engine: CanvasEngine,
   snapshot: HTMLCanvasElement,
@@ -211,6 +235,11 @@ export class SelectionController {
   private selection: { rect: Rect; snapshot: HTMLCanvasElement } | null = null;
   private moving: { id: number; start: Point; offset: Point } | null = null;
   private hasErasedOriginal = false;
+  private inkListener: ((op: InkSyncOp) => void) | null = null;
+
+  setInkListener(fn: ((op: InkSyncOp) => void) | null): void {
+    this.inkListener = fn;
+  }
 
   constructor(private engine: CanvasEngine) {
     engine.onInteractionFrame((ctx) => {
@@ -360,10 +389,12 @@ export class SelectionController {
     if (this.hasErasedOriginal) {
       const newX = sel.rect.x + m.offset.x;
       const newY = sel.rect.y + m.offset.y;
+      const dataUrl = snapshotToDataUrl(sel.snapshot);
       pasteRegion(this.engine, sel.snapshot, newX, newY);
 
       const newRect = { ...sel.rect, x: newX, y: newY };
       const oldRect = { x: sel.rect.x, y: sel.rect.y, w: sel.rect.w, h: sel.rect.h };
+      this.inkListener?.({ kind: "move", from: oldRect, to: newRect, dataUrl });
       this.selection = {
         rect: newRect,
         snapshot: captureRegion(this.engine, newRect),
@@ -386,9 +417,11 @@ export class SelectionController {
 
   deleteSelection(): void {
     if (!this.selection) return;
+    const rect = { ...this.selection.rect };
     if (!this.hasErasedOriginal) {
-      eraseRegion(this.engine, this.selection.rect);
+      eraseRegion(this.engine, rect);
     }
+    this.inkListener?.({ kind: "erase", rect });
     this.clearSelection();
   }
 

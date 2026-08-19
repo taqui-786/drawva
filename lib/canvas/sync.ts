@@ -1,7 +1,7 @@
 import type { ProjectSnapshot } from "./persistence";
 import type { ObjectItem } from "./objects";
 import type { WidgetItem } from "./widgets";
-import type { Point } from "./types";
+import type { Point, Rect } from "./types";
 
 export type SyncStatus = "idle" | "hosting" | "connecting" | "connected" | "error";
 
@@ -17,10 +17,14 @@ export interface RemoteCursor {
 
 export type SyncPacket =
   | { type: "SYNC_INIT_STATE"; snapshot: ProjectSnapshot }
+  | { type: "SYNC_SCENE"; widgets: WidgetItem[]; objects: ObjectItem[] }
+  | { type: "SYNC_TILES"; tiles: Record<string, string>; done: boolean }
   | { type: "SYNC_STROKE_SEGMENT"; a: Point; b: Point; erase: boolean; size: number; color: string }
+  | { type: "SYNC_INK_ERASE"; x: number; y: number; w: number; h: number }
+  | { type: "SYNC_INK_MOVE"; from: Rect; x: number; y: number; w: number; h: number; dataUrl: string }
   | { type: "SYNC_OBJECT_ADD"; object: ObjectItem }
   | { type: "SYNC_OBJECT_MOVE"; id: string; x: number; y: number }
-  | { type: "SYNC_OBJECT_RESIZE"; id: string; w: number; h: number }
+  | { type: "SYNC_OBJECT_RESIZE"; id: string; x: number; y: number; w: number; h: number }
   | { type: "SYNC_OBJECT_REMOVE"; id: string }
   | { type: "SYNC_OBJECT_MERGE"; id: string }
   | { type: "SYNC_WIDGET_ADD"; widget: WidgetItem }
@@ -32,9 +36,13 @@ export type SyncPacket =
 export interface SyncHandlers {
   onInitState?: (snapshot: ProjectSnapshot) => void;
   onRemoteStroke?: (segment: { a: Point; b: Point; erase: boolean; size: number; color: string }) => void;
+  onRemoteInkErase?: (rect: Rect) => void;
+  onRemoteInkMove?: (from: Rect, x: number, y: number, dataUrl: string) => void;
+  onRemoteScene?: (widgets: WidgetItem[], objects: ObjectItem[]) => void;
+  onRemoteTiles?: (tiles: Record<string, string>, done: boolean) => void;
   onRemoteObjectAdd?: (object: ObjectItem) => void;
   onRemoteObjectMove?: (id: string, x: number, y: number) => void;
-  onRemoteObjectResize?: (id: string, w: number, h: number) => void;
+  onRemoteObjectResize?: (id: string, x: number, y: number, w: number, h: number) => void;
   onRemoteObjectRemove?: (id: string) => void;
   onRemoteObjectMerge?: (id: string) => void;
   onRemoteWidgetAdd?: (widget: WidgetItem) => void;
@@ -56,13 +64,72 @@ export interface PeerConnection {
 
 export interface PeerInstance {
   on: (event: string, callback: (arg?: unknown) => void) => void;
-  connect: (peerId: string, options?: { reliable?: boolean }) => PeerConnection;
+  connect: (peerId: string, options?: { reliable?: boolean; serialization?: string }) => PeerConnection;
   destroy: () => void;
 }
 
 const PEER_PREFIX = "drawva-room-";
 const COLORS = ["#ef4444", "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
 const SESSION_KEY = "drawva.p2pSession";
+const TILE_CHUNK = 4;
+const CURSOR_MIN_MS = 50;
+const CONNECT_OPTS = { reliable: true, serialization: "json" } as const;
+
+function cloneJson<T>(value: T): T | null {
+  try {
+    return JSON.parse(JSON.stringify(value)) as T;
+  } catch {
+    return null;
+  }
+}
+
+export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
+  if (packet.type === "SYNC_OBJECT_ADD") {
+    const { image, ...object } = packet.object;
+    void image;
+    return cloneJson({ ...packet, object: object as ObjectItem });
+  }
+  if (packet.type === "SYNC_WIDGET_ADD") {
+    const { cachedImage, ...widget } = packet.widget;
+    void cachedImage;
+    return cloneJson({ ...packet, widget: widget as WidgetItem });
+  }
+  if (packet.type === "SYNC_INIT_STATE") {
+    const snap = packet.snapshot;
+    return cloneJson({
+      ...packet,
+      snapshot: {
+        ...snap,
+        widgets: (snap.widgets || []).map((w) => {
+          const { cachedImage, ...rest } = w;
+          void cachedImage;
+          return rest as WidgetItem;
+        }),
+        objects: (snap.objects || []).map((o) => {
+          const { image, ...rest } = o;
+          void image;
+          return rest as ObjectItem;
+        }),
+      },
+    });
+  }
+  if (packet.type === "SYNC_SCENE") {
+    return cloneJson({
+      ...packet,
+      widgets: packet.widgets.map((w) => {
+        const { cachedImage, ...rest } = w;
+        void cachedImage;
+        return rest as WidgetItem;
+      }),
+      objects: packet.objects.map((o) => {
+        const { image, ...rest } = o;
+        void image;
+        return rest as ObjectItem;
+      }),
+    });
+  }
+  return cloneJson(packet);
+}
 
 export interface StoredP2PSession {
   role: "host" | "joiner";
@@ -103,14 +170,16 @@ function generateShortCode(): string {
 export class SyncManager {
   private peer: PeerInstance | null = null;
   private connections: Map<string, PeerConnection> = new Map();
+  private pending = new Map<string, SyncPacket[]>();
   private status: SyncStatus = "idle";
   private roomCode: string | null = null;
-  private isApplyingRemote = false;
+  private remoteDepth = 0;
   private handlers: SyncHandlers = {};
   private remoteCursors: Map<string, RemoteCursor> = new Map();
   private localName = `Peer-${Math.floor(100 + Math.random() * 900)}`;
   private localColor = COLORS[Math.floor(Math.random() * COLORS.length)];
   private errorMessage: string | undefined = undefined;
+  private lastCursorAt = 0;
 
   constructor() {}
 
@@ -141,7 +210,15 @@ export class SyncManager {
   }
 
   get isRemote(): boolean {
-    return this.isApplyingRemote;
+    return this.remoteDepth > 0;
+  }
+
+  beginRemote(): void {
+    this.remoteDepth++;
+  }
+
+  endRemote(): void {
+    this.remoteDepth = Math.max(0, this.remoteDepth - 1);
   }
 
   async restoreSession(): Promise<boolean> {
@@ -235,7 +312,7 @@ export class SyncManager {
 
     this.peer.on("open", () => {
       const fullPeerId = `${PEER_PREFIX}${code}`;
-      const conn = this.peer?.connect(fullPeerId, { reliable: true });
+      const conn = this.peer?.connect(fullPeerId, CONNECT_OPTS);
       if (conn) {
         this.setupConnection(conn, false);
       }
@@ -251,19 +328,23 @@ export class SyncManager {
   }
 
   private setupConnection(conn: PeerConnection, isHost: boolean): void {
-    conn.on("open", () => {
+    let opened = false;
+    const onOpen = () => {
+      if (opened) return;
+      opened = true;
       this.connections.set(conn.peer, conn);
       this.status = "connected";
       this.notifyStatus();
+      this.flushPending(conn);
       this.handlers.onPeerConnect?.(conn.peer, isHost);
 
       if (isHost) {
         const snapshot = this.handlers.onRequestInitialState?.();
-        if (snapshot) {
-          conn.send({ type: "SYNC_INIT_STATE", snapshot });
-        }
+        if (snapshot) this.sendSnapshot(conn, snapshot);
       }
-    });
+    };
+    conn.on("open", onOpen);
+    if (conn.open) onOpen();
 
     conn.on("data", (data: unknown) => {
       this.handlePacket(conn.peer, data as SyncPacket);
@@ -271,6 +352,7 @@ export class SyncManager {
 
     conn.on("close", () => {
       this.connections.delete(conn.peer);
+      this.pending.delete(conn.peer);
       this.remoteCursors.delete(conn.peer);
       if (this.connections.size === 0 && !isHost) {
         this.status = "idle";
@@ -288,33 +370,76 @@ export class SyncManager {
     });
   }
 
-  private cleanPacket(packet: SyncPacket): SyncPacket {
-    if (packet.type === "SYNC_OBJECT_ADD" && packet.object.image) {
-      const { image, ...rest } = packet.object;
-      void image;
-      return { ...packet, object: rest as ObjectItem };
+  private sendSnapshot(conn: PeerConnection, snapshot: ProjectSnapshot): void {
+    this.sendTo(conn, {
+      type: "SYNC_SCENE",
+      widgets: snapshot.widgets || [],
+      objects: snapshot.objects || [],
+    });
+    const entries = Object.entries(snapshot.tiles || {});
+    if (entries.length === 0) {
+      this.sendTo(conn, { type: "SYNC_TILES", tiles: {}, done: true });
+      return;
     }
-    return packet;
+    for (let i = 0; i < entries.length; i += TILE_CHUNK) {
+      const chunk = Object.fromEntries(entries.slice(i, i + TILE_CHUNK));
+      this.sendTo(conn, { type: "SYNC_TILES", tiles: chunk, done: i + TILE_CHUNK >= entries.length });
+    }
+  }
+
+  private sendTo(conn: PeerConnection, packet: SyncPacket): void {
+    const safe = sanitizePacket(packet);
+    if (!safe) {
+      console.warn("[SyncManager] Dropped unserializable packet", packet.type);
+      return;
+    }
+    if (!conn.open) {
+      const q = this.pending.get(conn.peer) ?? [];
+      q.push(safe);
+      this.pending.set(conn.peer, q);
+      return;
+    }
+    try {
+      conn.send(safe);
+    } catch (err) {
+      console.warn("[SyncManager] Send failed:", packet.type, err);
+    }
+  }
+
+  private flushPending(conn: PeerConnection): void {
+    const q = this.pending.get(conn.peer);
+    if (!q?.length) return;
+    this.pending.delete(conn.peer);
+    for (const packet of q) this.sendTo(conn, packet);
   }
 
   private handlePacket(senderId: string, packet: SyncPacket): void {
-    const safePacket = this.cleanPacket(packet);
+    const safePacket = sanitizePacket(packet);
+    if (!safePacket) return;
     for (const [id, conn] of this.connections.entries()) {
-      if (id !== senderId && conn.open) {
-        try {
-          conn.send(safePacket);
-        } catch {}
-      }
+      if (id !== senderId) this.sendTo(conn, safePacket);
     }
 
-    this.isApplyingRemote = true;
+    this.beginRemote();
     try {
       switch (safePacket.type) {
         case "SYNC_INIT_STATE":
           this.handlers.onInitState?.(safePacket.snapshot);
           break;
+        case "SYNC_SCENE":
+          this.handlers.onRemoteScene?.(safePacket.widgets, safePacket.objects);
+          break;
+        case "SYNC_TILES":
+          this.handlers.onRemoteTiles?.(safePacket.tiles, safePacket.done);
+          break;
         case "SYNC_STROKE_SEGMENT":
           this.handlers.onRemoteStroke?.(safePacket);
+          break;
+        case "SYNC_INK_ERASE":
+          this.handlers.onRemoteInkErase?.({ x: safePacket.x, y: safePacket.y, w: safePacket.w, h: safePacket.h });
+          break;
+        case "SYNC_INK_MOVE":
+          this.handlers.onRemoteInkMove?.(safePacket.from, safePacket.x, safePacket.y, safePacket.dataUrl);
           break;
         case "SYNC_OBJECT_ADD":
           this.handlers.onRemoteObjectAdd?.(safePacket.object);
@@ -323,7 +448,7 @@ export class SyncManager {
           this.handlers.onRemoteObjectMove?.(safePacket.id, safePacket.x, safePacket.y);
           break;
         case "SYNC_OBJECT_RESIZE":
-          this.handlers.onRemoteObjectResize?.(safePacket.id, safePacket.w, safePacket.h);
+          this.handlers.onRemoteObjectResize?.(safePacket.id, safePacket.x, safePacket.y, safePacket.w, safePacket.h);
           break;
         case "SYNC_OBJECT_REMOVE":
           this.handlers.onRemoteObjectRemove?.(safePacket.id);
@@ -366,24 +491,25 @@ export class SyncManager {
           break;
       }
     } finally {
-      this.isApplyingRemote = false;
+      this.endRemote();
     }
   }
 
   broadcast(packet: SyncPacket): void {
-    if (this.isApplyingRemote || this.connections.size === 0) return;
-    const safePacket = this.cleanPacket(packet);
-    for (const conn of this.connections.values()) {
-      if (conn.open) {
-        try {
-          conn.send(safePacket);
-        } catch {}
-      }
+    if (this.isRemote || this.connections.size === 0) return;
+    const safePacket = sanitizePacket(packet);
+    if (!safePacket) {
+      console.warn("[SyncManager] Dropped unserializable broadcast", packet.type);
+      return;
     }
+    for (const conn of this.connections.values()) this.sendTo(conn, safePacket);
   }
 
   sendCursor(x: number, y: number, mode: string): void {
     if (this.connections.size === 0) return;
+    const now = performance.now();
+    if (now - this.lastCursorAt < CURSOR_MIN_MS) return;
+    this.lastCursorAt = now;
     this.broadcast({
       type: "SYNC_CURSOR",
       x,
@@ -404,7 +530,9 @@ export class SyncManager {
       } catch {}
     }
     this.connections.clear();
+    this.pending.clear();
     this.remoteCursors.clear();
+    this.remoteDepth = 0;
     if (this.peer) {
       try {
         this.peer.destroy();

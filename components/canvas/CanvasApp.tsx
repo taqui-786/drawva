@@ -31,7 +31,7 @@ import { buildAtlas } from "@/lib/canvas/atlas";
 import { unionRect } from "@/lib/canvas/engine";
 import { buildScene } from "@/lib/canvas/scene";
 import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
-import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject } from "@/lib/canvas/persistence";
+import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles } from "@/lib/canvas/persistence";
 import { BoardHistory } from "@/lib/canvas/history";
 import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
@@ -45,6 +45,7 @@ import {
 } from "@/lib/canvas/sync";
 import { ConnectDialog } from "./ConnectDialog";
 import { strokeSegment } from "@/lib/canvas/strokes";
+import { eraseRegion, pasteDataUrl } from "@/lib/canvas/selection";
 
 function parseCleanErrorMessage(raw: string): string {
   if (!raw) return "AI request failed";
@@ -167,7 +168,7 @@ export function CanvasApp() {
     return plotCommand(cmd);
   }
 
-  async function mergeObjectToInk(id: string): Promise<void> {
+  async function mergeObjectToInk(id: string, opts?: { silent?: boolean }): Promise<void> {
     const om = objects.current;
     const eng = engine;
     const item = om?.get(id);
@@ -182,7 +183,7 @@ export function CanvasApp() {
       bakePlot(eng, { tool: "plot_function", x: item.x, y: item.y, w: item.w, h: item.h, expression: item.source, color: item.color });
     }
     om.remove(id);
-    syncManager.current?.broadcast({ type: "SYNC_OBJECT_MERGE", id });
+    if (!opts?.silent) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MERGE", id });
     afterBoardChangeRef.current();
   }
 
@@ -768,12 +769,12 @@ export function CanvasApp() {
           om.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
           g.last = { x: e.clientX, y: e.clientY };
           const resized = om.get(id);
-          if (resized) broadcastMove("object", { type: "SYNC_OBJECT_RESIZE", id, w: resized.w, h: resized.h });
+          if (resized) broadcastMove("object", { type: "SYNC_OBJECT_RESIZE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h });
         },
         onResizeEnd: (id) => {
           objectResize.current = null;
           const item = om.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_RESIZE", id, w: item.w, h: item.h });
+          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_RESIZE", id, x: item.x, y: item.y, w: item.w, h: item.h });
           afterBoardChangeRef.current();
         },
         onRemove: (id) => {
@@ -825,7 +826,7 @@ export function CanvasApp() {
           history.current?.recordWidgets();
           wm.move(node.id, dx, dy);
           const item = wm.get(node.id);
-          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h });
+          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
         } else {
           history.current?.recordObjects();
           om.move(node.id, dx, dy);
@@ -836,7 +837,7 @@ export function CanvasApp() {
       endTranslate: (node) => {
         if (node.kind === "widget") {
           const item = wm.get(node.id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h });
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
         } else {
           const item = om.get(node.id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id: node.id, x: item.x, y: item.y });
@@ -1040,7 +1041,40 @@ export function CanvasApp() {
       },
       onInitState: async (snapshot) => {
         if (!engine) return;
-        await restoreSnapshot(engine, widgets.current, objects.current, snapshot);
+        sm.beginRemote();
+        try {
+          await restoreSnapshot(engine, widgets.current, objects.current, snapshot);
+        } finally {
+          sm.endRemote();
+        }
+      },
+      onRemoteScene: (nextWidgets, nextObjects) => {
+        if (!engine) return;
+        sm.beginRemote();
+        engine.tiles.clear();
+        widgets.current?.clear();
+        objects.current?.clear();
+        for (const w of nextWidgets) widgets.current?.add(w);
+        void (async () => {
+          try {
+            for (const obj of nextObjects) {
+              const restored = await renderObject(engine, obj);
+              if (restored) objects.current?.add(restored);
+            }
+            engine.requestRender();
+          } finally {
+            sm.endRemote();
+          }
+        })();
+      },
+      onRemoteTiles: (tiles, done) => {
+        if (!engine) return;
+        sm.beginRemote();
+        void applyTiles(engine, tiles)
+          .then(() => {
+            if (done) engine.requestRender();
+          })
+          .finally(() => sm.endRemote());
       },
       onRemoteStroke: (seg) => {
         if (!engine) return;
@@ -1050,10 +1084,24 @@ export function CanvasApp() {
           color: seg.color,
         });
       },
-      onRemoteObjectAdd: async (obj) => {
+      onRemoteInkErase: (rect) => {
+        if (!engine) return;
+        eraseRegion(engine, rect);
+      },
+      onRemoteInkMove: (from, x, y, dataUrl) => {
+        if (!engine) return;
+        sm.beginRemote();
+        eraseRegion(engine, from);
+        void pasteDataUrl(engine, dataUrl, x, y).finally(() => sm.endRemote());
+      },
+      onRemoteObjectAdd: (obj) => {
         if (!engine || !objects.current) return;
-        const restored = await renderObject(engine, obj);
-        if (restored) objects.current.add(restored);
+        sm.beginRemote();
+        void renderObject(engine, obj)
+          .then((restored) => {
+            if (restored) objects.current?.add(restored);
+          })
+          .finally(() => sm.endRemote());
       },
       onRemoteObjectMove: (id, x, y) => {
         const o = objects.current?.get(id);
@@ -1063,24 +1111,37 @@ export function CanvasApp() {
           objects.current.sync();
         }
       },
-      onRemoteObjectResize: (id, w, h) => {
-        objects.current?.resize(id, w, h);
+      onRemoteObjectResize: (id, x, y, w, h) => {
+        const o = objects.current?.get(id);
+        if (o && objects.current) {
+          o.x = x;
+          o.y = y;
+          objects.current.resize(id, w, h);
+        }
       },
       onRemoteObjectRemove: (id) => {
         objects.current?.remove(id);
       },
       onRemoteObjectMerge: (id) => {
-        void mergeObjectToInk(id);
+        sm.beginRemote();
+        void mergeObjectToInk(id, { silent: true }).finally(() => sm.endRemote());
       },
       onRemoteWidgetAdd: (w) => {
         widgets.current?.add(w);
       },
       onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
-        if (widgets.current?.has(id)) {
-          const currentItem = widgets.current.get(id)!;
-          widgets.current.move(id, x - currentItem.x, y - currentItem.y);
-          widgets.current.resize(id, w, h, contentW, contentH, userResized, resizeMode);
-        }
+        const currentItem = widgets.current?.get(id);
+        if (!currentItem || !widgets.current) return;
+        widgets.current.move(id, x - currentItem.x, y - currentItem.y);
+        widgets.current.resize(
+          id,
+          w,
+          h,
+          contentW ?? currentItem.contentW,
+          contentH ?? currentItem.contentH,
+          userResized ?? currentItem.userResized,
+          resizeMode ?? currentItem.resizeMode
+        );
       },
       onRemoteWidgetRemove: (id) => {
         widgets.current?.remove(id);
@@ -1092,6 +1153,23 @@ export function CanvasApp() {
         widgets.current?.clear();
         objects.current?.clear();
       },
+    });
+
+    tm.selection.setInkListener((op) => {
+      if (sm.isRemote) return;
+      if (op.kind === "erase") {
+        sm.broadcast({ type: "SYNC_INK_ERASE", x: op.rect.x, y: op.rect.y, w: op.rect.w, h: op.rect.h });
+      } else {
+        sm.broadcast({
+          type: "SYNC_INK_MOVE",
+          from: op.from,
+          x: op.to.x,
+          y: op.to.y,
+          w: op.to.w,
+          h: op.to.h,
+          dataUrl: op.dataUrl,
+        });
+      }
     });
 
     void sm.restoreSession().then((restored) => {
@@ -1141,6 +1219,7 @@ export function CanvasApp() {
       unsub();
       unsubRemoteCursors();
       engine.setStrokeSegmentHook(null);
+      tm.selection.setInkListener(null);
       sm.disconnect();
       syncManager.current = null;
       engine.setTileWriteHook(null);
@@ -1352,7 +1431,22 @@ export function CanvasApp() {
         redoRef.current();
         e.preventDefault();
       } else if (k === "delete" || k === "backspace") {
-        tools.current?.deleteSelection();
+        const tm = tools.current;
+        if (tm?.selection.hasSelection) {
+          tm.deleteSelection();
+        } else {
+          const wid = widgets.current?.getSelectedId();
+          const oid = objects.current?.getSelectedId();
+          if (wid) {
+            history.current?.recordWidgets();
+            widgets.current?.remove(wid);
+            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: wid });
+          } else if (oid) {
+            history.current?.recordObjects();
+            objects.current?.remove(oid);
+            syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id: oid });
+          }
+        }
         afterBoardChangeRef.current();
         e.preventDefault();
       } else if (k === "escape") {

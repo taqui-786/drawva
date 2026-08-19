@@ -59,6 +59,23 @@ function parseKey(k: string): [number, number] {
   return [a, b];
 }
 
+export async function applyTiles(engine: CanvasEngine, tiles: Record<string, string>): Promise<void> {
+  for (const [k, dataUrl] of Object.entries(tiles || {})) {
+    if (!dataUrl) continue;
+    const [tx, ty] = parseKey(k);
+    const c = engine.tiles.tile(tx, ty);
+    if (!c) continue;
+    const img = new Image();
+    img.src = dataUrl;
+    await img.decode();
+    const ctx = c.getContext("2d");
+    if (!ctx) continue;
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0);
+  }
+  engine.requestRender();
+}
+
 export async function restoreSnapshot(
   engine: CanvasEngine,
   widgets: WidgetManager | null,
