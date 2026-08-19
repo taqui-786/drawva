@@ -5,6 +5,7 @@ import { MAX_RETRIES } from "./model";
 import {
   AI_TIMEOUT_MS,
   CODE_SYSTEM_PROMPT_EXTRA,
+  ACCURATE_GRAPHICS_RULES,
   FLOWCHART_RULES,
   HTML_WIDGET_RULES,
   PLUGIN_ROUTING_PROMPT,
@@ -99,6 +100,7 @@ function systemPromptText(uiTheme?: string): string {
     WRITE_TEXT_RULES,
     FLOWCHART_RULES,
     HTML_WIDGET_RULES,
+    ACCURATE_GRAPHICS_RULES,
     WIDGET_RENDERING_POLICY,
     WIDGET_VISUAL_RULES,
   ].join("\n\n");
@@ -109,12 +111,12 @@ function widgetGeometryForViewport(visibleRect?: { w: number; h: number }) {
   const viewportW = bucket(visibleRect?.w ?? 2000);
   const viewportH = bucket(visibleRect?.h ?? 1200);
   return {
-    basis: "half-of-current-visible-viewport",
-    viewportBucket: { w: viewportW, h: viewportH, rounding: "ceil-to-1000-before-halving" },
-    min: { w: 240, h: 160 },
-    max: { w: Math.max(240, Math.round(viewportW / 2)), h: Math.max(160, Math.round(viewportH / 2)) },
+    basis: "most-of-current-visible-viewport",
+    viewportBucket: { w: viewportW, h: viewportH, rounding: "ceil-to-1000-then-ninety-percent" },
+    min: { w: 280, h: 200 },
+    max: { w: Math.max(720, Math.round(viewportW * 0.9)), h: Math.max(480, Math.round(viewportH * 0.9)) },
     sizingPolicy:
-      "The bounds are not targets. Choose dimensions appropriate to content volume, aspect ratio, layout, and readable typography; neither maximize nor minimize by default.",
+      "Bounds are ceilings, not targets. Size to the real assembled content so nothing clips. One gadget ~400×320; two or three related items in a row ~960–1400×420–560. Never undersize a multi-item applet. Never copy the handwriting box.",
   };
 }
 

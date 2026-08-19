@@ -1524,8 +1524,7 @@ export function CanvasApp() {
           if (
             inkBoxRef.current &&
             now - lastStrokeTimeRef.current < 20000 &&
-            Math.abs(singleStrokeBox.x - inkBoxRef.current.x) < 3000 &&
-            Math.abs(singleStrokeBox.y - inkBoxRef.current.y) < 3000
+            distanceBetweenRects(inkBoxRef.current, singleStrokeBox) <= 180
           ) {
             inkBoxRef.current = unionRect(inkBoxRef.current, singleStrokeBox);
           } else {

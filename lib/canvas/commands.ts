@@ -177,73 +177,92 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
-const PLACE_GAP = 56;
+export const PLACE_GAP = 40;
+const SLIDE_GAP = 24;
+const TELEPORT_PX = 280;
 
-function overlaps(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number },
-  pad = 28
-): boolean {
+type Box = { x: number; y: number; w: number; h: number };
+type Side = "below" | "right" | "left" | "top";
+
+function overlaps(a: Box, b: Box, pad = 24): boolean {
   return a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad;
 }
 
-function inView(
-  box: { x: number; y: number; w: number; h: number },
-  view?: { x: number; y: number; w: number; h: number },
-  loose = false
-): boolean {
-  if (!view) return true;
-  if (loose) {
-    const ix = Math.max(0, Math.min(box.x + box.w, view.x + view.w) - Math.max(box.x, view.x));
-    const iy = Math.max(0, Math.min(box.y + box.h, view.y + view.h) - Math.max(box.y, view.y));
-    return ix * iy >= box.w * box.h * 0.35;
-  }
-  return box.x >= view.x && box.y >= view.y && box.x + box.w <= view.x + view.w && box.y + box.h <= view.y + view.h;
+function viewOverlapRatio(box: Box, view?: Box): number {
+  if (!view) return 1;
+  const ix = Math.max(0, Math.min(box.x + box.w, view.x + view.w) - Math.max(box.x, view.x));
+  const iy = Math.max(0, Math.min(box.y + box.h, view.y + view.h) - Math.max(box.y, view.y));
+  return (ix * iy) / Math.max(1, box.w * box.h);
 }
 
-type Side = "below" | "right" | "left" | "top";
-
-function slotFor(
-  anchor: { x: number; y: number; w: number; h: number },
-  w: number,
-  h: number,
-  dir: Side,
-  gap = PLACE_GAP
-): { x: number; y: number } {
-  const leftX = clampNum(Math.round(anchor.x), 0, SIZE - w);
+function slotFor(anchor: Box, w: number, h: number, dir: Side, gap = PLACE_GAP): { x: number; y: number } {
   if (dir === "right") return { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) };
   if (dir === "left") return { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) };
-  if (dir === "top") return { x: leftX, y: Math.round(anchor.y - h - gap) };
-  return { x: leftX, y: Math.round(anchor.y + anchor.h + gap) };
+  if (dir === "top") return { x: Math.round(anchor.x), y: Math.round(anchor.y - h - gap) };
+  return { x: Math.round(anchor.x), y: Math.round(anchor.y + anchor.h + gap) };
+}
+
+function sideOrder(preferred: string): Side[] {
+  if (preferred === "right") return ["right", "below", "left", "top"];
+  if (preferred === "left") return ["left", "below", "right", "top"];
+  if (preferred === "top") return ["top", "below", "right", "left"];
+  return ["below", "right", "left", "top"];
+}
+
+/** Slide along the free axis to clear blockers instead of jumping to a distant side. */
+function slideClear(box: Box, dir: Side, blockers: Box[]): Box | null {
+  const next: Box = { ...box };
+  const alongX = dir === "below" || dir === "top";
+  for (let step = 0; step < 10; step++) {
+    const hit = blockers.find((b) => overlaps(next, b));
+    if (!hit) return next;
+    if (alongX) {
+      const right = hit.x + hit.w + SLIDE_GAP;
+      const left = hit.x - next.w - SLIDE_GAP;
+      next.x = Math.round(Math.abs(right - box.x) <= Math.abs(left - box.x) ? right : left);
+    } else {
+      const down = hit.y + hit.h + SLIDE_GAP;
+      const up = hit.y - next.h - SLIDE_GAP;
+      next.y = Math.round(Math.abs(down - box.y) <= Math.abs(up - box.y) ? down : up);
+    }
+    next.x = clampNum(next.x, 0, SIZE - next.w);
+    next.y = clampNum(next.y, 0, SIZE - next.h);
+    if (overlaps(next, hit, 0)) return null;
+  }
+  return blockers.some((b) => overlaps(next, b)) ? null : next;
+}
+
+function staysOnSide(box: Box, intended: { x: number; y: number }, dir: Side): boolean {
+  // Clamping to the canvas must not drag the widget off the requested side.
+  // Sliding along the free axis (x when below/top, y when left/right) is allowed.
+  if (dir === "below" || dir === "top") return Math.abs(box.y - intended.y) <= TELEPORT_PX;
+  return Math.abs(box.x - intended.x) <= TELEPORT_PX;
 }
 
 function roomOnSide(
-  anchor: { x: number; y: number; w: number; h: number },
+  anchor: Box,
   w: number,
   h: number,
   dir: Side,
-  view?: { x: number; y: number; w: number; h: number },
-  items?: Array<{ x: number; y: number; w: number; h: number }>
+  view?: Box,
+  items?: Box[]
 ): number {
   const p = slotFor(anchor, w, h, dir);
   const box = { x: clampNum(p.x, 0, SIZE - w), y: clampNum(p.y, 0, SIZE - h), w, h };
-  if (!inView(box, view, dir === "below")) return -1;
-  if ((items || []).some((it) => overlaps(box, it))) return -1;
-  if (!view) return w * h;
-  if (dir === "right") return view.x + view.w - (anchor.x + anchor.w);
-  if (dir === "left") return anchor.x - view.x;
-  if (dir === "top") return anchor.y - view.y;
-  return view.y + view.h - (anchor.y + anchor.h);
+  if (!staysOnSide(box, p, dir)) return -1;
+  const cleared = slideClear(box, dir, items || []);
+  if (!cleared || !staysOnSide(cleared, p, dir)) return -1;
+  return viewOverlapRatio(cleared, view);
 }
 
-/** Prefer the LLM side; if none, pick the roomiest in-view empty side. */
+/** Prefer the LLM side; if none, pick the roomiest nearby empty side. */
 function pickPreferredSide(
   requested: string,
-  anchor: { x: number; y: number; w: number; h: number },
+  anchor: Box,
   w: number,
   h: number,
-  view?: { x: number; y: number; w: number; h: number },
-  items?: Array<{ x: number; y: number; w: number; h: number }>,
+  view?: Box,
+  items?: Box[],
   fallback: Side = "below"
 ): Side {
   if (requested === "right" || requested === "left" || requested === "top" || requested === "below") {
@@ -251,7 +270,7 @@ function pickPreferredSide(
   }
   let best: Side = fallback;
   let bestScore = -1;
-  for (const dir of ["right", "below", "left", "top"] as Side[]) {
+  for (const dir of ["below", "right", "left", "top"] as Side[]) {
     const score = roomOnSide(anchor, w, h, dir, view, items);
     if (score > bestScore) {
       bestScore = score;
@@ -261,46 +280,46 @@ function pickPreferredSide(
   return bestScore >= 0 ? best : fallback;
 }
 
-/** below → right → left → top. Last resort is below even if it overflows the view. */
-function placeAroundAnchor(
-  anchor: { x: number; y: number; w: number; h: number },
+/**
+ * Sit the widget against the user's ink. Overflowing the viewport is allowed
+ * (the user can pan). Jumping across the canvas or covering the anchor is not.
+ */
+export function placeAroundAnchor(
+  anchor: Box,
   w: number,
   h: number,
-  view?: { x: number; y: number; w: number; h: number },
-  items?: Array<{ x: number; y: number; w: number; h: number }>,
+  view?: Box,
+  items?: Box[],
   preferred = "below"
 ): { x: number; y: number } {
-  const slots: Record<string, { x: number; y: number }> = {
-    below: slotFor(anchor, w, h, "below"),
-    right: slotFor(anchor, w, h, "right"),
-    left: slotFor(anchor, w, h, "left"),
-    top: slotFor(anchor, w, h, "top"),
-  };
-  const order: Side[] =
-    preferred === "right"
-      ? ["right", "below", "left", "top"]
-      : preferred === "left"
-        ? ["left", "below", "right", "top"]
-        : preferred === "top"
-          ? ["top", "below", "right", "left"]
-          : ["below", "right", "left", "top"];
+  const order = sideOrder(preferred);
   const blockers = (items || []).filter(
     (it) => Math.abs(it.x - anchor.x) > 2 || Math.abs(it.y - anchor.y) > 2
   );
+  let best: Box | null = null;
+  let bestScore = -1;
   for (const dir of order) {
-    const p = slots[dir];
-    const box = {
-      x: clampNum(p.x, 0, SIZE - w),
-      y: clampNum(p.y, 0, SIZE - h),
+    const intended = slotFor(anchor, w, h, dir);
+    const raw: Box = {
+      x: clampNum(intended.x, 0, SIZE - w),
+      y: clampNum(intended.y, 0, SIZE - h),
       w,
       h,
     };
-    if (!inView(box, view, dir === "below" || dir === preferred)) continue;
-    if (blockers.some((it) => overlaps(box, it))) continue;
-    return { x: box.x, y: box.y };
+    if (!staysOnSide(raw, intended, dir)) continue;
+    const cleared = slideClear(raw, dir, blockers);
+    if (!cleared || !staysOnSide(cleared, intended, dir)) continue;
+    const visible = viewOverlapRatio(cleared, view);
+    const score = visible + (dir === order[0] ? 0.2 : 0) - (dir === "top" ? 0.05 : 0);
+    if (dir === order[0] && visible >= 0.15) return { x: cleared.x, y: cleared.y };
+    if (score > bestScore) {
+      bestScore = score;
+      best = cleared;
+    }
   }
-  const below = slots.below;
-  return { x: clampNum(below.x, 0, SIZE - w), y: clampNum(below.y, 0, SIZE - h) };
+  if (best) return { x: best.x, y: best.y };
+  const fallback = slotFor(anchor, w, h, order[0]);
+  return { x: clampNum(fallback.x, 0, SIZE - w), y: clampNum(fallback.y, 0, SIZE - h) };
 }
 
 function occupancy(
@@ -308,7 +327,7 @@ function occupancy(
   sceneItems?: Array<{ x: number; y: number; w: number; h: number }>
 ): Array<{ x: number; y: number; w: number; h: number }> {
   const items = [...(sceneItems || [])];
-  if (changedBox && changedBox.w > 8 && changedBox.h > 8) items.push(changedBox);
+  if (changedBox && changedBox.w > 4 && changedBox.h > 4) items.push(changedBox);
   return items;
 }
 
@@ -321,21 +340,69 @@ function inferTextPlacement(placement: string, text: string): string {
   return "";
 }
 
+function placeContent(
+  placement: string,
+  sample: string,
+  w: number,
+  h: number,
+  ctx: CommandValidationContext
+): { x: number; y: number } {
+  const blockers = occupancy(ctx.changedBox, ctx.sceneItems);
+  const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
+  if (anchor) {
+    const preferred = pickPreferredSide(
+      inferTextPlacement(placement, sample),
+      anchor,
+      w,
+      h,
+      ctx.visibleRect,
+      blockers,
+      "below"
+    );
+    return placeAroundAnchor(anchor, w, h, ctx.visibleRect, blockers, preferred);
+  }
+  if (ctx.visibleRect) return placeInVisible(ctx.visibleRect, w, h, blockers);
+  return { x: 1000, y: 1000 };
+}
+
 const MIN_WIDGET_WIDTH = 240;
 const MIN_WIDGET_HEIGHT = 160;
-const DEFAULT_WIDGET_WIDTH = 540;
-const DEFAULT_WIDGET_HEIGHT = 360;
+const DEFAULT_WIDGET_WIDTH = 720;
+const DEFAULT_WIDGET_HEIGHT = 480;
 const MAX_WIDGET_WIDTH = 2800;
 const MAX_WIDGET_HEIGHT = 4500;
 
-function fitWidgetGeometry(
+function placementAnchor(
+  changedBox: Box | undefined,
+  visibleRect?: Box
+): Box | null {
+  if (!changedBox || changedBox.w < 4 || changedBox.h < 4) return null;
+  const vw = Math.max(visibleRect?.w ?? 2000, 1);
+  const vh = Math.max(visibleRect?.h ?? 1200, 1);
+  // Full-viewport dumps are not a handwriting box — don't sit the widget
+  // thousands of pixels below the whole capture.
+  if (changedBox.w >= vw * 0.8 && changedBox.h >= vh * 0.8) return null;
+  return changedBox;
+}
+
+function placeInVisible(view: Box, w: number, h: number, blockers: Box[]): { x: number; y: number } {
+  const hint: Box = {
+    x: Math.round(view.x + 48),
+    y: Math.round(view.y + Math.min(220, view.h * 0.22)),
+    w: Math.max(80, Math.min(w, Math.round(view.w * 0.35))),
+    h: 36,
+  };
+  return placeAroundAnchor(hint, w, h, view, blockers, "below");
+}
+
+export function fitWidgetGeometry(
   cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown; placement?: unknown },
-  visibleRect?: { x: number; y: number; w: number; h: number },
-  changedBox?: { x: number; y: number; w: number; h: number },
+  visibleRect?: Box,
+  changedBox?: Box,
   reposition = true,
-  widgetEditBox?: { x: number; y: number; w: number; h: number },
+  widgetEditBox?: Box,
   sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>
-): { x: number; y: number; w: number; h: number } | null {
+): Box | null {
   const placement = String(cmd.placement || "").toLowerCase();
 
   // Refinement mode: snap to the original widget's box — ignore whatever the AI returned.
@@ -372,6 +439,8 @@ function fitWidgetGeometry(
 
   const viewportW = Math.max(visibleRect?.w ?? 2000, 1);
   const viewportH = Math.max(visibleRect?.h ?? 1200, 1);
+  const maxW = Math.min(MAX_WIDGET_WIDTH, Math.max(1800, Math.round(viewportW * 0.95)));
+  const maxH = Math.min(MAX_WIDGET_HEIGHT, Math.max(1400, Math.round(viewportH * 0.95)));
 
   let rawW = Number(cmd.w);
   let rawH = Number(cmd.h);
@@ -385,60 +454,43 @@ function fitWidgetGeometry(
     rawH = Math.ceil(rawH * scale);
   }
 
-  // Anchor even on a single text line (h≈22). Ignore full-viewport dumps.
   const sketchW = changedBox?.w ?? 0;
   const sketchH = changedBox?.h ?? 0;
-  const hasAnchor = sketchW > 8 && sketchH > 8 && sketchW < viewportW * 0.85 && sketchH < viewportH * 0.85;
+  const anchor = placementAnchor(changedBox, visibleRect);
   const matchSketch = placement === "match_sketch" || placement === "in_place";
-  if (!matchSketch) {
-    const copiesInk = hasAnchor && Math.abs(rawW - sketchW) < 48 && Math.abs(rawH - sketchH) < 48;
-    const huge = rawW > Math.max(1400, viewportW * 0.75) || rawH > Math.max(1000, viewportH * 0.75);
-    if (copiesInk || huge) {
-      rawW = DEFAULT_WIDGET_WIDTH;
-      rawH = DEFAULT_WIDGET_HEIGHT;
-    }
+  if (!matchSketch && anchor && Math.abs(rawW - sketchW) < 48 && Math.abs(rawH - sketchH) < 48) {
+    // Model copied the handwriting box instead of sizing the applet.
+    rawW = DEFAULT_WIDGET_WIDTH;
+    rawH = DEFAULT_WIDGET_HEIGHT;
   }
-  if (hasAnchor && matchSketch) {
+  if (anchor && matchSketch) {
     rawW = Math.max(rawW, Math.round(sketchW));
     rawH = Math.max(rawH, Math.round(sketchH));
   }
 
-  const maxW = Math.min(MAX_WIDGET_WIDTH, Math.max(1800, Math.round(viewportW * 0.95)));
-  const maxH = Math.min(MAX_WIDGET_HEIGHT, Math.max(1400, Math.round(viewportH * 0.95)));
-
   const w = clampNum(rawW, MIN_WIDGET_WIDTH, maxW);
   const h = clampNum(rawH, MIN_WIDGET_HEIGHT, maxH);
 
-  let x = Number(cmd.x);
-  let y = Number(cmd.y);
-
-  const hasValidExplicitCoords =
-    Number.isFinite(x) &&
-    Number.isFinite(y) &&
-    x >= 0 &&
-    y >= 0 &&
-    x < SIZE - w &&
-    y < SIZE - h &&
-    (!visibleRect || (x >= visibleRect.x - 500 && x <= visibleRect.x + visibleRect.w + 500 && y >= visibleRect.y - 500 && y <= visibleRect.y + visibleRect.h + 500));
-
   const blockers = occupancy(changedBox, sceneItems);
 
-  if (placement === "match_sketch" && hasAnchor && changedBox) {
+  let x: number;
+  let y: number;
+
+  if (placement === "match_sketch" && anchor && changedBox) {
     x = Math.round(changedBox.x);
     y = Math.round(changedBox.y);
-  } else if (hasAnchor && changedBox && (placement === "below" || placement === "right" || placement === "left" || placement === "top" || reposition || !hasValidExplicitCoords)) {
+  } else if (anchor && changedBox) {
     const preferred = pickPreferredSide(placement, changedBox, w, h, visibleRect, blockers, "below");
     const near = placeAroundAnchor(changedBox, w, h, visibleRect, blockers, preferred);
     x = near.x;
     y = near.y;
-  } else if (placement === "below" || reposition || !hasValidExplicitCoords) {
-    if (visibleRect) {
-      x = clampNum(Math.round(visibleRect.x + visibleRect.w / 2 - w / 2), 0, Math.max(0, SIZE - w));
-      y = clampNum(Math.round(visibleRect.y + visibleRect.h / 2 - h / 2), 0, Math.max(0, SIZE - h));
-    } else {
-      x = Math.round(Number.isFinite(x) ? x : 1000);
-      y = Math.round(Number.isFinite(y) ? y : 1000);
-    }
+  } else if (visibleRect) {
+    const near = placeInVisible(visibleRect, w, h, blockers);
+    x = near.x;
+    y = near.y;
+  } else {
+    x = clampNum(Number(cmd.x), 0, SIZE - w);
+    y = clampNum(Number(cmd.y), 0, SIZE - h);
   }
 
   x = Math.max(0, Math.min(SIZE - w, Math.round(x)));
@@ -485,51 +537,11 @@ export function validateCommand(
         Math.min(Math.round(viewportW * 0.9), Math.min(3200, calculatedMaxWidth))
       );
 
-      let x = Number(c.x);
-      let y = Number(c.y);
-      const hasValidCoords =
-        Number.isFinite(x) &&
-        Number.isFinite(y) &&
-        x >= 0 &&
-        y >= 0 &&
-        x < SIZE &&
-        y < SIZE &&
-        (!ctx.visibleRect ||
-          (x >= ctx.visibleRect.x - 300 &&
-            x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
-
-      if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
-        const lines = Math.min(8, Math.max(2, text.split("\n").length + 1));
-        const blockH = Math.round(fontSize * lineHeight * lines);
-        const blockers = occupancy(ctx.changedBox, ctx.sceneItems);
-        const preferred = pickPreferredSide(
-          inferTextPlacement(placement, text),
-          ctx.changedBox,
-          maxWidth,
-          blockH,
-          ctx.visibleRect,
-          blockers,
-          "below"
-        );
-        const near = placeAroundAnchor(
-          ctx.changedBox,
-          maxWidth,
-          blockH,
-          ctx.visibleRect,
-          blockers,
-          preferred
-        );
-        x = near.x;
-        y = near.y;
-      } else if (!hasValidCoords) {
-        if (ctx.visibleRect) {
-          x = Math.round(ctx.visibleRect.x + ctx.visibleRect.w / 2 - maxWidth / 2);
-          y = Math.round(ctx.visibleRect.y + ctx.visibleRect.h / 2 - 100);
-        } else {
-          x = 1000;
-          y = 1000;
-        }
-      }
+      const lines = Math.min(8, Math.max(2, text.split("\n").length + 1));
+      const blockH = Math.round(fontSize * lineHeight * lines);
+      const near = placeContent(placement, text, maxWidth, blockH, ctx);
+      let x = near.x;
+      let y = near.y;
 
       x = Math.max(0, Math.min(SIZE - maxWidth, Math.round(x)));
       y = Math.max(0, Math.min(SIZE - fontSize * lineHeight * 2, Math.round(y)));
@@ -551,48 +563,10 @@ export function validateCommand(
       const fontSize = matchedFontSize(c.fontSize, ctx.scale, ctx.changedBox?.h);
       const estimatedWidth = Math.min(5000, Math.max(fontSize * 2, latex.length * fontSize * 0.72));
 
-      let x = Number(c.x);
-      let y = Number(c.y);
-      const hasValidCoords =
-        Number.isFinite(x) &&
-        Number.isFinite(y) &&
-        x >= 0 &&
-        y >= 0 &&
-        x < SIZE &&
-        y < SIZE &&
-        (!ctx.visibleRect || (x >= ctx.visibleRect.x - 300 && x <= ctx.visibleRect.x + ctx.visibleRect.w + 300));
-
-      if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0 && (placement === "right" || placement === "left" || placement === "top" || placement === "below" || !hasValidCoords)) {
-        const formulaH = Math.round(fontSize * 1.8);
-        const blockers = occupancy(ctx.changedBox, ctx.sceneItems);
-        const preferred = pickPreferredSide(
-          inferTextPlacement(placement, latex),
-          ctx.changedBox,
-          estimatedWidth,
-          formulaH,
-          ctx.visibleRect,
-          blockers,
-          "below"
-        );
-        const near = placeAroundAnchor(
-          ctx.changedBox,
-          estimatedWidth,
-          formulaH,
-          ctx.visibleRect,
-          blockers,
-          preferred
-        );
-        x = near.x;
-        y = near.y;
-      } else if (!hasValidCoords) {
-        if (ctx.visibleRect) {
-          x = Math.round(ctx.visibleRect.x + 80);
-          y = Math.round(ctx.visibleRect.y + 80);
-        } else {
-          x = Number.isFinite(x) ? Math.round(x) : 1000;
-          y = Number.isFinite(y) ? Math.round(y) : 1000;
-        }
-      }
+      const formulaH = Math.round(fontSize * 1.8);
+      const near = placeContent(placement, latex, estimatedWidth, formulaH, ctx);
+      let x = near.x;
+      let y = near.y;
 
       x = Math.max(0, Math.min(SIZE - estimatedWidth, Math.round(x)));
       y = Math.max(0, Math.min(SIZE - fontSize * 1.8, Math.round(y)));

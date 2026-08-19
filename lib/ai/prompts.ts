@@ -30,8 +30,8 @@ PLACEMENT — you choose a side; the client computes exact x/y and avoids collis
 - Companion diagram/chart or longer prose → "below" by default, or "right" / "left" / "top" if that side is clearly more open.
 - Overlay annotation (transparent SVG on existing figures) → "match_sketch" only when the widget must paint ON the referenced drawing.
 - Never place an explanation at canvas y=0 or the top edge merely because that area is blank when the referenced content is far below.
-- ANTI-COLLISION: never intend to overlap drawn ink, text, or existing widgets.
-- Widget w/h: follow modelInput.widgetGeometry. Those bounds are not targets — choose dimensions for actual content volume, aspect ratio, and readable typography.
+- ANTI-COLLISION: never intend to overlap drawn ink, text, or existing widgets. x/y are client-owned — do not invent coordinates.
+- Widget w/h: follow modelInput.widgetGeometry. Those bounds are ceilings, not targets. Size to the REAL assembled content so nothing clips: one compact gadget ~400×320; two–three related items in a row ~960–1400×420–560; dashboards up to max. Never copy the handwriting box. Never undersize a multi-item applet to a single card.
 - Do not return color; the client applies the user's AI color.
 
 SELECTION: whenever selectionContext or widgetEdit is present, treat that region as the exclusive target. Do not use unrelated ink elsewhere. Place any new answer in clear space beside it (or in_place when editing the target widget).
@@ -57,7 +57,7 @@ export const CODE_SYSTEM_PROMPT_EXTRA = `Return exactly one JSON object. Do not 
 Every command MUST identify its tool with property "tool". commands has 1..16 items.`;
 
 export const WIDGET_RENDERING_POLICY = `WIDGET RENDERING
-An html_widget is direct content on a zoomable canvas, not a dashboard card. Layout and typography must be designed together for the widget's declared width and height. Use responsive sizing such as clamp() with container- or viewport-relative units. Width-only or height-only resize changes the layout viewport: reflow or regroup instead of scaling a fixed-size scene. Keep SVG or professional-graphic bounds tight with only slight padding. Body text should stay readable at normal canvas scale — roughly clamp(36px,1.2cqw,52px) for body, at least 28px for secondary, clamp(52px,2cqw,80px) for headings. These are zoomable-canvas widget pixels; ordinary 14–16px browser defaults are too small. Do not fix overflow by shrinking text into unreadability. Prefer reflowing, regrouping, or a more appropriate widget size. Keep html, body, and the outermost layout transparent, with no outer background, border, corner radius, or box shadow, so the result blends into the canvas. Keep user-facing text natively selectable. Use high-contrast text and avoid dense tables, tiny legends, and decorative chrome.`;
+An html_widget is direct content on a zoomable canvas, not a dashboard card. Layout and typography must be designed together for the widget's declared width and height. Root layout MUST be width:max-content; height:max-content; overflow:visible. NEVER use width:100%, height:100%, 100vh, 100vw, or overflow:hidden on html, body, or the outermost wrapper — those clip the applet inside the iframe. Use clamp() for type, not for the outer box. Width-only or height-only resize changes the layout viewport: reflow or regroup instead of scaling a fixed-size scene. Keep SVG or professional-graphic bounds tight with only slight padding. Body text should stay readable at normal canvas scale — roughly clamp(36px,1.2cqw,52px) for body, at least 28px for secondary, clamp(52px,2cqw,80px) for headings. These are zoomable-canvas widget pixels; ordinary 14–16px browser defaults are too small. Do not fix overflow by shrinking text into unreadability. Prefer reflowing, regrouping, or a more appropriate widget size. Keep html, body, and the outermost layout transparent, with no outer background, border, corner radius, or box shadow, so the result blends into the canvas. Keep user-facing text natively selectable. Use high-contrast text and avoid dense tables, tiny legends, and decorative chrome.`;
 
 export const WIDGET_VISUAL_RULES = `WIDGET VISUAL SYSTEM
 - 100% TRANSPARENT BACKGROUND: widgets, HTML applets, and diagrams MUST use background: transparent !important. NEVER render opaque white container boxes, solid card backgrounds, or heavy drop shadows over the canvas grid.
@@ -67,11 +67,36 @@ export const WIDGET_VISUAL_RULES = `WIDGET VISUAL SYSTEM
 export const PLUGIN_ROUTING_PROMPT = `PLUGIN ROUTING
 General HTML (pluginId "general") is always available. Use native draw only for a very simple static sketch of about 10 or fewer primitives. For larger static visuals, animation, simulation, illustration, or custom graphics, use html_widget with pluginId "general" and prefer compact inline SVG. Use diagram_source when a built-in professional format (mermaid, dot, vega-lite, smiles, bpmn-xml, cytoscape-json, geojson) faithfully fits. For current or changing public information, prefer a network-backed html_widget that fetches at runtime with a refreshSeconds interval appropriate to the source. Do not approximate a visual by splitting it into many write_text commands. A plugin/widget command must be the only returned command.`;
 
+export const ACCURATE_GRAPHICS_RULES = `ACCURATE GRAPHICS
+Every generated visual — clocks, gauges, plots, maps, geometry, simulations, UI controls, diagrams, illustrations — must be geometrically and numerically correct, not decorative.
+
+Coordinate systems (pick one and stay consistent):
+- Screen (SVG/Canvas): +x right, +y down. Origin is the element's top-left unless you set a viewBox.
+- Math / Cartesian plots / geometry constructions: +x right, +y up. Flip y (or invert the range) when drawing into SVG/Canvas.
+- Compass-style polar (clocks, analog gauges, pies, radar, circular sliders): 0° at 12 o'clock, increasing clockwise.
+- Mathematical polar (unit circle, trig, phasors): 0° at +x (3 o'clock), increasing counterclockwise.
+Never mix those polar conventions in one figure. Never use CSS top/left percentages to place a rotating pointer.
+
+Transforms:
+- Rotate and scale around the visual center with transform="rotate(angle, cx, cy)" (SVG) or an equivalent transform-origin at (cx, cy). Never rotate around (0,0) unless that is the intended pivot.
+- Un-rotated pointers/hands/needles point toward the domain's 0° mark, then rotate.
+
+Value → geometry (closed form, no guessing):
+- Map every tick, hand, needle, bar, slice, marker, and label from the data. Linear: x = min + (v-min)/(max-min)*length, with a true zero baseline. Polar: angle = start + (v-min)/(max-min)*span. Clocks: hours12=hours%12; hour=(hours12+minutes/60)*30°; minute=(minutes+seconds/60)*6°; second=seconds*6° from 12, clockwise.
+- Drawn state, digital readout, legend, and axis labels must show the SAME value, unit, scale, and timezone. Use real IANA zones (Asia/Kolkata, Europe/London, Asia/Tokyo, …), SI units, and honest map scales — never a hardcoded offset that can drift.
+- Geometry the user asked for must actually hold: right angles are 90°, equal lengths are equal, intersections meet, arrows hit their target, pie slices sum to 100%.
+
+Layout:
+- Give each graphic a known size (viewBox + explicit width/height). Multi-item applets keep every item fully visible at its intrinsic size.
+- Do not clip labels, overlap strokes with text, or let axes/arrows miss their marks.
+
+Self-check before returning: pick two landmark states of THIS domain and verify the code would draw them correctly — e.g. clock 3:00 / 12:00 / 4:30; gauge 0 and max; unit circle 0° and 90°; bar of 50% at half height. If a landmark would land in the wrong place, fix the mapping.`;
+
 export const HTML_WIDGET_RULES = `HTML WIDGET RULES (html_widget)
-- Generate one complete HTML document. Use {tool:"html_widget",pluginId,title,html,w,h,placement,refreshSeconds,copyText?,copyLabel?,diagramKind?,sourceFormat?,frameworkVersion?}. Choose w/h for the actual content: compact applets 360–600×240–440, charts/dashboards 640–1100×380–720, vertical flows tall, and wide diagrams wide. x/y are client-owned.
+- Generate one complete HTML document. Use {tool:"html_widget",pluginId,title,html,w,h,placement,refreshSeconds,copyText?,copyLabel?,diagramKind?,sourceFormat?,frameworkVersion?}. Choose w/h for the FULL assembled content, not one child: compact single gadget 400–560×280–420; 2–3 items in a row 960–1400×420–560; charts/dashboards 720–1400×420–800; vertical flows tall. x/y are client-owned.
 - pluginId is "general" unless a professional source needs pluginId "flowchart".
 - Placement is semantic: any standalone UI uses "below" or another empty side — never overlap the user's handwriting. Overlay existing canvas content with a transparent SVG using "match_sketch" only when annotating that drawing.
-- If the user asks for several related things, put ALL of them in this one html_widget (row or compact grid). Use width:max-content / fit-content so every item is visible. Do not clip, scroll, or omit parts. The client measures the rendered content and fits the iframe to it.
+- If the user asks for several related things, put ALL of them in this one html_widget (row or compact grid). Outer layout: display:flex; gap:24px; width:max-content; height:max-content; overflow:visible. Each item has a fixed intrinsic size (e.g. a 220×220 SVG viewBox). Do not clip, scroll, omit parts, or wrap a multi-item row into a single cropped card.
 - Generated HTML may use inline JavaScript and load version-pinned HTTPS third-party scripts, ES modules, styles, fonts, images, or data endpoints when they materially improve the result. Never use latest tags, guessed /lib or /dist paths, or invented APIs. Prefer no dependency when native HTML/SVG/Canvas is sufficient.
 - Do not use frames, forms, cookies, or storage. Never include secrets. Public HTTPS links must use target="_blank" and rel="noopener noreferrer" and must never navigate the widget itself. Use credentials:"omit" for data requests.
 - Reflow on resize. After the initial stable render and meaningful changes, notify the snapshot bridge with window.parent.postMessage({type:"drawva-widget-updated"}, "*"); wait for visible assets before notifying, but never clear a successful render because a non-rendering follow-up fails.

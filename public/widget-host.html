@@ -75,6 +75,38 @@
           measureTimer = setTimeout(postSize, 48);
         }
 
+        function contentBox() {
+          const body = document.body;
+          const root = document.documentElement;
+          const skip = { SCRIPT:1, STYLE:1, LINK:1, META:1, TITLE:1, NOSCRIPT:1 };
+          let right = 0;
+          let bottom = 0;
+          const nodes = body.querySelectorAll('*');
+          for (let i = 0; i < nodes.length; i++) {
+            const el = nodes[i];
+            if (el === body || el === root || skip[el.tagName]) continue;
+            let r;
+            try { r = el.getBoundingClientRect(); } catch (e) { continue; }
+            if (r.width <= 1 || r.height <= 1) continue;
+            right = Math.max(right, r.right);
+            bottom = Math.max(bottom, r.bottom);
+            if (el.tagName === 'SVG') {
+              const nat = svgSize(el);
+              if (nat) {
+                right = Math.max(right, r.left + nat.w);
+                bottom = Math.max(bottom, r.top + nat.h);
+              }
+            }
+            if (el.tagName === 'CANVAS') {
+              const cw = Number(el.width) || r.width;
+              const ch = Number(el.height) || r.height;
+              right = Math.max(right, r.left + cw);
+              bottom = Math.max(bottom, r.top + ch);
+            }
+          }
+          return { w: right, h: bottom };
+        }
+
         function postSize() {
           try {
             const body = document.body;
@@ -83,31 +115,42 @@
             const stage = document.getElementById('stage');
             if (stage && /^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed')) return;
 
-            const svg = document.querySelector('#stage svg, .vega-embed svg, svg');
-            const nat = svg && svgSize(svg);
-            if (nat && !body.querySelector('input, button, table, section, article, ul, ol, form')) {
-              emitSize(nat.w + 16, nat.h + 16);
-              return;
+            // Single standalone SVG (mermaid/dot/etc): use its intrinsic size.
+            // NEVER take the first of several SVGs — analog clocks, dashboards,
+            // and multi-card applets would collapse to one face and clip the rest.
+            const svgs = document.querySelectorAll('#stage svg, .vega-embed svg, svg');
+            const text = String(body.innerText || '').replace(/\s+/g, ' ').trim();
+            const extraVisual = body.querySelector('canvas, img, video');
+            if (svgs.length === 1 && !extraVisual && text.length < 8) {
+              const nat = svgSize(svgs[0]);
+              if (nat) {
+                emitSize(nat.w + 16, nat.h + 16);
+                return;
+              }
             }
 
-            const pad = 12;
-            let right = 0;
-            let bottom = 0;
-            const nodes = body.querySelectorAll('*');
-            for (let i = 0; i < nodes.length; i++) {
-              const el = nodes[i];
-              // Never measure the document viewport: it is set by the parent and
-              // would feed the previous settled size back into the next one.
-              if (el === body || el === root || el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK' || el.tagName === 'META') continue;
-              const r = el.getBoundingClientRect();
-              if (r.width <= 1 || r.height <= 1) continue;
-              right = Math.max(right, r.right);
-              bottom = Math.max(bottom, r.bottom);
-            }
-            const scrollW = right;
-            const scrollH = bottom;
-            if (scrollW < 8 || scrollH < 8) return;
-            emitSize(scrollW + pad, scrollH + pad);
+            // Probe at a generous layout width so width:100% / flex rows lay out
+            // fully instead of reporting the current (often too-small) iframe.
+            const hs = root.style, bs = body.style;
+            const prev = {
+              hw: hs.width, hh: hs.height, hmin: hs.minWidth, ho: hs.overflow,
+              bw: bs.width, bh: bs.height, bmin: bs.minWidth, bo: bs.overflow
+            };
+            hs.width = '1600px';
+            hs.height = 'max-content';
+            hs.minWidth = 'max-content';
+            hs.overflow = 'visible';
+            bs.width = 'max-content';
+            bs.height = 'max-content';
+            bs.minWidth = 'max-content';
+            bs.overflow = 'visible';
+            const box = contentBox();
+            hs.width = prev.hw; hs.height = prev.hh; hs.minWidth = prev.hmin; hs.overflow = prev.ho;
+            bs.width = prev.bw; bs.height = prev.bh; bs.minWidth = prev.bmin; bs.overflow = prev.bo;
+
+            const pad = 16;
+            if (box.w < 8 || box.h < 8) return;
+            emitSize(box.w + pad, box.h + pad);
           } catch(e) {}
         }
 
@@ -239,7 +282,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;min-width:0;height:auto;min-height:0;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:max-content;min-width:0;max-width:none;height:auto;min-height:0;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;
