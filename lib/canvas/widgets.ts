@@ -56,6 +56,8 @@ const RESIZE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
 
 export function extractHtmlDimensions(html: string): { width: number; height: number } | null {
   if (!html) return null;
+  const trimmed = html.trim().toLowerCase();
+  if (!trimmed.startsWith("<svg") && !trimmed.startsWith("<?xml")) return null;
   const vb = html.match(/<svg[^>]*viewBox=["']\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*["']/i);
   if (vb) {
     const w = parseFloat(vb[3]);
