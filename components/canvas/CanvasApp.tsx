@@ -9,12 +9,9 @@ import {
   setAutoOn,
   setCenter,
   setColor,
-  setCursor,
-  setGeometry,
   setMode,
   setPen,
   setZoom,
-  type GeometryInfo,
 } from "@/lib/state";
 import { useCanvas } from "./CanvasProvider";
 import { ToolManager, type ToolGestureEvent } from "@/lib/canvas/toolManager";
@@ -80,26 +77,6 @@ function distanceBetweenRects(a: Rect, b: { x: number; y: number; w: number; h: 
   return Math.hypot(dx, dy);
 }
 
-function isSameGeometry(a: GeometryInfo | null, b: GeometryInfo | null): boolean {
-  if (a === b) return true;
-  if (!a || !b) return false;
-  return (
-    a.type === b.type &&
-    a.id === b.id &&
-    a.x === b.x &&
-    a.y === b.y &&
-    a.w === b.w &&
-    a.h === b.h &&
-    a.label === b.label &&
-    a.title === b.title &&
-    a.kind === b.kind &&
-    a.contentW === b.contentW &&
-    a.contentH === b.contentH &&
-    a.status === b.status &&
-    a.isMarquee === b.isMarquee &&
-    a.isMoving === b.isMoving
-  );
-}
 
 async function readSse(
   res: Response,
@@ -589,104 +566,9 @@ export function CanvasApp() {
     setCanRedo(!!h && h.canRedo);
   }
 
-  const syncGeometry = useCallback(() => {
-    const tm = tools.current;
-    let geom: GeometryInfo | null = null;
-
-    if (tm) {
-      const activeShape = tm.shapes.getLiveGeometry();
-      if (activeShape) {
-        geom = {
-          type: "shape",
-          label: `Shape (${activeShape.kind})`,
-          kind: activeShape.kind,
-          x: Math.round(activeShape.x),
-          y: Math.round(activeShape.y),
-          w: Math.round(activeShape.w),
-          h: Math.round(activeShape.h),
-        };
-      } else {
-        const activeSel = tm.selection.getGeometry();
-        if (activeSel) {
-          geom = {
-            type: "selection",
-            label: activeSel.isMarquee ? "Marquee Selection" : activeSel.isMoving ? "Moving Selection" : "Ink Selection",
-            isMarquee: activeSel.isMarquee,
-            isMoving: activeSel.isMoving,
-            x: Math.round(activeSel.x),
-            y: Math.round(activeSel.y),
-            w: Math.round(activeSel.w),
-            h: Math.round(activeSel.h),
-          };
-        }
-      }
-    }
-
-    if (!geom && drawingRef.current && (drawingRef.current.w > 0 || drawingRef.current.h > 0)) {
-      const d = drawingRef.current;
-      geom = {
-        type: "stroke",
-        label: `Drawing (${appState.mode})`,
-        x: Math.round(d.x),
-        y: Math.round(d.y),
-        w: Math.round(d.w),
-        h: Math.round(d.h),
-      };
-    }
-
-    if (!geom && widgets.current) {
-      const wGeom = widgets.current.getSelectedGeometry();
-      if (wGeom) {
-        geom = {
-          type: "widget",
-          id: wGeom.id,
-          label: `Widget (${wGeom.pluginId || wGeom.kind})`,
-          title: wGeom.title,
-          kind: wGeom.kind,
-          status: wGeom.status,
-          x: Math.round(wGeom.x),
-          y: Math.round(wGeom.y),
-          w: Math.round(wGeom.w),
-          h: Math.round(wGeom.h),
-          contentW: Math.round(wGeom.contentW),
-          contentH: Math.round(wGeom.contentH),
-        };
-      }
-    }
-
-    if (!geom && objects.current) {
-      const oGeom = objects.current.getSelectedGeometry();
-      if (oGeom) {
-        geom = {
-          type: "object",
-          id: oGeom.id,
-          label: `Object (${oGeom.kind})`,
-          kind: oGeom.kind,
-          status: oGeom.status,
-          x: Math.round(oGeom.x),
-          y: Math.round(oGeom.y),
-          w: Math.round(oGeom.w),
-          h: Math.round(oGeom.h),
-          contentW: Math.round(oGeom.contentW),
-          contentH: Math.round(oGeom.contentH),
-        };
-      }
-    }
-
-    if (!isSameGeometry(appState.geometry, geom)) {
-      setGeometry(geom);
-    }
-  }, []);
-
-  const syncGeometryRef = useRef(syncGeometry);
-  useEffect(() => {
-    syncGeometryRef.current = syncGeometry;
-  });
-
   function afterBoardChange() {
     history.current?.commit();
     syncHistoryButtons();
-    syncGeometryRef.current();
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     autosaveTimer.current = setTimeout(() => {
       autosaveTimer.current = null;
@@ -774,11 +656,9 @@ export function CanvasApp() {
       callbacks: {
         onSelect: () => {
           om.setSelected(null);
-          syncGeometryRef.current();
         },
         onDragStart: (id, e) => {
           widgetDrag.current = { id, last: { x: e.clientX, y: e.clientY } };
-          syncGeometryRef.current();
         },
         onDragMove: (id, e) => {
           const g = widgetDrag.current;
@@ -790,18 +670,15 @@ export function CanvasApp() {
           g.last = { x: e.clientX, y: e.clientY };
           const item = wm.get(id);
           if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
-          syncGeometryRef.current();
         },
         onDragEnd: (id) => {
           widgetDrag.current = null;
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onResizeStart: (id, mode, e) => {
           widgetResize.current = { id, mode, last: { x: e.clientX, y: e.clientY } };
-          syncGeometryRef.current();
         },
         onResizeMove: (id, _mode, e) => {
           const g = widgetResize.current;
@@ -813,21 +690,18 @@ export function CanvasApp() {
           g.last = { x: e.clientX, y: e.clientY };
           const resized = wm.get(id);
           if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h, contentW: resized.contentW, contentH: resized.contentH, userResized: resized.userResized, resizeMode: resized.resizeMode });
-          syncGeometryRef.current();
         },
         onResizeEnd: (id) => {
           widgetResize.current = null;
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onRemove: (id) => {
           history.current?.recordWidgets();
           wm.remove(id);
           syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id });
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onAccept: (id) => {
           history.current?.recordWidgets();
@@ -835,7 +709,6 @@ export function CanvasApp() {
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onAiRefine: (id) => {
           const item = wm.get(id);
@@ -862,11 +735,9 @@ export function CanvasApp() {
       callbacks: {
         onSelect: () => {
           wm.setSelected(null);
-          syncGeometryRef.current();
         },
         onDragStart: (id, e) => {
           objectDrag.current = { id, last: { x: e.clientX, y: e.clientY } };
-          syncGeometryRef.current();
         },
         onDragMove: (id, e) => {
           const g = objectDrag.current;
@@ -878,18 +749,15 @@ export function CanvasApp() {
           g.last = { x: e.clientX, y: e.clientY };
           const item = om.get(id);
           if (item) broadcastMove("object", { type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
-          syncGeometryRef.current();
         },
         onDragEnd: (id) => {
           objectDrag.current = null;
           const item = om.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onResizeStart: (id, e) => {
           objectResize.current = { id, last: { x: e.clientX, y: e.clientY } };
-          syncGeometryRef.current();
         },
         onResizeMove: (id, e) => {
           const g = objectResize.current;
@@ -901,21 +769,18 @@ export function CanvasApp() {
           g.last = { x: e.clientX, y: e.clientY };
           const resized = om.get(id);
           if (resized) broadcastMove("object", { type: "SYNC_OBJECT_RESIZE", id, w: resized.w, h: resized.h });
-          syncGeometryRef.current();
         },
         onResizeEnd: (id) => {
           objectResize.current = null;
           const item = om.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_RESIZE", id, w: item.w, h: item.h });
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onRemove: (id) => {
           history.current?.recordObjects();
           om.remove(id);
           syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id });
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onAccept: (id) => {
           history.current?.recordObjects();
@@ -927,7 +792,6 @@ export function CanvasApp() {
             syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: cleanObject });
           }
           afterBoardChangeRef.current();
-          syncGeometryRef.current();
         },
         onMerge: (id) => mergeObjectToInk(id),
       },
@@ -951,12 +815,10 @@ export function CanvasApp() {
         if (!node) {
           wm.setSelected(null);
           om.setSelected(null);
-          syncGeometryRef.current();
           return;
         }
         if (node.kind === "widget") wm.setSelected(node.id);
         else om.setSelected(node.id);
-        syncGeometryRef.current();
       },
       translate: (node, dx, dy) => {
         if (node.kind === "widget") {
@@ -970,7 +832,6 @@ export function CanvasApp() {
           const item = om.get(node.id);
           if (item) broadcastMove("object", { type: "SYNC_OBJECT_MOVE", id: node.id, x: item.x, y: item.y });
         }
-        syncGeometryRef.current();
       },
       endTranslate: (node) => {
         if (node.kind === "widget") {
@@ -980,7 +841,6 @@ export function CanvasApp() {
           const item = om.get(node.id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id: node.id, x: item.x, y: item.y });
         }
-        syncGeometryRef.current();
       },
     });
 
@@ -1153,7 +1013,6 @@ export function CanvasApp() {
       }
       wm.sync();
       objects.current?.sync();
-      syncGeometryRef.current();
     };
     const unsub = engine.onPostFrame(sync);
 
@@ -1176,7 +1035,6 @@ export function CanvasApp() {
       onInitState: async (snapshot) => {
         if (!engine) return;
         await restoreSnapshot(engine, widgets.current, objects.current, snapshot);
-        syncGeometryRef.current();
       },
       onRemoteStroke: (seg) => {
         if (!engine) return;
@@ -1190,7 +1048,6 @@ export function CanvasApp() {
         if (!engine || !objects.current) return;
         const restored = await renderObject(engine, obj);
         if (restored) objects.current.add(restored);
-        syncGeometryRef.current();
       },
       onRemoteObjectMove: (id, x, y) => {
         const o = objects.current?.get(id);
@@ -1198,36 +1055,29 @@ export function CanvasApp() {
           o.x = x;
           o.y = y;
           objects.current.sync();
-          syncGeometryRef.current();
         }
       },
       onRemoteObjectResize: (id, w, h) => {
         objects.current?.resize(id, w, h);
-        syncGeometryRef.current();
       },
       onRemoteObjectRemove: (id) => {
         objects.current?.remove(id);
-        syncGeometryRef.current();
       },
       onRemoteObjectMerge: (id) => {
         void mergeObjectToInk(id);
-        syncGeometryRef.current();
       },
       onRemoteWidgetAdd: (w) => {
         widgets.current?.add(w);
-        syncGeometryRef.current();
       },
       onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
         if (widgets.current?.has(id)) {
           const currentItem = widgets.current.get(id)!;
           widgets.current.move(id, x - currentItem.x, y - currentItem.y);
           widgets.current.resize(id, w, h, contentW, contentH, userResized, resizeMode);
-          syncGeometryRef.current();
         }
       },
       onRemoteWidgetRemove: (id) => {
         widgets.current?.remove(id);
-        syncGeometryRef.current();
       },
       onRemoteClear: () => {
         if (!engine) return;
@@ -1235,7 +1085,6 @@ export function CanvasApp() {
         engine.requestRender();
         widgets.current?.clear();
         objects.current?.clear();
-        syncGeometryRef.current();
       },
     });
 
@@ -1318,7 +1167,6 @@ export function CanvasApp() {
     tools.current?.setMode(mode);
     widgets.current?.setMode(mode);
     objects.current?.setMode(mode);
-    syncGeometryRef.current();
   }, [mode, engine]);
 
   useEffect(() => {
@@ -1492,11 +1340,9 @@ export function CanvasApp() {
       } else if (k === "delete" || k === "backspace") {
         tools.current?.deleteSelection();
         afterBoardChangeRef.current();
-        syncGeometryRef.current();
         e.preventDefault();
       } else if (k === "escape") {
         tools.current?.clearSelection();
-        syncGeometryRef.current();
         setTextOpen(false);
       }
     };
@@ -1567,7 +1413,6 @@ export function CanvasApp() {
       widgets.current?.setSelected(null);
       objects.current?.setSelected(null);
       tm.begin(gestureEvent(e));
-      syncGeometryRef.current();
       return;
     }
     if (e.button !== 0) return;
@@ -1587,11 +1432,9 @@ export function CanvasApp() {
       setTextValue("");
       setTextOpen(true);
       requestAnimationFrame(() => textareaRef.current?.focus());
-      syncGeometryRef.current();
       return;
     }
     tm.begin(gestureEvent(e));
-    syncGeometryRef.current();
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -1628,11 +1471,6 @@ export function CanvasApp() {
     const tm = tools.current;
     if (!tm) return;
     const world = screenToWorld(e);
-    const cx = Math.round(world.x);
-    const cy = Math.round(world.y);
-    if (!appState.cursor || appState.cursor.x !== cx || appState.cursor.y !== cy) {
-      setCursor({ x: cx, y: cy });
-    }
     syncManager.current?.sendCursor(world.x, world.y, mode);
     tm.move(gestureEvent(e));
     if (drawingRef.current) {
@@ -1643,7 +1481,6 @@ export function CanvasApp() {
       const y2 = Math.max(d.y + d.h, world.y);
       drawingRef.current = { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
     }
-    syncGeometryRef.current();
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -1690,7 +1527,6 @@ export function CanvasApp() {
         }
       }
     }
-    syncGeometryRef.current();
   };
 
   const onWheel = (e: React.WheelEvent) => {
@@ -1779,7 +1615,6 @@ export function CanvasApp() {
           onPointerMove={onPointerMove}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
-          onPointerLeave={() => setCursor(null)}
           onWheel={onWheel}
           style={{
             position: "absolute",

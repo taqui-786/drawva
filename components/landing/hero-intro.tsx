@@ -43,7 +43,7 @@ function InkSplashOnClick() {
         <Button
           size="lg"
           onClick={go}
-          className="gap-2 px-7 shadow-lg shadow-primary/20 transition-transform hover:scale-[1.03] active:scale-95"
+          className="gap-2 px-7 shadow-lg shadow-primary/20 transition-transform hover:scale-[1.04] active:scale-95"
         >
           <HugeiconsIcon icon={PencilIcon} className="size-5" aria-hidden />
           <span>Start drawing</span>
@@ -67,22 +67,26 @@ function InkSplashOnClick() {
   );
 }
 
-/* ── left column copy ────────────────────────────────────────────────── */
+/* ── centered hero copy ──────────────────────────────────────────────── */
 
 export function HeroIntro() {
   return (
-    <div className="flex flex-col justify-center gap-6 py-6 md:py-10">
-      <p className="font-mono text-xs font-semibold uppercase tracking-[0.25em] text-primary">
+    <div className="flex flex-col items-center justify-center gap-5 text-center py-2 md:py-6">
+      <p className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
+        <span className="relative flex size-1.5">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+          <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
+        </span>
         AI-Powered Infinite Whiteboard
       </p>
 
       <ScatteredHeadline />
 
-      <p className="max-w-[54ch] text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
+      <p className="max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
         Sketch, drop a formula, or draw a flowchart — Drawva&apos;s multimodal AI agent converts your handwritten ink into live diagrams, equations, and interactive applets right on your infinite board.
       </p>
 
-      <div className="flex flex-wrap items-center gap-3.5 pt-2">
+      <div className="flex flex-wrap items-center justify-center gap-3.5 pt-1">
         <InkSplashOnClick />
         <Button
           size="lg"
@@ -101,19 +105,13 @@ export function HeroIntro() {
         </Button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-5 pt-4 text-xs text-muted-foreground border-t border-border/40">
-        <div className="flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-emerald-500" />
-          <span>BYO OpenAI API Key</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-emerald-500" />
-          <span>IndexedDB Auto-Save</span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="size-2 rounded-full bg-emerald-500" />
-          <span>Zero-Cloud P2P Sync</span>
-        </div>
+      <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-3 text-xs text-muted-foreground">
+        {["BYO OpenAI API Key", "IndexedDB Auto-Save", "Zero-Cloud P2P Sync"].map((label) => (
+          <div key={label} className="flex items-center gap-1.5">
+            <span className="size-2 rounded-full bg-emerald-500" />
+            <span>{label}</span>
+          </div>
+        ))}
       </div>
     </div>
   );

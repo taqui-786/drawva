@@ -266,7 +266,7 @@ export function CanvasHeader({
           <TooltipTrigger
             render={
               <span className="cursor-pointer font-mono text-[10px] font-semibold text-muted-foreground/60 hover:text-foreground transition-colors px-1.5 py-0.5 rounded border border-transparent hover:border-border/40 hover:bg-muted/40 select-none">
-                v3.1
+                v3.2
               </span>
             }
           />

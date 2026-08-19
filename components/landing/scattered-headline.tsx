@@ -43,7 +43,7 @@ export function ScatteredHeadline() {
   }
 
   return (
-    <h1 className="font-heading flex flex-wrap text-3xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
+    <h1 className="font-heading flex flex-wrap items-center justify-center text-3xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.4rem]">
       {WORDS.map((w, i) => (
         <motion.span
           key={w.text}

@@ -11,10 +11,10 @@ const socials = [
 
 export function Footer() {
   return (
-    <footer className="w-full border-t border-border/60 bg-background/80 backdrop-blur-md">
-      <div className={`${CONTAINER} py-12 space-y-8`}>
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6">
-          <div className="space-y-2 text-center md:text-left">
+    <footer className="w-full border-t border-border/60 bg-background/60 backdrop-blur-md">
+      <div className={`${CONTAINER} py-6 space-y-5`}>
+        <div className="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="space-y-1.5 text-center md:text-left">
             <Link href="/" className="brand-wordmark text-2xl font-bold">
               Drawva
             </Link>
@@ -30,7 +30,7 @@ export function Footer() {
           </div>
         </div>
 
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-border/40 text-xs text-muted-foreground">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-border/40 text-xs text-muted-foreground">
           <p>
             Built by{" "}
             <a
