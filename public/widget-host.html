@@ -59,6 +59,7 @@
           return null;
         }
 
+        let measureTimer = 0;
         function emitSize(width, height) {
           const w = Math.min(3200, Math.max(80, Math.ceil(width)));
           const h = Math.min(6000, Math.max(60, Math.ceil(height)));
@@ -67,6 +68,11 @@
             lastH = h;
             window.parent.postMessage({ type: 'drawva-widget-resize-content', width: w, height: h }, '*');
           }
+        }
+
+        function scheduleSize() {
+          clearTimeout(measureTimer);
+          measureTimer = setTimeout(postSize, 48);
         }
 
         function postSize() {
@@ -90,14 +96,16 @@
             const nodes = body.querySelectorAll('*');
             for (let i = 0; i < nodes.length; i++) {
               const el = nodes[i];
-              if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK' || el.tagName === 'META') continue;
+              // Never measure the document viewport: it is set by the parent and
+              // would feed the previous settled size back into the next one.
+              if (el === body || el === root || el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK' || el.tagName === 'META') continue;
               const r = el.getBoundingClientRect();
               if (r.width <= 1 || r.height <= 1) continue;
               right = Math.max(right, r.right);
               bottom = Math.max(bottom, r.bottom);
             }
-            const scrollW = Math.max(body.scrollWidth || 0, root.scrollWidth || 0, right);
-            const scrollH = Math.max(body.scrollHeight || 0, root.scrollHeight || 0, bottom);
+            const scrollW = right;
+            const scrollH = bottom;
             if (scrollW < 8 || scrollH < 8) return;
             emitSize(scrollW + pad, scrollH + pad);
           } catch(e) {}
@@ -162,6 +170,14 @@
         window.addEventListener('message', function(ev) {
           if (ev.data && ev.data.type === 'drawva-widget-snapshot-request') {
             postSnapshot(ev.data.reqId);
+          } else if (ev.data && ev.data.type === 'drawva-widget-layout-size') {
+            const w = Number(ev.data.width), h = Number(ev.data.height);
+            if (w >= 80 && w <= 3200 && h >= 60 && h <= 6000) {
+              document.documentElement.style.setProperty('--drawva-layout-width', w + 'px');
+              document.documentElement.style.setProperty('--drawva-layout-height', h + 'px');
+              window.dispatchEvent(new CustomEvent('drawva-widget-layout', { detail: { width: w, height: h } }));
+              scheduleSize();
+            }
           }
         });
 
@@ -172,14 +188,14 @@
         }
         if (typeof ResizeObserver !== 'undefined') {
           try {
-            const ro = new ResizeObserver(postSize);
+            const ro = new ResizeObserver(scheduleSize);
             if (document.body) ro.observe(document.body);
             if (document.documentElement) ro.observe(document.documentElement);
           } catch(e) {}
         }
         if (typeof MutationObserver !== 'undefined' && document.body) {
           try {
-            const mo = new MutationObserver(postSize);
+            const mo = new MutationObserver(scheduleSize);
             mo.observe(document.body, { childList: true, subtree: true });
           } catch(e) {}
         }
@@ -201,18 +217,18 @@
           }, '*');
         }, true);
 
-        setTimeout(postSize, 30);
-        setTimeout(postSize, 120);
-        setTimeout(postSize, 300);
-        setTimeout(postSize, 600);
-        setTimeout(postSize, 1200);
+        setTimeout(scheduleSize, 30);
+        setTimeout(scheduleSize, 120);
+        setTimeout(scheduleSize, 300);
+        setTimeout(scheduleSize, 600);
+        setTimeout(scheduleSize, 1200);
         // Auto-snapshot after chart likely rendered
         setTimeout(function() { postSnapshot('auto'); }, 900);
         setTimeout(function() { postSnapshot('auto'); }, 2200);
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:max-content;min-width:0;height:auto;min-height:0}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;min-width:0;height:auto;min-height:0}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;
@@ -228,14 +244,23 @@
   addEventListener("message", (event) => {
     const data = event.data;
     if (!data || typeof data !== "object") return;
+    const fromParent = event.source === parent;
+    const fromInner = event.source === inner.contentWindow;
     if (data.type === "drawva-widget-init") {
+      if (!fromParent) return;
       if (typeof data.html !== "string" || data.html.length > MAX_HTML_LENGTH) return;
       writeInner(data.html);
     } else if (data.type === "drawva-widget-state") {
+      if (!fromParent) return;
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-state", selected: !!data.selected, active: !!data.active }, "*");
+    } else if (data.type === "drawva-widget-layout-size") {
+      if (!fromParent || !Number.isFinite(data.width) || !Number.isFinite(data.height) || data.width < 80 || data.width > 3200 || data.height < 60 || data.height > 6000) return;
+      inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-layout-size", width: Math.round(data.width), height: Math.round(data.height) }, "*");
     } else if (data.type === "drawva-widget-resize-content") {
-      forward({ type: "drawva-widget-resize-content", width: data.width, height: data.height });
+      if (!fromInner || !Number.isFinite(data.width) || !Number.isFinite(data.height) || data.width < 80 || data.width > 3200 || data.height < 60 || data.height > 6000) return;
+      forward({ type: "drawva-widget-settled-size", width: Math.round(data.width), height: Math.round(data.height) });
     } else if (data.type === "drawva-widget-inner-wheel") {
+      if (!fromInner) return;
       postAnywhere({
         type: "drawva-widget-wheel",
         clientX: data.clientX,
@@ -244,13 +269,17 @@
         deltaY: data.deltaY
       });
     } else if (data.type === "drawva-widget-inner-pointerdown") {
+      if (!fromInner) return;
       postAnywhere({ type: "drawva-widget-pointerdown" });
     } else if (data.type === "drawva-widget-updated") {
+      if (!fromInner) return;
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: "updated" }, "*");
     } else if (data.type === "drawva-widget-snapshot-request") {
+      if (!fromParent) return;
       // Forward snapshot request into the inner iframe
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: data.reqId }, "*");
     } else if (data.type === "drawva-widget-inner-snapshot") {
+      if (!fromInner) return;
       // Forward snapshot response from inner iframe up to parent
       postAnywhere({ type: "drawva-widget-snapshot", reqId: data.reqId, dataUrl: data.dataUrl, w: data.w, h: data.h });
     }

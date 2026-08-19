@@ -27,7 +27,7 @@ import { LogsDialog } from "./LogsDialog";
 import { CanvasFooter } from "./CanvasFooter";
 import { WidgetManager, type WidgetItem, extractHtmlDimensions } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
-import { diagramDocument, copyLabel, detectDiagramFormat, normalizeFormat, estimateDiagramDimensions } from "@/lib/canvas/diagram";
+import { diagramDocument, copyLabel, detectDiagramFormat, normalizeFormat } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { buildAtlas } from "@/lib/canvas/atlas";
@@ -154,7 +154,7 @@ export function CanvasApp() {
   const objects = useRef<ObjectManager | null>(null);
   const history = useRef<BoardHistory | null>(null);
   const widgetDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
-  const widgetResize = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
+  const widgetResize = useRef<{ id: string; mode: import("@/lib/canvas/widgetGeometry").WidgetResizeMode; last: { x: number; y: number } } | null>(null);
   const objectDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
   const objectResize = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
   const syncManager = useRef<SyncManager | null>(null);
@@ -789,36 +789,36 @@ export function CanvasApp() {
           wm.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
           const item = wm.get(id);
-          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized });
+          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
           syncGeometryRef.current();
         },
         onDragEnd: (id) => {
           widgetDrag.current = null;
           const item = wm.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized });
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
           afterBoardChangeRef.current();
           syncGeometryRef.current();
         },
-        onResizeStart: (id, e) => {
-          widgetResize.current = { id, last: { x: e.clientX, y: e.clientY } };
+        onResizeStart: (id, mode, e) => {
+          widgetResize.current = { id, mode, last: { x: e.clientX, y: e.clientY } };
           syncGeometryRef.current();
         },
-        onResizeMove: (id, e) => {
+        onResizeMove: (id, _mode, e) => {
           const g = widgetResize.current;
           if (!g || g.id !== id) return;
           history.current?.recordWidgets();
           const item = wm.get(id);
           if (!item) return;
-          wm.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
+          wm.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale, undefined, undefined, true, g.mode);
           g.last = { x: e.clientX, y: e.clientY };
           const resized = wm.get(id);
-          if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h, contentW: resized.contentW, contentH: resized.contentH, userResized: resized.userResized });
+          if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h, contentW: resized.contentW, contentH: resized.contentH, userResized: resized.userResized, resizeMode: resized.resizeMode });
           syncGeometryRef.current();
         },
         onResizeEnd: (id) => {
           widgetResize.current = null;
           const item = wm.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized });
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
           afterBoardChangeRef.current();
           syncGeometryRef.current();
         },
@@ -1006,8 +1006,8 @@ export function CanvasApp() {
       }
       activeEditTargetRef.current = null;
       const estimated = extractHtmlDimensions(cmd.html);
-      const initialW = oldWidget ? oldWidget.w : Math.round(Math.max(cmd.w, estimated?.width || 0));
-      const initialH = oldWidget ? oldWidget.h : Math.round(Math.max(cmd.h, estimated?.height || 0));
+      const initialW = oldWidget ? oldWidget.w : Math.round(cmd.w || estimated?.width || 540);
+      const initialH = oldWidget ? oldWidget.h : Math.round(cmd.h || estimated?.height || 360);
 
       const item: WidgetItem = {
         id: oldWidget?.id || targetId || `widget-${Date.now()}`,
@@ -1115,12 +1115,8 @@ export function CanvasApp() {
       activeEditTargetRef.current = null;
       const res = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
       const html = typeof res === "string" ? res : res.html;
-      const estimated =
-        typeof res === "object" && res.width && res.height
-          ? { width: res.width, height: res.height }
-          : estimateDiagramDimensions(cmd.sourceFormat, cmd.source, cmd.diagramKind);
-      const initialW = oldWidget ? oldWidget.w : Math.round(estimated.width || cmd.w);
-      const initialH = oldWidget ? oldWidget.h : Math.round(estimated.height || cmd.h);
+      const initialW = oldWidget ? oldWidget.w : Math.round(cmd.w || 540);
+      const initialH = oldWidget ? oldWidget.h : Math.round(cmd.h || 360);
 
       const item: WidgetItem = {
         id: oldWidget?.id || targetId || `diagram-${Date.now()}`,
@@ -1221,11 +1217,11 @@ export function CanvasApp() {
         widgets.current?.add(w);
         syncGeometryRef.current();
       },
-      onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized) => {
+      onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
         if (widgets.current?.has(id)) {
           const currentItem = widgets.current.get(id)!;
           widgets.current.move(id, x - currentItem.x, y - currentItem.y);
-          widgets.current.resize(id, w, h, contentW, contentH, userResized);
+          widgets.current.resize(id, w, h, contentW, contentH, userResized, resizeMode);
           syncGeometryRef.current();
         }
       },

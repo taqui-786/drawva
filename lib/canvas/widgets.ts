@@ -1,6 +1,13 @@
 import { Camera } from "./camera";
 import { SIZE } from "./constants";
 import type { CanvasMode, Point } from "./types";
+import {
+  normalizeWidgetGeometry,
+  resizeWidgetGeometry,
+  settleWidgetContent,
+  widgetScale,
+  type WidgetResizeMode,
+} from "./widgetGeometry";
 
 export type WidgetKind = "html" | "diagram";
 export type WidgetStatus = "draft" | "accepted";
@@ -23,6 +30,7 @@ export interface WidgetItem {
   copyLabel?: string;
   status: WidgetStatus;
   userResized?: boolean;
+  resizeMode?: WidgetResizeMode;
   cachedImage?: HTMLImageElement | HTMLCanvasElement;
 }
 
@@ -31,8 +39,8 @@ export interface WidgetCallbacks {
   onDragStart?: (id: string, e: PointerEvent) => void;
   onDragMove?: (id: string, e: PointerEvent) => void;
   onDragEnd?: (id: string) => void;
-  onResizeStart?: (id: string, e: PointerEvent) => void;
-  onResizeMove?: (id: string, e: PointerEvent) => void;
+  onResizeStart?: (id: string, mode: WidgetResizeMode, e: PointerEvent) => void;
+  onResizeMove?: (id: string, mode: WidgetResizeMode, e: PointerEvent) => void;
   onResizeEnd?: (id: string) => void;
   onRemove?: (id: string) => void;
   onAccept?: (id: string) => void;
@@ -90,6 +98,8 @@ export class WidgetManager {
       chrome: HTMLElement;
       dragBar: HTMLElement;
       resizeHandle: HTMLElement;
+      resizeWidth: HTMLElement;
+      resizeHeight: HTMLElement;
       refine?: HTMLElement;
       overlay: HTMLElement;
       acceptBtn: HTMLElement;
@@ -179,6 +189,7 @@ export class WidgetManager {
   }
 
   private onMessage = (e: MessageEvent) => {
+    if (e.origin !== location.origin) return;
     if (e.data?.type === "drawva-widget-pointerdown") {
       for (const [id, shell] of this.shells) {
         const iframe = shell.querySelector("iframe");
@@ -212,9 +223,10 @@ export class WidgetManager {
     if (this.shells.has(widget.id)) {
       this.unmount(widget.id);
     }
-    this.widgets.set(widget.id, widget);
-    this.mount(widget);
-    this.position(widget);
+    const normalized = normalizeWidgetGeometry(widget);
+    this.widgets.set(widget.id, normalized);
+    this.mount(normalized);
+    this.position(normalized);
   }
 
   remove(id: string): void {
@@ -285,7 +297,7 @@ export class WidgetManager {
   private applyMode(id: string): void {
     const tb = this.toolbars.get(id);
     if (!tb) return;
-    const { chrome, dragBar, resizeHandle, refine, overlay, acceptBtn } = tb;
+    const { chrome, dragBar, resizeHandle, resizeWidth, resizeHeight, refine, overlay, acceptBtn } = tb;
     const shell = this.shells.get(id);
     const hand = this.mode === "hand";
     const select = this.mode === "select";
@@ -324,6 +336,8 @@ export class WidgetManager {
     if (resizeHandle) {
       resizeHandle.style.display = active ? "inline-flex" : "none";
     }
+    resizeWidth.style.display = active ? "block" : "none";
+    resizeHeight.style.display = active ? "block" : "none";
     if (refine) {
       refine.style.display = active ? "inline-flex" : "none";
     }
@@ -368,18 +382,13 @@ export class WidgetManager {
     this.position(w);
   }
 
-  resize(id: string, newW: number, newH: number, contentW?: number, contentH?: number, userResized?: boolean): void {
+  resize(id: string, newW: number, newH: number, contentW?: number, contentH?: number, userResized?: boolean, mode: WidgetResizeMode = "corner"): void {
     const w = this.widgets.get(id);
     if (!w) return;
-    w.userResized = userResized ?? true;
-    w.w = Math.max(120, Math.min(SIZE - w.x, Math.round(newW)));
-    w.h = Math.max(80, Math.min(SIZE - w.y, Math.round(newH)));
-    if (typeof contentW === "number" && contentW > 10) {
-      w.contentW = Math.round(contentW);
-    }
-    if (typeof contentH === "number" && contentH > 10) {
-      w.contentH = Math.round(contentH);
-    }
+    const resized = typeof contentW === "number" || typeof contentH === "number"
+      ? normalizeWidgetGeometry({ ...w, w: newW, h: newH, contentW: contentW ?? w.contentW, contentH: contentH ?? w.contentH, userResized: userResized ?? w.userResized, resizeMode: mode })
+      : resizeWidgetGeometry(w, mode, newW, newH);
+    Object.assign(w, resized, { userResized: userResized ?? resized.userResized });
     this.position(w);
   }
 
@@ -425,13 +434,17 @@ export class WidgetManager {
         { type: "drawva-widget-init", title: widget.title, html: widget.html },
         target
       );
+      targetWindow.postMessage(
+        { type: "drawva-widget-layout-size", width: Math.max(80, widget.contentW), height: Math.max(60, widget.contentH) },
+        target
+      );
     };
 
     const onMessage = (event: MessageEvent) => {
-      if (event.source !== frame.contentWindow) return;
+      if (event.source !== frame.contentWindow || event.origin !== location.origin) return;
       if (event.data?.type === "drawva-widget-host-ready") {
         sendInit(frame.contentWindow, event.origin);
-      } else if (event.data?.type === "drawva-widget-resize-content") {
+      } else if (event.data?.type === "drawva-widget-settled-size") {
         const { width, height } = event.data;
         if (typeof height === "number" && height > 0) {
           const w = this.widgets.get(widget.id);
@@ -448,12 +461,7 @@ export class WidgetManager {
             ) {
               return;
             }
-            w.contentW = measuredW;
-            w.contentH = measuredH;
-            if (!w.userResized) {
-              w.w = measuredW;
-              w.h = measuredH;
-            }
+            Object.assign(w, settleWidgetContent(w, measuredW, measuredH));
             this.position(w);
             if (fallbackReveal) window.clearTimeout(fallbackReveal);
             requestAnimationFrame(() => requestAnimationFrame(reveal));
@@ -546,7 +554,16 @@ export class WidgetManager {
     resizeHandle.style.cssText =
       "position:absolute;right:-4px;bottom:-4px;width:24px;height:24px;cursor:nwse-resize;z-index:10;display:none;align-items:center;justify-content:center;background:transparent;border:none;pointer-events:auto;user-select:none;";
 
-    shell.append(body, chrome, resizeHandle);
+    const resizeWidth = document.createElement("div");
+    resizeWidth.className = "drawva-widget-resize";
+    resizeWidth.title = "Resize width";
+    resizeWidth.style.cssText = "position:absolute;right:-5px;top:50%;width:10px;height:32px;transform:translateY(-50%);cursor:ew-resize;z-index:10;display:none;pointer-events:auto;";
+    const resizeHeight = document.createElement("div");
+    resizeHeight.className = "drawva-widget-resize";
+    resizeHeight.title = "Resize height";
+    resizeHeight.style.cssText = "position:absolute;bottom:-5px;left:50%;width:32px;height:10px;transform:translateX(-50%);cursor:ns-resize;z-index:10;display:none;pointer-events:auto;";
+
+    shell.append(body, chrome, resizeHandle, resizeWidth, resizeHeight);
 
     shell.addEventListener("pointerdown", (e) => {
       const target = e.target as HTMLElement | null;
@@ -563,17 +580,20 @@ export class WidgetManager {
       dragBar.setPointerCapture?.(e.pointerId);
       cb.onDragStart?.(widget.id, e);
     };
-    const beginResize = (e: PointerEvent) => {
+    const beginResize = (mode: WidgetResizeMode) => (e: PointerEvent) => {
       e.stopPropagation();
       this.setSelected(widget.id);
-      resizeHandle.setPointerCapture?.(e.pointerId);
-      cb.onResizeStart?.(widget.id, e);
+      (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+      cb.onResizeStart?.(widget.id, mode, e);
     };
     dragBar.addEventListener("pointerdown", beginDrag);
-    resizeHandle.addEventListener("pointerdown", beginResize);
+    resizeHandle.addEventListener("pointerdown", beginResize("corner"));
+    resizeWidth.addEventListener("pointerdown", beginResize("horizontal"));
+    resizeHeight.addEventListener("pointerdown", beginResize("vertical"));
     window.addEventListener("pointermove", (e) => {
       cb.onDragMove?.(widget.id, e);
-      cb.onResizeMove?.(widget.id, e);
+      const mode = this.widgets.get(widget.id)?.resizeMode ?? "corner";
+      cb.onResizeMove?.(widget.id, mode, e);
     });
     window.addEventListener("pointerup", (e) => {
       cb.onDragEnd?.(widget.id);
@@ -583,7 +603,7 @@ export class WidgetManager {
 
     this.hostRoot.append(shell);
     this.shells.set(widget.id, shell);
-    this.toolbars.set(widget.id, { chrome, dragBar, resizeHandle, refine: undefined, overlay, acceptBtn });
+    this.toolbars.set(widget.id, { chrome, dragBar, resizeHandle, resizeWidth, resizeHeight, refine: undefined, overlay, acceptBtn });
     this.applyMode(widget.id);
   }
 
@@ -604,11 +624,13 @@ export class WidgetManager {
     const relativeY = cam.panY + widget.y * cam.scale;
     const contentW = Math.max(80, widget.contentW && widget.contentW > 10 ? widget.contentW : (widget.w || 400));
     const contentH = Math.max(60, widget.contentH && widget.contentH > 10 ? widget.contentH : (widget.h || 300));
-    const s = cam.scale * Math.min(widget.w / contentW, widget.h / contentH);
+    const s = cam.scale * widgetScale(widget);
 
     shell.style.width = `${contentW}px`;
     shell.style.height = `${contentH}px`;
     shell.style.transform = `translate3d(${relativeX}px,${relativeY}px,0) scale(${s},${s})`;
+    const frame = shell.querySelector("iframe");
+    frame?.contentWindow?.postMessage({ type: "drawva-widget-layout-size", width: contentW, height: contentH }, location.origin);
 
     const offscreen =
       relativeX > viewportW ||

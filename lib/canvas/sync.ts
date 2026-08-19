@@ -24,7 +24,7 @@ export type SyncPacket =
   | { type: "SYNC_OBJECT_REMOVE"; id: string }
   | { type: "SYNC_OBJECT_MERGE"; id: string }
   | { type: "SYNC_WIDGET_ADD"; widget: WidgetItem }
-  | { type: "SYNC_WIDGET_MOVE"; id: string; x: number; y: number; w: number; h: number; contentW?: number; contentH?: number; userResized?: boolean }
+  | { type: "SYNC_WIDGET_MOVE"; id: string; x: number; y: number; w: number; h: number; contentW?: number; contentH?: number; userResized?: boolean; resizeMode?: WidgetItem["resizeMode"] }
   | { type: "SYNC_WIDGET_REMOVE"; id: string }
   | { type: "SYNC_CLEAR" }
   | { type: "SYNC_CURSOR"; x: number; y: number; mode: string; color: string; name: string };
@@ -38,7 +38,7 @@ export interface SyncHandlers {
   onRemoteObjectRemove?: (id: string) => void;
   onRemoteObjectMerge?: (id: string) => void;
   onRemoteWidgetAdd?: (widget: WidgetItem) => void;
-  onRemoteWidgetMove?: (id: string, x: number, y: number, w: number, h: number, contentW?: number, contentH?: number, userResized?: boolean) => void;
+  onRemoteWidgetMove?: (id: string, x: number, y: number, w: number, h: number, contentW?: number, contentH?: number, userResized?: boolean, resizeMode?: WidgetItem["resizeMode"]) => void;
   onRemoteWidgetRemove?: (id: string) => void;
   onRemoteClear?: () => void;
   onStatusChange?: (status: SyncStatus, code: string | null, peerCount: number, errorMsg?: string) => void;
@@ -343,7 +343,8 @@ export class SyncManager {
             safePacket.h,
             safePacket.contentW,
             safePacket.contentH,
-            safePacket.userResized
+            safePacket.userResized,
+            safePacket.resizeMode
           );
           break;
         case "SYNC_WIDGET_REMOVE":

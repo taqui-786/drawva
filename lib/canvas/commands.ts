@@ -1,5 +1,4 @@
 import { SIZE } from "./constants";
-import { extractHtmlDimensions } from "./widgets";
 
 export const MAX_COMMANDS = 16;
 export const AI_TEXT_MAX_LENGTH = 1000;
@@ -611,11 +610,6 @@ export function validateCommand(
       // Standalone HTML applets sit beside/below ink — never on top of the handwriting.
       if (placement === "match_sketch" || placement === "in_place" && !ctx.widgetEditBox) {
         c.placement = "below";
-      }
-      const estimated = typeof c.html === "string" ? extractHtmlDimensions(c.html) : null;
-      if (estimated && String(c.placement || "").toLowerCase() !== "match_sketch") {
-        c.w = estimated.width;
-        c.h = estimated.height;
       }
       const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
       if (

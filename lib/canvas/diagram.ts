@@ -288,6 +288,7 @@ export async function diagramDocument(
       width: Math.min(3200, Math.max(120, Math.ceil(w))),
       height: Math.min(5000, Math.max(80, Math.ceil(h))),
     }, "*");
+    window.parent?.postMessage({ type: "drawva-widget-updated" }, "*");
   }
 
   try {

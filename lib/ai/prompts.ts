@@ -50,8 +50,8 @@ export const CODE_SYSTEM_PROMPT_EXTRA = `Return exactly one JSON object. Do not 
     {"tool":"plot_function","expression":string,"placement":"match_sketch|below|right|top|left","w":number,"h":number},
     {"tool":"draw","points":[{"x":number,"y":number},...],"size":number},
     {"tool":"erase","mode":"rect|path","x":number,"y":number,"w":number,"h":number},
-    {"tool":"diagram_source","pluginId":"flowchart","title":string,"sourceFormat":"smiles|mermaid|dot|vega-lite|bpmn-xml|cytoscape-json|geojson","source":string,"placement":"match_sketch|in_place|below|right|top|left","diagramKind":string},
-    {"tool":"html_widget","pluginId":"general|flowchart","title":string,"html":string,"placement":"match_sketch|in_place|below|right|top|left","refreshSeconds":0,"copyText":string,"copyLabel":string,"sourceFormat":string,"frameworkVersion":string}
+    {"tool":"diagram_source","pluginId":"flowchart","title":string,"sourceFormat":"smiles|mermaid|dot|vega-lite|bpmn-xml|cytoscape-json|geojson","source":string,"w":number,"h":number,"placement":"match_sketch|in_place|below|right|top|left","diagramKind":string},
+    {"tool":"html_widget","pluginId":"general|flowchart","title":string,"html":string,"w":number,"h":number,"placement":"match_sketch|in_place|below|right|top|left","refreshSeconds":0,"copyText":string,"copyLabel":string,"sourceFormat":string,"frameworkVersion":string}
   ]
 }
 Every command MUST identify its tool with property "tool". commands has 1..16 items.`;
@@ -68,7 +68,7 @@ export const PLUGIN_ROUTING_PROMPT = `PLUGIN ROUTING
 General HTML (pluginId "general") is always available. Use native draw only for a very simple static sketch of about 10 or fewer primitives. For larger static visuals, animation, simulation, illustration, or custom graphics, use html_widget with pluginId "general" and prefer compact inline SVG. Use diagram_source when a built-in professional format (mermaid, dot, vega-lite, smiles, bpmn-xml, cytoscape-json, geojson) faithfully fits. For current or changing public information, prefer a network-backed html_widget that fetches at runtime with a refreshSeconds interval appropriate to the source. Do not approximate a visual by splitting it into many write_text commands. A plugin/widget command must be the only returned command.`;
 
 export const HTML_WIDGET_RULES = `HTML WIDGET RULES (html_widget)
-- Generate one complete HTML document. Use {tool:"html_widget",pluginId,title,html,placement,refreshSeconds,copyText?,copyLabel?,diagramKind?,sourceFormat?,frameworkVersion?}.
+- Generate one complete HTML document. Use {tool:"html_widget",pluginId,title,html,w,h,placement,refreshSeconds,copyText?,copyLabel?,diagramKind?,sourceFormat?,frameworkVersion?}. Choose w/h for the actual content: compact applets 360–600×240–440, charts/dashboards 640–1100×380–720, vertical flows tall, and wide diagrams wide. x/y are client-owned.
 - pluginId is "general" unless a professional source needs pluginId "flowchart".
 - Placement is semantic: any standalone UI uses "below" or another empty side — never overlap the user's handwriting. Overlay existing canvas content with a transparent SVG using "match_sketch" only when annotating that drawing.
 - If the user asks for several related things, put ALL of them in this one html_widget (row or compact grid). Use width:max-content / fit-content so every item is visible. Do not clip, scroll, or omit parts. The client measures the rendered content and fits the iframe to it.
@@ -92,6 +92,7 @@ export const WRITE_TEXT_RULES = `STRUCTURED TEXT RULES (write_text)
 export const FLOWCHART_RULES = `PROFESSIONAL DIAGRAM RULES (diagram_source)
 Prefer diagram_source whenever one of these local renderers faithfully fits. source must be a complete reusable professional document — not a fragment, HTML, SVG, or renderer code. Drawva supplies the iframe, renderer, and Copy button.
 
+- Include content-based w and h in every diagram_source (compact molecule 340×240; chart 640–1000×380–700; vertical flowchart taller; wide dependency diagram wider). x/y are client-owned and placement stays semantic.
 - smiles: 2D molecular structures (Aspirin 'CC(=O)Oc1ccccc1C(=O)O', Ethanol 'CCO', Benzene 'c1ccccc1'). ONLY the raw SMILES string. Compact/abbreviated request → diagramKind "molecular-structure-compact". HARD BAN: never format chemistry as Mermaid.
 - mermaid: flowcharts, sequence, state, class, ER, mind maps, Gantt. Quote any label that contains parentheses, brackets, colons, or punctuation: NodeID["Label (with info)"]. Vertical sketches → flowchart TD; horizontal → flowchart LR. Decision nodes: NodeID{"Condition?"}. For more than about 10 nodes, partition into 3–5 phases/subgraphs. For responsive flowcharts add %% drawva:responsive, use top-level flowchart LR, and direction TB inside phase subgraphs. Do not repeat the widget title as a Mermaid title.
 - vega-lite: complete Vega-Lite JSON for statistical / scientific / comparative charts.
