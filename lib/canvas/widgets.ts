@@ -398,7 +398,7 @@ export class WidgetManager {
     shell.dataset.ready = "false";
     shell.className = "drawva-widget-shell";
     shell.style.cssText =
-      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;opacity:0;transition:opacity 0.12s ease;";
+      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;opacity:0;transition:opacity 0.12s ease;touch-action:none;overscroll-behavior:contain;";
 
     let revealed = false;
     const reveal = () => {
@@ -417,11 +417,11 @@ export class WidgetManager {
     const body = document.createElement("div");
     body.className = "drawva-widget-body";
     body.style.cssText =
-      "width:100%;height:100%;flex:1;position:relative;border-radius:8px;overflow:hidden;background:transparent;";
+      "width:100%;height:100%;flex:1;position:relative;border-radius:8px;overflow:hidden;background:transparent;touch-action:none;overscroll-behavior:contain;";
 
     const frame = document.createElement("iframe");
     frame.style.cssText =
-      "width:100%;height:100%;border:0;display:block;background:transparent;";
+      "width:100%;height:100%;border:0;display:block;background:transparent;touch-action:none;";
     frame.referrerPolicy = "no-referrer";
     frame.title = widget.title;
 
@@ -487,7 +487,7 @@ export class WidgetManager {
     const chrome = document.createElement("div");
     chrome.className = "drawva-widget-chrome";
     chrome.style.cssText =
-      "position:absolute;left:0;right:0;top:-30px;height:24px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;";
+      "position:absolute;left:0;right:0;top:-32px;height:28px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;touch-action:none;";
 
     const leftGroup = document.createElement("div");
     leftGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
@@ -498,7 +498,7 @@ export class WidgetManager {
     acceptBtn.innerHTML = ACCEPT_SVG;
     acceptBtn.title = "Accept & keep widget";
     acceptBtn.style.cssText =
-      "width:24px;height:24px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;";
+      "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
     acceptBtn.style.display = widget.status === "draft" ? "inline-flex" : "none";
     acceptBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     acceptBtn.addEventListener("click", (e) => {
@@ -512,7 +512,7 @@ export class WidgetManager {
     copyBtn.innerHTML = COPY_SVG;
     copyBtn.title = widget.copyLabel ? `Copy ${widget.copyLabel}` : "Copy source code";
     copyBtn.style.cssText =
-      "width:24px;height:24px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;";
+      "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
     copyBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     copyBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -526,7 +526,7 @@ export class WidgetManager {
     dragBar.innerHTML = DRAG_SVG;
     dragBar.title = `Drag ${widget.title}`;
     dragBar.style.cssText =
-      "position:absolute;left:50%;transform:translateX(-50%);width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;cursor:grab;background:transparent;border:none;pointer-events:auto;user-select:none;";
+      "position:absolute;left:50%;transform:translateX(-50%);width:36px;height:32px;display:inline-flex;align-items:center;justify-content:center;cursor:grab;background:transparent;border:none;pointer-events:auto;user-select:none;touch-action:none;";
 
     const rightGroup = document.createElement("div");
     rightGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
@@ -537,7 +537,7 @@ export class WidgetManager {
     closeBtn.innerHTML = REMOVE_SVG;
     closeBtn.title = "Remove widget";
     closeBtn.style.cssText =
-      "width:24px;height:24px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;";
+      "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
     closeBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     closeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -552,16 +552,16 @@ export class WidgetManager {
     resizeHandle.innerHTML = RESIZE_SVG;
     resizeHandle.title = "Resize widget";
     resizeHandle.style.cssText =
-      "position:absolute;right:-4px;bottom:-4px;width:24px;height:24px;cursor:nwse-resize;z-index:10;display:none;align-items:center;justify-content:center;background:transparent;border:none;pointer-events:auto;user-select:none;";
+      "position:absolute;right:-6px;bottom:-6px;width:32px;height:32px;cursor:nwse-resize;z-index:10;display:none;align-items:center;justify-content:center;background:transparent;border:none;pointer-events:auto;user-select:none;touch-action:none;";
 
     const resizeWidth = document.createElement("div");
     resizeWidth.className = "drawva-widget-resize";
     resizeWidth.title = "Resize width";
-    resizeWidth.style.cssText = "position:absolute;right:-5px;top:50%;width:10px;height:32px;transform:translateY(-50%);cursor:ew-resize;z-index:10;display:none;pointer-events:auto;";
+    resizeWidth.style.cssText = "position:absolute;right:-10px;top:50%;width:24px;height:48px;transform:translateY(-50%);cursor:ew-resize;z-index:10;display:none;pointer-events:auto;touch-action:none;";
     const resizeHeight = document.createElement("div");
     resizeHeight.className = "drawva-widget-resize";
     resizeHeight.title = "Resize height";
-    resizeHeight.style.cssText = "position:absolute;bottom:-5px;left:50%;width:32px;height:10px;transform:translateX(-50%);cursor:ns-resize;z-index:10;display:none;pointer-events:auto;";
+    resizeHeight.style.cssText = "position:absolute;bottom:-10px;left:50%;width:48px;height:24px;transform:translateX(-50%);cursor:ns-resize;z-index:10;display:none;pointer-events:auto;touch-action:none;";
 
     shell.append(body, chrome, resizeHandle, resizeWidth, resizeHeight);
 

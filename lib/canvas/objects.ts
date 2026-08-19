@@ -289,12 +289,12 @@ export class ObjectManager {
     shell.dataset.hovered = "false";
     shell.className = "drawva-object-shell";
     shell.style.cssText =
-      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:8px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;user-select:none;";
+      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:8px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;user-select:none;touch-action:none;overscroll-behavior:contain;";
 
     const body = document.createElement("div");
     body.className = "drawva-object-body";
     body.style.cssText =
-      "width:100%;height:100%;flex:1;position:relative;border-radius:6px;overflow:hidden;";
+      "width:100%;height:100%;flex:1;position:relative;border-radius:6px;overflow:hidden;touch-action:none;overscroll-behavior:contain;";
 
     const img = document.createElement("img");
     img.draggable = false;
@@ -308,7 +308,7 @@ export class ObjectManager {
     const chrome = document.createElement("div");
     chrome.className = "drawva-object-chrome";
     chrome.style.cssText =
-      "position:absolute;left:0;right:0;top:-30px;height:24px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;";
+      "position:absolute;left:0;right:0;top:-32px;height:28px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;touch-action:none;";
 
     const leftGroup = document.createElement("div");
     leftGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
@@ -319,7 +319,7 @@ export class ObjectManager {
     acceptBtn.innerHTML = ACCEPT_SVG;
     acceptBtn.title = `Accept & keep ${item.kind}`;
     acceptBtn.style.cssText =
-      "width:24px;height:24px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;";
+      "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
     acceptBtn.style.display = item.status === "draft" ? "inline-flex" : "none";
     acceptBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     acceptBtn.addEventListener("click", (e) => {
@@ -333,7 +333,7 @@ export class ObjectManager {
     copyBtn.innerHTML = COPY_SVG;
     copyBtn.title = "Copy source";
     copyBtn.style.cssText =
-      "width:24px;height:24px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;";
+      "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
     copyBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     copyBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -347,7 +347,7 @@ export class ObjectManager {
     dragBar.innerHTML = DRAG_SVG;
     dragBar.title = `Drag ${item.kind}`;
     dragBar.style.cssText =
-      "position:absolute;left:50%;transform:translateX(-50%);width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;cursor:grab;background:transparent;border:none;pointer-events:auto;user-select:none;";
+      "position:absolute;left:50%;transform:translateX(-50%);width:36px;height:32px;display:inline-flex;align-items:center;justify-content:center;cursor:grab;background:transparent;border:none;pointer-events:auto;user-select:none;touch-action:none;";
 
     const rightGroup = document.createElement("div");
     rightGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
@@ -358,7 +358,7 @@ export class ObjectManager {
     mergeBtn.innerHTML = MERGE_SVG;
     mergeBtn.title = "Merge to ink (erasable)";
     mergeBtn.style.cssText =
-      "width:24px;height:24px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;";
+      "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
     mergeBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     mergeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -371,7 +371,7 @@ export class ObjectManager {
     removeBtn.innerHTML = REMOVE_SVG;
     removeBtn.title = "Remove";
     removeBtn.style.cssText =
-      "width:24px;height:24px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;";
+      "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
     removeBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     removeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -386,7 +386,7 @@ export class ObjectManager {
     resizeHandle.innerHTML = RESIZE_SVG;
     resizeHandle.title = "Resize";
     resizeHandle.style.cssText =
-      "position:absolute;right:-4px;bottom:-4px;width:24px;height:24px;cursor:nwse-resize;z-index:10;display:none;align-items:center;justify-content:center;background:transparent;border:none;pointer-events:auto;user-select:none;";
+      "position:absolute;right:-6px;bottom:-6px;width:32px;height:32px;cursor:nwse-resize;z-index:10;display:none;align-items:center;justify-content:center;background:transparent;border:none;pointer-events:auto;user-select:none;touch-action:none;";
 
     shell.append(body, chrome, resizeHandle);
 

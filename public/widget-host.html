@@ -207,7 +207,10 @@
             clientX: e.clientX,
             clientY: e.clientY,
             deltaX: e.deltaX,
-            deltaY: e.deltaY
+            deltaY: e.deltaY,
+            ctrlKey: !!e.ctrlKey,
+            metaKey: !!e.metaKey,
+            deltaMode: e.deltaMode || 0
           }, '*');
         }, { passive: false });
 
@@ -228,7 +231,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;min-width:0;height:auto;min-height:0}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;min-width:0;height:auto;min-height:0;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;
@@ -266,7 +269,10 @@
         clientX: data.clientX,
         clientY: data.clientY,
         deltaX: data.deltaX,
-        deltaY: data.deltaY
+        deltaY: data.deltaY,
+        ctrlKey: !!data.ctrlKey,
+        metaKey: !!data.metaKey,
+        deltaMode: data.deltaMode || 0
       });
     } else if (data.type === "drawva-widget-inner-pointerdown") {
       if (!fromInner) return;
@@ -293,7 +299,10 @@
       clientX: ev.clientX,
       clientY: ev.clientY,
       deltaX: ev.deltaX,
-      deltaY: ev.deltaY
+      deltaY: ev.deltaY,
+      ctrlKey: !!ev.ctrlKey,
+      metaKey: !!ev.metaKey,
+      deltaMode: ev.deltaMode || 0
     });
   }, { passive: false });
 

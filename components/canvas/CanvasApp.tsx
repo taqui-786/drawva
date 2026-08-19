@@ -1184,7 +1184,15 @@ export function CanvasApp() {
             break;
           }
         }
-        engine.camera.zoomAt(screenX, screenY, e.data.deltaY);
+        engine.camera.handleWheel({
+          clientX: screenX,
+          clientY: screenY,
+          deltaX: typeof e.data.deltaX === "number" ? e.data.deltaX : 0,
+          deltaY: typeof e.data.deltaY === "number" ? e.data.deltaY : 0,
+          ctrlKey: !!e.data.ctrlKey,
+          metaKey: !!e.data.metaKey,
+          deltaMode: typeof e.data.deltaMode === "number" ? e.data.deltaMode : 0,
+        });
         engine.requestRender();
       }
     };
@@ -1532,7 +1540,7 @@ export function CanvasApp() {
   const onWheel = (e: React.WheelEvent) => {
     if (!engine) return;
     e.preventDefault();
-    engine.camera.zoomAt(e.clientX, e.clientY, e.deltaY);
+    engine.camera.handleWheel(e.nativeEvent);
     engine.requestRender();
   };
 
