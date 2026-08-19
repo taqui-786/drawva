@@ -325,7 +325,7 @@ export function CanvasApp() {
       const allWidgets = wm.all();
       for (const w of allWidgets) {
         const dist = distanceBetweenRects(box, { x: w.x, y: w.y, w: w.w, h: w.h });
-        if (dist <= 120 && dist < minDistance) {
+        if (dist <= 350 && dist < minDistance) {
           minDistance = dist;
           closestWidget = w;
         }
@@ -849,9 +849,12 @@ export function CanvasApp() {
       if (cmd.tool !== "html_widget") return;
       const targetId = activeEditTargetRef.current;
       let oldWidget = targetId ? wm.get(targetId) : null;
-      if (!oldWidget && cmd.title) {
+      if (!oldWidget) {
         for (const w of wm.all()) {
-          if (w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 200) {
+          const isExactMatch = Math.abs(w.x - cmd.x) < 5 && Math.abs(w.y - cmd.y) < 5;
+          const isTitleMatch = cmd.title && w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 300;
+          const isInPlace = (cmd as { placement?: string }).placement === "in_place" && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 350;
+          if (isExactMatch || isTitleMatch || isInPlace) {
             oldWidget = w;
             break;
           }
@@ -961,9 +964,12 @@ export function CanvasApp() {
       if (cmd.tool !== "diagram_source") return;
       const targetId = activeEditTargetRef.current;
       let oldWidget = targetId ? wm.get(targetId) : null;
-      if (!oldWidget && cmd.title) {
+      if (!oldWidget) {
         for (const w of wm.all()) {
-          if (w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 200) {
+          const isExactMatch = Math.abs(w.x - cmd.x) < 5 && Math.abs(w.y - cmd.y) < 5;
+          const isTitleMatch = cmd.title && w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 300;
+          const isInPlace = (cmd as { placement?: string }).placement === "in_place" && w.kind === "diagram" && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 350;
+          if (isExactMatch || isTitleMatch || isInPlace) {
             oldWidget = w;
             break;
           }

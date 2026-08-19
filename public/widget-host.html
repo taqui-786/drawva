@@ -116,6 +116,14 @@
           try {
             const svg = document.querySelector('svg');
             if (!svg) {
+              const canvasEl = document.querySelector('canvas');
+              if (canvasEl && canvasEl.width > 2 && canvasEl.height > 2) {
+                try {
+                  const dataUrl = canvasEl.toDataURL('image/webp', 0.9);
+                  window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: dataUrl, w: canvasEl.width, h: canvasEl.height }, '*');
+                  return;
+                } catch (e2) {}
+              }
               window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
               return;
             }

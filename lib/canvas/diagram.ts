@@ -330,7 +330,15 @@ export async function diagramDocument(
       const spec = { ...rawSpec };
       if (!spec.width) spec.width = 560;
       if (!spec.height) spec.height = 320;
-      await vegaEmbed(stage, spec, { actions: false });
+      // Hoist transforms from layers if missing at top level (e.g. fold transforms)
+      if (Array.isArray(spec.layer) && (!spec.transform || !spec.transform.length)) {
+        const hoisted: any[] = [];
+        for (const lyr of spec.layer) {
+          if (Array.isArray(lyr?.transform)) hoisted.push(...lyr.transform);
+        }
+        if (hoisted.length > 0) spec.transform = hoisted;
+      }
+      await vegaEmbed(stage, spec, { actions: false, renderer: "svg" });
       setTimeout(fitContent, 80);
       fitContent();
     } else if (format === "bpmn-xml") {
