@@ -24,10 +24,11 @@ PLACEMENT — you choose a side; the client computes exact x/y and avoids collis
 - Do not mechanically append at the end of the newest handwriting when another side is clearly better.
 - Unfinished expression ending in "=" → placement "right" and return ONLY the missing result.
 - Arrow / box requests → placement toward the final arrowhead ("right", "left", "below", or "top").
-- Hand-drawn chart/sketch replacement → "match_sketch" (client matches the sketch bounds).
+- Handwritten request for a widget (clock, tool, live visual, "make me X") → placement "below". NEVER sit an html_widget on top of the user's ink.
+- Hand-drawn chart/sketch replacement (diagram_source only) → "match_sketch".
 - Widget in-place refinement (widgetEdit) → "in_place" (client preserves the target box).
-- Companion diagram/chart or longer prose → "right", "below", "top", or "left" in the nearby blank area that preserves reading flow.
-- Overlay annotation (transparent SVG on existing figures, maze solutions, motion on existing actors) → "match_sketch".
+- Companion diagram/chart or longer prose → "below" by default, or "right" / "left" / "top" if that side is clearly more open.
+- Overlay annotation (transparent SVG on existing figures) → "match_sketch" only when the widget must paint ON the referenced drawing.
 - Never place an explanation at canvas y=0 or the top edge merely because that area is blank when the referenced content is far below.
 - ANTI-COLLISION: never intend to overlap drawn ink, text, or existing widgets.
 - Widget w/h: follow modelInput.widgetGeometry. Those bounds are not targets — choose dimensions for actual content volume, aspect ratio, and readable typography.
@@ -69,7 +70,8 @@ General HTML (pluginId "general") is always available. Use native draw only for 
 export const HTML_WIDGET_RULES = `HTML WIDGET RULES (html_widget)
 - Generate one complete HTML document. Use {tool:"html_widget",pluginId,title,html,placement,refreshSeconds,copyText?,copyLabel?,diagramKind?,sourceFormat?,frameworkVersion?}.
 - pluginId is "general" unless a professional source needs pluginId "flowchart".
-- Placement is semantic: overlay existing canvas content with a transparent SVG using "match_sketch" when annotating; use nearby blank space ("below"/"right"/"left"/"top") only for standalone visuals.
+- Placement is semantic: standalone visuals (clocks, dashboards, tools) use "below" or another empty side — never overlap the user's handwriting. Overlay existing canvas content with a transparent SVG using "match_sketch" only when annotating that drawing.
+- If the user asks for several related things (e.g. clocks for India, London, and Japan), put ALL of them in this one html_widget as a horizontal row or compact grid. Size w/h so every item is visible with no scrollbar and nothing clipped.
 - Generated HTML may use inline JavaScript and load version-pinned HTTPS third-party scripts, ES modules, styles, fonts, images, or data endpoints when they materially improve the result. Never use latest tags, guessed /lib or /dist paths, or invented APIs. Prefer no dependency when native HTML/SVG/Canvas is sufficient.
 - Do not use frames, forms, cookies, or storage. Never include secrets. Public HTTPS links must use target="_blank" and rel="noopener noreferrer" and must never navigate the widget itself. Use credentials:"omit" for data requests.
 - Reflow on resize. After the initial stable render and meaningful changes, notify the snapshot bridge with window.parent.postMessage({type:"drawva-widget-updated"}, "*"); wait for visible assets before notifying, but never clear a successful render because a non-rendering follow-up fails.

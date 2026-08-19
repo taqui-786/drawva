@@ -261,6 +261,37 @@ export function CanvasHeader({
           Drawva
         </span>
 
+        {/* Version Indicator Tag */}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <span className="cursor-pointer font-mono text-[10px] font-semibold text-muted-foreground/60 hover:text-foreground transition-colors px-1.5 py-0.5 rounded border border-transparent hover:border-border/40 hover:bg-muted/40 select-none">
+                v3.0
+              </span>
+            }
+          />
+          <TooltipContent
+            side="bottom"
+            align="start"
+            className="w-56 p-2.5 flex flex-col gap-1.5 bg-popover text-popover-foreground border border-border shadow-xs rounded-md font-mono text-xs"
+          >
+            <div className="flex items-center justify-between text-xs font-semibold">
+              <span>Drawva Engine</span>
+              <span className="text-[10px] text-muted-foreground font-normal">v3.0.0</span>
+            </div>
+            <div className="flex flex-col gap-1 border-t border-border/40 pt-1.5 text-[10px] text-muted-foreground">
+              <div className="flex justify-between">
+                <span>Build:</span>
+                <span className="text-foreground">v3.0.0</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Environment:</span>
+                <span className="text-foreground">Production</span>
+              </div>
+            </div>
+          </TooltipContent>
+        </Tooltip>
+
         {/* Compact Main Menu Bar */}
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -618,28 +649,25 @@ export function CanvasHeader({
             >
               {aiStatus === "done" && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.9, y: 1 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ duration: 0.2 }}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 border border-emerald-500/25 shadow-xs select-none"
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  transition={{ duration: 0.15 }}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/30 px-2 py-0.5 text-[11px] font-mono text-muted-foreground select-none"
                 >
-                  <span className="relative flex size-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex size-1.5 rounded-full bg-emerald-500" />
-                  </span>
+                  <span className="size-1.5 rounded-full bg-emerald-500" />
                   <span>Ready</span>
                 </motion.div>
               )}
 
               {aiStatus === "error" && (
                 <motion.div
-                  initial={{ opacity: 0, scale: 0.9 }}
+                  initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  className="inline-flex items-center gap-1.5 rounded-full bg-destructive/10 px-2.5 py-0.5 text-[11px] font-medium text-destructive border border-destructive/25 shadow-xs select-none"
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-0.5 text-[11px] font-mono text-destructive select-none"
                 >
-                  <span className="size-1.5 rounded-full bg-destructive animate-pulse" />
+                  <span className="size-1.5 rounded-full bg-destructive" />
                   <span>Failed</span>
                 </motion.div>
               )}

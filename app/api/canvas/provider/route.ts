@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
-import { PROVIDER_INFOS, type ProviderType, type CustomModel } from "@/lib/ai/provider";
+import {
+  PROVIDER_INFOS,
+  type ProviderType,
+  type CustomModel,
+} from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
 
@@ -32,15 +36,21 @@ export async function POST(req: Request) {
 
   const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
-  const baseUrlInput = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
-  const customModels = Array.isArray(body.customModels) ? body.customModels : [];
+  const baseUrlInput =
+    typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  const customModels = Array.isArray(body.customModels)
+    ? body.customModels
+    : [];
 
   if (!apiKey) {
     return json({ error: "Missing API key" }, 400);
   }
 
   if (providerType === "custom" && !baseUrlInput && customModels.length === 0) {
-    return json({ error: "Custom provider requires a Base URL or custom models list." }, 400);
+    return json(
+      { error: "Custom provider requires a Base URL or custom models list." },
+      400,
+    );
   }
 
   const info = PROVIDER_INFOS[providerType] || PROVIDER_INFOS.custom;
@@ -78,10 +88,18 @@ export async function POST(req: Request) {
             data?: Array<Record<string, unknown>>;
             models?: Array<Record<string, unknown>>;
           };
-          const rawRows = Array.isArray(data.data) ? data.data : Array.isArray(data.models) ? data.models : [];
-          const rows = rawRows.filter((m) => typeof m?.id === "string" || typeof m?.name === "string");
+          const rawRows = Array.isArray(data.data)
+            ? data.data
+            : Array.isArray(data.models)
+              ? data.models
+              : [];
+          const rows = rawRows.filter(
+            (m) => typeof m?.id === "string" || typeof m?.name === "string",
+          );
           if (rows.length > 0) {
-            const compatible = rows.filter((m) => providerType === "custom" || isCompatibleModel(m));
+            const compatible = rows.filter(
+              (m) => providerType === "custom" || isCompatibleModel(m),
+            );
             fetchedModels = compatible.map((m) => String(m.id || m.name));
             if (fetchedModels.length > 0) break;
           }
@@ -108,7 +126,10 @@ export async function POST(req: Request) {
   }
 
   for (const m of fetchedModels) {
-    if (!combinedCandidates.includes(m) && (providerType === "custom" || isCompatibleModel(m))) {
+    if (
+      !combinedCandidates.includes(m) &&
+      (providerType === "custom" || isCompatibleModel(m))
+    ) {
       combinedCandidates.push(m);
     }
   }
@@ -130,11 +151,15 @@ export async function POST(req: Request) {
           fetchError ||
           "No vision-supported models found for this provider configuration.",
       },
-      422
+      422,
     );
   }
 
-  return json({ models: combinedCandidates, filteredByVision: true, providerType });
+  return json({
+    models: combinedCandidates,
+    filteredByVision: true,
+    providerType,
+  });
 }
 
 function hasModality(list: string[], value: string): boolean {
@@ -147,7 +172,10 @@ function isCompatibleModel(m: Record<string, unknown> | string): boolean {
   if (cap !== null) {
     return cap;
   }
-  const id = typeof modelObj.id === "string" ? modelObj.id.toLowerCase() : String(m).toLowerCase();
+  const id =
+    typeof modelObj.id === "string"
+      ? modelObj.id.toLowerCase()
+      : String(m).toLowerCase();
   return (
     id.includes("vision") ||
     id.includes("-vl") ||

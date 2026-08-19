@@ -1002,8 +1002,8 @@ export function CanvasApp() {
       }
       activeEditTargetRef.current = null;
       const estimated = extractHtmlDimensions(cmd.html);
-      const initialW = oldWidget ? oldWidget.w : Math.round(estimated?.width || cmd.w);
-      const initialH = oldWidget ? oldWidget.h : Math.round(estimated?.height || cmd.h);
+      const initialW = oldWidget ? oldWidget.w : Math.round(Math.max(cmd.w, estimated?.width || 0));
+      const initialH = oldWidget ? oldWidget.h : Math.round(Math.max(cmd.h, estimated?.height || 0));
 
       const item: WidgetItem = {
         id: oldWidget?.id || targetId || `widget-${Date.now()}`,

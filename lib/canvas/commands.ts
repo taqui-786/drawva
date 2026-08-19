@@ -178,19 +178,27 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
+const PLACE_GAP = 56;
+
 function overlaps(
   a: { x: number; y: number; w: number; h: number },
   b: { x: number; y: number; w: number; h: number },
-  pad = 16
+  pad = 28
 ): boolean {
   return a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad;
 }
 
 function inView(
   box: { x: number; y: number; w: number; h: number },
-  view?: { x: number; y: number; w: number; h: number }
+  view?: { x: number; y: number; w: number; h: number },
+  loose = false
 ): boolean {
   if (!view) return true;
+  if (loose) {
+    const ix = Math.max(0, Math.min(box.x + box.w, view.x + view.w) - Math.max(box.x, view.x));
+    const iy = Math.max(0, Math.min(box.y + box.h, view.y + view.h) - Math.max(box.y, view.y));
+    return ix * iy >= box.w * box.h * 0.35;
+  }
   return box.x >= view.x && box.y >= view.y && box.x + box.w <= view.x + view.w && box.y + box.h <= view.y + view.h;
 }
 
@@ -201,14 +209,13 @@ function slotFor(
   w: number,
   h: number,
   dir: Side,
-  gap = 24
+  gap = PLACE_GAP
 ): { x: number; y: number } {
-  const cx = anchor.x + anchor.w / 2;
-  const alignedX = clampNum(cx - w / 2, 0, SIZE - w);
+  const leftX = clampNum(Math.round(anchor.x), 0, SIZE - w);
   if (dir === "right") return { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) };
   if (dir === "left") return { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) };
-  if (dir === "top") return { x: alignedX, y: Math.round(anchor.y - h - gap) };
-  return { x: alignedX, y: Math.round(anchor.y + anchor.h + gap) };
+  if (dir === "top") return { x: leftX, y: Math.round(anchor.y - h - gap) };
+  return { x: leftX, y: Math.round(anchor.y + anchor.h + gap) };
 }
 
 function roomOnSide(
@@ -221,7 +228,7 @@ function roomOnSide(
 ): number {
   const p = slotFor(anchor, w, h, dir);
   const box = { x: clampNum(p.x, 0, SIZE - w), y: clampNum(p.y, 0, SIZE - h), w, h };
-  if (!inView(box, view)) return -1;
+  if (!inView(box, view, dir === "below")) return -1;
   if ((items || []).some((it) => overlaps(box, it))) return -1;
   if (!view) return w * h;
   if (dir === "right") return view.x + view.w - (anchor.x + anchor.w);
@@ -289,11 +296,21 @@ function placeAroundAnchor(
       w,
       h,
     };
-    if (!inView(box, view)) continue;
+    if (!inView(box, view, dir === "below" || dir === preferred)) continue;
     if (blockers.some((it) => overlaps(box, it))) continue;
     return { x: box.x, y: box.y };
   }
-  return slots.below;
+  const below = slots.below;
+  return { x: clampNum(below.x, 0, SIZE - w), y: clampNum(below.y, 0, SIZE - h) };
+}
+
+function occupancy(
+  changedBox?: { x: number; y: number; w: number; h: number },
+  sceneItems?: Array<{ x: number; y: number; w: number; h: number }>
+): Array<{ x: number; y: number; w: number; h: number }> {
+  const items = [...(sceneItems || [])];
+  if (changedBox && changedBox.w > 8 && changedBox.h > 8) items.push(changedBox);
+  return items;
 }
 
 function inferTextPlacement(placement: string, text: string): string {
@@ -383,12 +400,14 @@ function fitWidgetGeometry(
     y < SIZE - h &&
     (!visibleRect || (x >= visibleRect.x - 500 && x <= visibleRect.x + visibleRect.w + 500 && y >= visibleRect.y - 500 && y <= visibleRect.y + visibleRect.h + 500));
 
+  const blockers = occupancy(changedBox, sceneItems);
+
   if (placement === "match_sketch" && hasAnchor && changedBox) {
     x = Math.round(changedBox.x);
     y = Math.round(changedBox.y);
   } else if (hasAnchor && changedBox && (placement === "below" || placement === "right" || placement === "left" || placement === "top" || reposition || !hasValidExplicitCoords)) {
-    const preferred = pickPreferredSide(placement, changedBox, w, h, visibleRect, sceneItems, "below");
-    const near = placeAroundAnchor(changedBox, w, h, visibleRect, sceneItems, preferred);
+    const preferred = pickPreferredSide(placement, changedBox, w, h, visibleRect, blockers, "below");
+    const near = placeAroundAnchor(changedBox, w, h, visibleRect, blockers, preferred);
     x = near.x;
     y = near.y;
   } else if (placement === "below" || reposition || !hasValidExplicitCoords) {
@@ -461,13 +480,14 @@ export function validateCommand(
       if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0) {
         const lines = Math.min(8, Math.max(2, text.split("\n").length + 1));
         const blockH = Math.round(fontSize * lineHeight * lines);
+        const blockers = occupancy(ctx.changedBox, ctx.sceneItems);
         const preferred = pickPreferredSide(
           inferTextPlacement(placement, text),
           ctx.changedBox,
           maxWidth,
           blockH,
           ctx.visibleRect,
-          ctx.sceneItems,
+          blockers,
           "below"
         );
         const near = placeAroundAnchor(
@@ -475,7 +495,7 @@ export function validateCommand(
           maxWidth,
           blockH,
           ctx.visibleRect,
-          ctx.sceneItems,
+          blockers,
           preferred
         );
         x = near.x;
@@ -523,13 +543,14 @@ export function validateCommand(
 
       if (ctx.changedBox && ctx.changedBox.w > 0 && ctx.changedBox.h > 0 && (placement === "right" || placement === "left" || placement === "top" || placement === "below" || !hasValidCoords)) {
         const formulaH = Math.round(fontSize * 1.8);
+        const blockers = occupancy(ctx.changedBox, ctx.sceneItems);
         const preferred = pickPreferredSide(
           inferTextPlacement(placement, latex),
           ctx.changedBox,
           estimatedWidth,
           formulaH,
           ctx.visibleRect,
-          ctx.sceneItems,
+          blockers,
           "below"
         );
         const near = placeAroundAnchor(
@@ -537,7 +558,7 @@ export function validateCommand(
           estimatedWidth,
           formulaH,
           ctx.visibleRect,
-          ctx.sceneItems,
+          blockers,
           preferred
         );
         x = near.x;
@@ -587,6 +608,10 @@ export function validateCommand(
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim() : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim() : "";
+      // Standalone HTML applets sit beside/below ink — never on top of the handwriting.
+      if (placement === "match_sketch" || placement === "in_place" && !ctx.widgetEditBox) {
+        c.placement = "below";
+      }
       const estimated = typeof c.html === "string" ? extractHtmlDimensions(c.html) : null;
       if (estimated && String(c.placement || "").toLowerCase() !== "match_sketch") {
         c.w = estimated.width;

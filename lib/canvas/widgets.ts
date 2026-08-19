@@ -88,9 +88,6 @@ export function extractHtmlDimensions(html: string): { width: number; height: nu
   if (/<(?:form|input|button|textarea|select)\b/i.test(html)) {
     return { width: 360, height: 480 };
   }
-  if (/counter|clock|stopwatch|timer|toggle|badge|pill/i.test(html) && html.length < 2500) {
-    return { width: 320, height: 220 };
-  }
   return null;
 }
 
@@ -450,8 +447,8 @@ export class WidgetManager {
                 : w.contentW;
             if (w.kind === "html" && measuredW < 280) measuredW = Math.max(w.contentW, 360);
             if (w.kind === "html" && measuredH < 80 && measuredW > measuredH * 5) return;
-            if (w.kind === "html" && measuredH > 80 && measuredW > measuredH * 3) {
-              measuredW = Math.max(280, Math.round(measuredH));
+            if (w.kind === "html" && measuredW > 1400 && measuredH < 400 && measuredW > measuredH * 4) {
+              measuredW = Math.max(w.contentW, Math.min(960, Math.round(measuredH * 2.4)));
             }
             if (
               Math.abs(measuredW - w.contentW) <= 2 &&
