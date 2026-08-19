@@ -41,7 +41,11 @@ import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
 import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel, addTokenUsageRecord } from "@/lib/ai/provider";
 import { Textarea } from "@/components/ui/textarea";
-import { SyncManager, type SyncStatus } from "@/lib/canvas/sync";
+import {
+  SyncManager,
+  type SyncStatus,
+  getStoredP2PSession,
+} from "@/lib/canvas/sync";
 import { ConnectDialog } from "./ConnectDialog";
 import { strokeSegment } from "@/lib/canvas/strokes";
 
@@ -785,13 +789,13 @@ export function CanvasApp() {
           wm.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
           const item = wm.get(id);
-          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h });
+          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized });
           syncGeometryRef.current();
         },
         onDragEnd: (id) => {
           widgetDrag.current = null;
           const item = wm.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h });
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized });
           afterBoardChangeRef.current();
           syncGeometryRef.current();
         },
@@ -808,13 +812,13 @@ export function CanvasApp() {
           wm.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
           g.last = { x: e.clientX, y: e.clientY };
           const resized = wm.get(id);
-          if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h });
+          if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h, contentW: resized.contentW, contentH: resized.contentH, userResized: resized.userResized });
           syncGeometryRef.current();
         },
         onResizeEnd: (id) => {
           widgetResize.current = null;
           const item = wm.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h });
+          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized });
           afterBoardChangeRef.current();
           syncGeometryRef.current();
         },
@@ -1217,11 +1221,11 @@ export function CanvasApp() {
         widgets.current?.add(w);
         syncGeometryRef.current();
       },
-      onRemoteWidgetMove: (id, x, y, w, h) => {
+      onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized) => {
         if (widgets.current?.has(id)) {
           const currentItem = widgets.current.get(id)!;
           widgets.current.move(id, x - currentItem.x, y - currentItem.y);
-          widgets.current.resize(id, w, h);
+          widgets.current.resize(id, w, h, contentW, contentH, userResized);
           syncGeometryRef.current();
         }
       },
@@ -1237,6 +1241,17 @@ export function CanvasApp() {
         objects.current?.clear();
         syncGeometryRef.current();
       },
+    });
+
+    void sm.restoreSession().then((restored) => {
+      if (restored) {
+        const session = getStoredP2PSession();
+        if (session?.role === "joiner") {
+          toast.info(`Reconnecting to P2P session ${session.roomCode}…`);
+        } else if (session?.role === "host") {
+          toast.info(`Re-hosting P2P session ${session.roomCode}…`);
+        }
+      }
     });
 
     engine.setStrokeSegmentHook((a, b, opts) => {

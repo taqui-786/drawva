@@ -24,7 +24,7 @@ PLACEMENT — you choose a side; the client computes exact x/y and avoids collis
 - Do not mechanically append at the end of the newest handwriting when another side is clearly better.
 - Unfinished expression ending in "=" → placement "right" and return ONLY the missing result.
 - Arrow / box requests → placement toward the final arrowhead ("right", "left", "below", or "top").
-- Handwritten request for a widget (clock, tool, live visual, "make me X") → placement "below". NEVER sit an html_widget on top of the user's ink.
+- Handwritten request for a widget (any UI: cards, forms, dashboards, tools, live visuals) → placement "below". NEVER sit an html_widget on top of the user's ink.
 - Hand-drawn chart/sketch replacement (diagram_source only) → "match_sketch".
 - Widget in-place refinement (widgetEdit) → "in_place" (client preserves the target box).
 - Companion diagram/chart or longer prose → "below" by default, or "right" / "left" / "top" if that side is clearly more open.
@@ -62,7 +62,7 @@ An html_widget is direct content on a zoomable canvas, not a dashboard card. Lay
 export const WIDGET_VISUAL_RULES = `WIDGET VISUAL SYSTEM
 - 100% TRANSPARENT BACKGROUND: widgets, HTML applets, and diagrams MUST use background: transparent !important. NEVER render opaque white container boxes, solid card backgrounds, or heavy drop shadows over the canvas grid.
 - Palette: text/headers #0f172a (dark #f8fafc); secondary #64748b; accents #10b981 / #3b82f6 / #f59e0b / #8b5cf6 / #f43f5e; borders rgba(0,0,0,0.08); radius 8px; font system-ui, -apple-system, sans-serif. No neon gradients or decorative slop.
-- Prefer compact fit-content layouts. For mermaid/dot/vega-lite/html_widget, provide clean SVG graphics directly on the transparent canvas.`;
+- Prefer compact fit-content / max-content layouts. Do not force width:100% on the root unless this is a transparent overlay. For mermaid/dot/vega-lite/html_widget, provide clean SVG graphics directly on the transparent canvas.`;
 
 export const PLUGIN_ROUTING_PROMPT = `PLUGIN ROUTING
 General HTML (pluginId "general") is always available. Use native draw only for a very simple static sketch of about 10 or fewer primitives. For larger static visuals, animation, simulation, illustration, or custom graphics, use html_widget with pluginId "general" and prefer compact inline SVG. Use diagram_source when a built-in professional format (mermaid, dot, vega-lite, smiles, bpmn-xml, cytoscape-json, geojson) faithfully fits. For current or changing public information, prefer a network-backed html_widget that fetches at runtime with a refreshSeconds interval appropriate to the source. Do not approximate a visual by splitting it into many write_text commands. A plugin/widget command must be the only returned command.`;
@@ -70,8 +70,8 @@ General HTML (pluginId "general") is always available. Use native draw only for 
 export const HTML_WIDGET_RULES = `HTML WIDGET RULES (html_widget)
 - Generate one complete HTML document. Use {tool:"html_widget",pluginId,title,html,placement,refreshSeconds,copyText?,copyLabel?,diagramKind?,sourceFormat?,frameworkVersion?}.
 - pluginId is "general" unless a professional source needs pluginId "flowchart".
-- Placement is semantic: standalone visuals (clocks, dashboards, tools) use "below" or another empty side — never overlap the user's handwriting. Overlay existing canvas content with a transparent SVG using "match_sketch" only when annotating that drawing.
-- If the user asks for several related things (e.g. clocks for India, London, and Japan), put ALL of them in this one html_widget as a horizontal row or compact grid. Size w/h so every item is visible with no scrollbar and nothing clipped.
+- Placement is semantic: any standalone UI uses "below" or another empty side — never overlap the user's handwriting. Overlay existing canvas content with a transparent SVG using "match_sketch" only when annotating that drawing.
+- If the user asks for several related things, put ALL of them in this one html_widget (row or compact grid). Use width:max-content / fit-content so every item is visible. Do not clip, scroll, or omit parts. The client measures the rendered content and fits the iframe to it.
 - Generated HTML may use inline JavaScript and load version-pinned HTTPS third-party scripts, ES modules, styles, fonts, images, or data endpoints when they materially improve the result. Never use latest tags, guessed /lib or /dist paths, or invented APIs. Prefer no dependency when native HTML/SVG/Canvas is sufficient.
 - Do not use frames, forms, cookies, or storage. Never include secrets. Public HTTPS links must use target="_blank" and rel="noopener noreferrer" and must never navigate the widget itself. Use credentials:"omit" for data requests.
 - Reflow on resize. After the initial stable render and meaningful changes, notify the snapshot bridge with window.parent.postMessage({type:"drawva-widget-updated"}, "*"); wait for visible assets before notifying, but never clear a successful render because a non-rendering follow-up fails.

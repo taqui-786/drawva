@@ -72,40 +72,34 @@
         function postSize() {
           try {
             const body = document.body;
+            const root = document.documentElement;
             if (!body) return;
             const stage = document.getElementById('stage');
             if (stage && /^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed')) return;
 
             const svg = document.querySelector('#stage svg, .vega-embed svg, svg');
             const nat = svg && svgSize(svg);
-            if (nat) { emitSize(nat.w + 16, nat.h + 16); return; }
-
-            const canvas = document.querySelector('#stage canvas, .vega-embed canvas, canvas');
-            if (canvas) {
-              const cw = canvas.width || canvas.getBoundingClientRect().width;
-              const ch = canvas.height || canvas.getBoundingClientRect().height;
-              if (cw > 2 && ch > 2) { emitSize(cw + 16, ch + 16); return; }
+            if (nat && !body.querySelector('input, button, table, section, article, ul, ol, form')) {
+              emitSize(nat.w + 16, nat.h + 16);
+              return;
             }
 
-            const kids = Array.from(body.children).filter(function(el) {
-              return el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE' && el.tagName !== 'LINK';
-            });
-            if (!kids.length) return;
-            const vw = document.documentElement.clientWidth || 0;
-            const pad = 8;
-            let maxW = 0, maxB = 0;
-            for (const el of kids) {
+            const pad = 12;
+            let right = 0;
+            let bottom = 0;
+            const nodes = body.querySelectorAll('*');
+            for (let i = 0; i < nodes.length; i++) {
+              const el = nodes[i];
+              if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK' || el.tagName === 'META') continue;
               const r = el.getBoundingClientRect();
-              maxB = Math.max(maxB, r.bottom);
-              if (r.width > 1 && !(vw > 0 && r.width >= vw - 16)) maxW = Math.max(maxW, r.width);
+              if (r.width <= 1 || r.height <= 1) continue;
+              right = Math.max(right, r.right);
+              bottom = Math.max(bottom, r.bottom);
             }
-            const firstStyle = window.getComputedStyle(kids[0]);
-            const maxWpx = parseFloat(firstStyle.maxWidth);
-            if (firstStyle.maxWidth && firstStyle.maxWidth !== 'none' && !firstStyle.maxWidth.endsWith('%') && maxWpx > 80) {
-              maxW = maxWpx;
-            }
-            if (maxW < 80) maxW = body.querySelector('input, button, textarea, select, form') ? 360 : 280;
-            emitSize(maxW + pad * 2, maxB + pad);
+            const scrollW = Math.max(body.scrollWidth || 0, root.scrollWidth || 0, right);
+            const scrollH = Math.max(body.scrollHeight || 0, root.scrollHeight || 0, bottom);
+            if (scrollW < 8 || scrollH < 8) return;
+            emitSize(scrollW + pad, scrollH + pad);
           } catch(e) {}
         }
 
@@ -218,7 +212,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;height:auto;min-height:0}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:100%;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:max-content;min-width:0;height:auto;min-height:0}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;

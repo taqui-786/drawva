@@ -24,7 +24,7 @@ export type SyncPacket =
   | { type: "SYNC_OBJECT_REMOVE"; id: string }
   | { type: "SYNC_OBJECT_MERGE"; id: string }
   | { type: "SYNC_WIDGET_ADD"; widget: WidgetItem }
-  | { type: "SYNC_WIDGET_MOVE"; id: string; x: number; y: number; w: number; h: number }
+  | { type: "SYNC_WIDGET_MOVE"; id: string; x: number; y: number; w: number; h: number; contentW?: number; contentH?: number; userResized?: boolean }
   | { type: "SYNC_WIDGET_REMOVE"; id: string }
   | { type: "SYNC_CLEAR" }
   | { type: "SYNC_CURSOR"; x: number; y: number; mode: string; color: string; name: string };
@@ -38,7 +38,7 @@ export interface SyncHandlers {
   onRemoteObjectRemove?: (id: string) => void;
   onRemoteObjectMerge?: (id: string) => void;
   onRemoteWidgetAdd?: (widget: WidgetItem) => void;
-  onRemoteWidgetMove?: (id: string, x: number, y: number, w: number, h: number) => void;
+  onRemoteWidgetMove?: (id: string, x: number, y: number, w: number, h: number, contentW?: number, contentH?: number, userResized?: boolean) => void;
   onRemoteWidgetRemove?: (id: string) => void;
   onRemoteClear?: () => void;
   onStatusChange?: (status: SyncStatus, code: string | null, peerCount: number, errorMsg?: string) => void;
@@ -62,6 +62,34 @@ export interface PeerInstance {
 
 const PEER_PREFIX = "drawva-room-";
 const COLORS = ["#ef4444", "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
+const SESSION_KEY = "drawva.p2pSession";
+
+export interface StoredP2PSession {
+  role: "host" | "joiner";
+  roomCode: string;
+}
+
+export function getStoredP2PSession(): StoredP2PSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as StoredP2PSession;
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredP2PSession(session: StoredP2PSession | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    if (session) {
+      window.sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    } else {
+      window.sessionStorage.removeItem(SESSION_KEY);
+    }
+  } catch {}
+}
 
 function generateShortCode(): string {
   const chars = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -116,12 +144,32 @@ export class SyncManager {
     return this.isApplyingRemote;
   }
 
-  async hostSession(): Promise<string> {
-    this.disconnect();
-    const code = generateShortCode();
+  async restoreSession(): Promise<boolean> {
+    const session = getStoredP2PSession();
+    if (!session || !session.roomCode || !session.role) return false;
+
+    try {
+      if (session.role === "host") {
+        await this.hostSession(session.roomCode);
+        return true;
+      } else if (session.role === "joiner") {
+        await this.joinSession(session.roomCode);
+        return true;
+      }
+    } catch (err) {
+      console.warn("[SyncManager] Failed to restore P2P session:", err);
+      this.disconnect(true);
+    }
+    return false;
+  }
+
+  async hostSession(customCode?: string): Promise<string> {
+    this.disconnect(false);
+    const code = customCode ? customCode.trim().toUpperCase() : generateShortCode();
     this.roomCode = code;
     this.status = "hosting";
     this.errorMessage = undefined;
+    setStoredP2PSession({ role: "host", roomCode: code });
     this.notifyStatus();
 
     const PeerModule = await import("peerjs");
@@ -153,6 +201,7 @@ export class SyncManager {
       const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "Failed to initialize host connection";
       this.status = "error";
       this.errorMessage = msg;
+      setStoredP2PSession(null);
       this.notifyStatus();
     });
 
@@ -160,13 +209,14 @@ export class SyncManager {
   }
 
   async joinSession(rawCode: string): Promise<void> {
-    this.disconnect();
+    this.disconnect(false);
     const code = rawCode.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
     if (!code) throw new Error("Invalid session code");
 
     this.roomCode = code;
     this.status = "connecting";
     this.errorMessage = undefined;
+    setStoredP2PSession({ role: "joiner", roomCode: code });
     this.notifyStatus();
 
     const PeerModule = await import("peerjs");
@@ -195,6 +245,7 @@ export class SyncManager {
       console.error("[SyncManager] Join peer error:", err);
       this.status = "error";
       this.errorMessage = "Could not find host with this code";
+      setStoredP2PSession(null);
       this.notifyStatus();
     });
   }
@@ -284,7 +335,16 @@ export class SyncManager {
           this.handlers.onRemoteWidgetAdd?.(safePacket.widget);
           break;
         case "SYNC_WIDGET_MOVE":
-          this.handlers.onRemoteWidgetMove?.(safePacket.id, safePacket.x, safePacket.y, safePacket.w, safePacket.h);
+          this.handlers.onRemoteWidgetMove?.(
+            safePacket.id,
+            safePacket.x,
+            safePacket.y,
+            safePacket.w,
+            safePacket.h,
+            safePacket.contentW,
+            safePacket.contentH,
+            safePacket.userResized
+          );
           break;
         case "SYNC_WIDGET_REMOVE":
           this.handlers.onRemoteWidgetRemove?.(safePacket.id);
@@ -333,7 +393,10 @@ export class SyncManager {
     });
   }
 
-  disconnect(): void {
+  disconnect(clearStorage = true): void {
+    if (clearStorage) {
+      setStoredP2PSession(null);
+    }
     for (const conn of this.connections.values()) {
       try {
         conn.close();

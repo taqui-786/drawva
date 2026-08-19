@@ -76,18 +76,6 @@ export function extractHtmlDimensions(html: string): { width: number; height: nu
       }
     }
   }
-  const maxW = html.match(/max-width\s*:\s*(\d+)px/i);
-  const minH = html.match(/(?:min-height|height)\s*:\s*(\d+)px/i);
-  if (maxW) {
-    const w = parseInt(maxW[1], 10);
-    if (w >= 200 && w <= 900) {
-      const h = minH ? parseInt(minH[1], 10) : Math.round(w * 1.3);
-      return { width: w + 16, height: Math.min(1400, Math.max(200, h + 16)) };
-    }
-  }
-  if (/<(?:form|input|button|textarea|select)\b/i.test(html)) {
-    return { width: 360, height: 480 };
-  }
   return null;
 }
 
@@ -378,12 +366,18 @@ export class WidgetManager {
     this.position(w);
   }
 
-  resize(id: string, newW: number, newH: number): void {
+  resize(id: string, newW: number, newH: number, contentW?: number, contentH?: number, userResized?: boolean): void {
     const w = this.widgets.get(id);
     if (!w) return;
-    w.userResized = true;
-    w.w = Math.max(300, Math.min(SIZE - w.x, Math.round(newW)));
-    w.h = Math.max(200, Math.min(SIZE - w.y, Math.round(newH)));
+    w.userResized = userResized ?? true;
+    w.w = Math.max(120, Math.min(SIZE - w.x, Math.round(newW)));
+    w.h = Math.max(80, Math.min(SIZE - w.y, Math.round(newH)));
+    if (typeof contentW === "number" && contentW > 10) {
+      w.contentW = Math.round(contentW);
+    }
+    if (typeof contentH === "number" && contentH > 10) {
+      w.contentH = Math.round(contentH);
+    }
     this.position(w);
   }
 
@@ -441,15 +435,10 @@ export class WidgetManager {
           const w = this.widgets.get(widget.id);
           if (w) {
             const measuredH = Math.min(6000, Math.max(60, Math.round(height)));
-            let measuredW =
+            const measuredW =
               typeof width === "number" && width > 0
                 ? Math.min(3200, Math.max(80, Math.round(width)))
                 : w.contentW;
-            if (w.kind === "html" && measuredW < 280) measuredW = Math.max(w.contentW, 360);
-            if (w.kind === "html" && measuredH < 80 && measuredW > measuredH * 5) return;
-            if (w.kind === "html" && measuredW > 1400 && measuredH < 400 && measuredW > measuredH * 4) {
-              measuredW = Math.max(w.contentW, Math.min(960, Math.round(measuredH * 2.4)));
-            }
             if (
               Math.abs(measuredW - w.contentW) <= 2 &&
               Math.abs(measuredH - w.contentH) <= 2 &&
@@ -611,8 +600,8 @@ export class WidgetManager {
     const viewportH = rect.height;
     const relativeX = cam.panX + widget.x * cam.scale;
     const relativeY = cam.panY + widget.y * cam.scale;
-    const contentW = Math.max(1, widget.contentW);
-    const contentH = Math.max(1, widget.contentH);
+    const contentW = Math.max(80, widget.contentW && widget.contentW > 10 ? widget.contentW : (widget.w || 400));
+    const contentH = Math.max(60, widget.contentH && widget.contentH > 10 ? widget.contentH : (widget.h || 300));
     const s = cam.scale * Math.min(widget.w / contentW, widget.h / contentH);
 
     shell.style.width = `${contentW}px`;
