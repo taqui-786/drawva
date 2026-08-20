@@ -81,6 +81,107 @@ function distanceBetweenRects(a: Rect, b: { x: number; y: number; w: number; h: 
   return Math.hypot(dx, dy);
 }
 
+function rectsOverlap(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+function overlapArea(
+  a: { x: number; y: number; w: number; h: number },
+  b: { x: number; y: number; w: number; h: number }
+): number {
+  const left = Math.max(a.x, b.x);
+  const top = Math.max(a.y, b.y);
+  const right = Math.min(a.x + a.w, b.x + b.w);
+  const bottom = Math.min(a.y + a.h, b.y + b.h);
+  return Math.max(0, right - left) * Math.max(0, bottom - top);
+}
+
+function widgetEditFromItem(item: WidgetItem): import("@/lib/ai/types").WidgetEditContext {
+  const detectedFormat =
+    item.kind === "diagram"
+      ? item.sourceFormat
+        ? normalizeFormat(item.sourceFormat) || item.sourceFormat
+        : detectDiagramFormat(item.pluginId, item.copyText, item.title)
+      : undefined;
+  return {
+    id: item.id,
+    pluginId: item.pluginId || (item.kind === "diagram" ? "flowchart" : "general"),
+    widgetType: item.kind === "diagram" ? "diagram_source" : "html_widget",
+    title: item.title,
+    sourceFormat: detectedFormat,
+    source: item.copyText,
+    html: item.html,
+    box: { x: item.x, y: item.y, w: item.w, h: item.h },
+  };
+}
+
+function pickProminentVisibleWidget(
+  wm: WidgetManager,
+  sourceRect: { x: number; y: number; w: number; h: number }
+): WidgetItem | null {
+  const cx = sourceRect.x + sourceRect.w / 2;
+  const cy = sourceRect.y + sourceRect.h / 2;
+  let best: WidgetItem | null = null;
+  let bestArea = -1;
+  let bestD = Infinity;
+  for (const w of wm.all()) {
+    if (!rectsOverlap(w, sourceRect)) continue;
+    const area = overlapArea(w, sourceRect);
+    const d = Math.hypot(w.x + w.w / 2 - cx, w.y + w.h / 2 - cy);
+    if (area > bestArea || (area === bestArea && d < bestD)) {
+      best = w;
+      bestArea = area;
+      bestD = d;
+    }
+  }
+  return best;
+}
+
+function findInPlaceWidget(
+  wm: WidgetManager,
+  opts: {
+    targetId: string | null;
+    title?: string;
+    kind?: WidgetItem["kind"];
+    lockTarget?: boolean;
+    cmdX?: number;
+    cmdY?: number;
+  }
+): WidgetItem | null {
+  const byId = opts.targetId ? wm.get(opts.targetId) ?? null : null;
+  if (opts.lockTarget && byId) return byId;
+
+  if (opts.title) {
+    const needle = opts.title.toLowerCase().trim();
+    const matches: WidgetItem[] = [];
+    for (const w of wm.all()) {
+      if (opts.kind && w.kind !== opts.kind) continue;
+      const wTitle = (w.title || "").toLowerCase();
+      if (wTitle && (needle.includes(wTitle) || wTitle.includes(needle))) matches.push(w);
+    }
+    if (matches.length === 1) return matches[0];
+  }
+
+  if (byId) return byId;
+
+  let closest: WidgetItem | null = null;
+  let minD = Infinity;
+  const cx = opts.cmdX ?? 0;
+  const cy = opts.cmdY ?? 0;
+  for (const w of wm.all()) {
+    if (opts.kind && w.kind !== opts.kind) continue;
+    const d = Math.hypot(w.x - cx, w.y - cy);
+    if (d < 600 && d < minD) {
+      minD = d;
+      closest = w;
+    }
+  }
+  return closest;
+}
+
 
 async function readSse(
   res: Response,
@@ -199,6 +300,7 @@ export function CanvasApp() {
   const lastStrokeTimeRef = useRef<number>(0);
   const refineFocusRef = useRef<{ rect: Rect; widgetId: string } | null>(null);
   const activeEditTargetRef = useRef<string | null>(null);
+  const lockEditTargetRef = useRef(false);
 
   const activePointersRef = useRef<Map<number, Point>>(new Map());
   const pinchRef = useRef<{
@@ -316,36 +418,23 @@ export function CanvasApp() {
     let widgetEditTarget: import("@/lib/ai/types").WidgetEditContext | undefined = undefined;
     if (explicitRefine && wm && refineFocusRef.current) {
       const targetItem = wm.get(refineFocusRef.current.widgetId);
-      if (targetItem) {
-        const detectedFormat = targetItem.kind === "diagram"
-          ? (targetItem.sourceFormat
-              ? (normalizeFormat(targetItem.sourceFormat) || targetItem.sourceFormat)
-              : detectDiagramFormat(targetItem.pluginId, targetItem.copyText, targetItem.title))
-          : undefined;
-        widgetEditTarget = {
-          id: targetItem.id,
-          pluginId: detectedFormat || targetItem.pluginId || (targetItem.kind === "diagram" ? "diagram" : "general"),
-          widgetType: targetItem.kind === "diagram" ? "diagram_source" : "html_widget",
-          title: targetItem.title,
-          sourceFormat: detectedFormat,
-          source: targetItem.copyText,
-          html: targetItem.html,
-          box: { x: targetItem.x, y: targetItem.y, w: targetItem.w, h: targetItem.h },
-        };
-      }
+      if (targetItem) widgetEditTarget = widgetEditFromItem(targetItem);
     } else if (wm && !boxIsDump && box.w > 0 && box.h > 0) {
       // Annotation proximity only: leftover selection of a distant widget must
       // not turn an independent "Draw …" request into an in-place refine.
+      // Off-screen ink must not lock onto a widget the snapshot will not show.
       const ANNOTATION_PX = 120;
+      const inkInView = rectsOverlap(box, viewport);
       const selectedId = wm.getSelectedId();
       let targetWidget: WidgetItem | null = null;
       const selected = selectedId ? wm.get(selectedId) ?? null : null;
-      if (selected && distanceBetweenRects(box, selected) <= ANNOTATION_PX) {
+      if (selected && distanceBetweenRects(box, selected) <= ANNOTATION_PX && (inkInView || rectsOverlap(selected, viewport))) {
         targetWidget = selected;
       } else {
         let closestWidget: WidgetItem | null = null;
         let minDistance = Infinity;
         for (const w of wm.all()) {
+          if (!inkInView && !rectsOverlap(w, viewport)) continue;
           const dist = distanceBetweenRects(box, w);
           if (dist <= ANNOTATION_PX && dist < minDistance) {
             minDistance = dist;
@@ -354,26 +443,10 @@ export function CanvasApp() {
         }
         targetWidget = closestWidget;
       }
-      if (targetWidget) {
-        const detectedFormat = targetWidget.kind === "diagram"
-          ? (targetWidget.sourceFormat
-              ? (normalizeFormat(targetWidget.sourceFormat) || targetWidget.sourceFormat)
-              : detectDiagramFormat(targetWidget.pluginId, targetWidget.copyText, targetWidget.title))
-          : undefined;
-        widgetEditTarget = {
-          id: targetWidget.id,
-          pluginId: detectedFormat || targetWidget.pluginId || (targetWidget.kind === "diagram" ? "diagram" : "general"),
-          widgetType: targetWidget.kind === "diagram" ? "diagram_source" : "html_widget",
-          title: targetWidget.title,
-          sourceFormat: detectedFormat,
-          source: targetWidget.copyText,
-          html: targetWidget.html,
-          box: { x: targetWidget.x, y: targetWidget.y, w: targetWidget.w, h: targetWidget.h },
-        };
-      }
+      if (targetWidget) widgetEditTarget = widgetEditFromItem(targetWidget);
     }
 
-    activeEditTargetRef.current = widgetEditTarget?.id ?? null;
+    lockEditTargetRef.current = explicitRefine;
 
     let effectiveBox = { ...box };
     const boxMargin = 20;
@@ -391,6 +464,22 @@ export function CanvasApp() {
     }
 
     const atlas = await buildAtlas(engineAtCall, viewport, effectiveBox, wm, objects.current);
+
+    // widgetEdit must describe a widget the model can actually see. Off-screen
+    // leftover ink used to attach the wrong flowchart while the snapshot showed
+    // a different one; in_place then overwrote the neighbor.
+    if (!explicitRefine && wm) {
+      const editVisible = widgetEditTarget && rectsOverlap(widgetEditTarget.box, atlas.sourceRect);
+      const inkInSnapshot = rectsOverlap(box, atlas.sourceRect);
+      if (widgetEditTarget && !editVisible) {
+        const visible = pickProminentVisibleWidget(wm, atlas.sourceRect);
+        widgetEditTarget = visible ? widgetEditFromItem(visible) : undefined;
+      } else if (!widgetEditTarget && !inkInSnapshot) {
+        const visible = pickProminentVisibleWidget(wm, atlas.sourceRect);
+        if (visible) widgetEditTarget = widgetEditFromItem(visible);
+      }
+    }
+    activeEditTargetRef.current = widgetEditTarget?.id ?? null;
 
     const reqTimestamp = Date.now();
     // Placement anchors to the handwriting, not the capture/viewport. Atlas may
@@ -901,37 +990,18 @@ export function CanvasApp() {
       if (cmd.tool !== "html_widget") return;
       const targetId = activeEditTargetRef.current;
       activeEditTargetRef.current = null;
+      const lockTarget = lockEditTargetRef.current;
+      lockEditTargetRef.current = false;
       const isInPlace = (cmd as { placement?: string }).placement === "in_place";
-      let oldWidget: WidgetItem | null = null;
-      if (isInPlace) {
-        if (targetId) {
-          oldWidget = wm.get(targetId) ?? null;
-        }
-        if (!oldWidget && cmd.title) {
-          const cmdTitle = cmd.title.toLowerCase();
-          for (const w of wm.all()) {
-            if (w.kind === "html" || w.kind === "diagram") {
-              const wTitle = (w.title || "").toLowerCase();
-              if (wTitle && (cmdTitle.includes(wTitle) || wTitle.includes(cmdTitle))) {
-                oldWidget = w;
-                break;
-              }
-            }
-          }
-        }
-        if (!oldWidget) {
-          let closest: WidgetItem | null = null;
-          let minD = Infinity;
-          for (const w of wm.all()) {
-            const d = Math.hypot(w.x - cmd.x, w.y - cmd.y);
-            if (d < 600 && d < minD) {
-              minD = d;
-              closest = w;
-            }
-          }
-          oldWidget = closest;
-        }
-      }
+      const oldWidget = isInPlace
+        ? findInPlaceWidget(wm, {
+            targetId,
+            title: cmd.title,
+            lockTarget,
+            cmdX: cmd.x,
+            cmdY: cmd.y,
+          })
+        : null;
       if (oldWidget) {
         wm.remove(oldWidget.id);
         syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });
@@ -1033,39 +1103,19 @@ export function CanvasApp() {
       if (cmd.tool !== "diagram_source") return;
       const targetId = activeEditTargetRef.current;
       activeEditTargetRef.current = null;
+      const lockTarget = lockEditTargetRef.current;
+      lockEditTargetRef.current = false;
       const isInPlace = (cmd as { placement?: string }).placement === "in_place";
-      let oldWidget: WidgetItem | null = null;
-      if (isInPlace) {
-        if (targetId) {
-          oldWidget = wm.get(targetId) ?? null;
-        }
-        if (!oldWidget && cmd.title) {
-          const cmdTitle = cmd.title.toLowerCase();
-          for (const w of wm.all()) {
-            if (w.kind === "diagram") {
-              const wTitle = (w.title || "").toLowerCase();
-              if (wTitle && (cmdTitle.includes(wTitle) || wTitle.includes(cmdTitle))) {
-                oldWidget = w;
-                break;
-              }
-            }
-          }
-        }
-        if (!oldWidget) {
-          let closest: WidgetItem | null = null;
-          let minD = Infinity;
-          for (const w of wm.all()) {
-            if (w.kind === "diagram") {
-              const d = Math.hypot(w.x - cmd.x, w.y - cmd.y);
-              if (d < 600 && d < minD) {
-                minD = d;
-                closest = w;
-              }
-            }
-          }
-          oldWidget = closest;
-        }
-      }
+      const oldWidget = isInPlace
+        ? findInPlaceWidget(wm, {
+            targetId,
+            title: cmd.title,
+            kind: "diagram",
+            lockTarget,
+            cmdX: cmd.x,
+            cmdY: cmd.y,
+          })
+        : null;
       if (oldWidget) {
         wm.remove(oldWidget.id);
         syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });

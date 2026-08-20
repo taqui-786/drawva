@@ -410,6 +410,19 @@ function placeInVisible(view: Box, w: number, h: number, blockers: Box[]): { x: 
   return placeAroundAnchor(hint, w, h, view, blockers, "below");
 }
 
+function uniqueSceneWidgetByTitle(
+  title: unknown,
+  widgetItems: Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }>
+): { kind: string; x: number; y: number; w: number; h: number; title?: string } | null {
+  const cmdTitle = typeof title === "string" ? title.toLowerCase().trim() : "";
+  if (!cmdTitle || widgetItems.length === 0) return null;
+  const matched = widgetItems.filter((w) => {
+    const wTitle = (w.title || "").toLowerCase().trim();
+    return wTitle.length > 0 && (cmdTitle.includes(wTitle) || wTitle.includes(cmdTitle));
+  });
+  return matched.length === 1 ? matched[0] : null;
+}
+
 export function fitWidgetGeometry(
   cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown; placement?: unknown; title?: unknown },
   visibleRect?: Box,
@@ -431,36 +444,37 @@ export function fitWidgetGeometry(
   // keepPosition (explicit Refine button) still snaps when the model omits a side.
   const snapInPlace = placement === "in_place" || (!reposition && !newItemSide);
 
-  // Refinement mode: snap to the target widget's box
+  // Refinement mode: snap to the widget the model actually edited.
+  // widgetEditBox is a hint — a stale/off-screen neighbor must not steal
+  // in_place when the command title uniquely names a different scene widget.
   if (snapInPlace) {
     let targetBox = widgetEditBox;
-    if ((!targetBox || targetBox.w <= 0 || targetBox.h <= 0) && Array.isArray(sceneItems) && sceneItems.length > 0) {
-      const widgetItems = sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html");
-      if (widgetItems.length > 0) {
-        const cmdTitle = typeof cmd.title === "string" ? cmd.title.toLowerCase().trim() : "";
-        if (cmdTitle) {
-          const matched = widgetItems.find(
-            (w) => w.title && (cmdTitle.includes(w.title.toLowerCase()) || w.title.toLowerCase().includes(cmdTitle))
+    const widgetItems = Array.isArray(sceneItems)
+      ? sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html")
+      : [];
+    const titled = uniqueSceneWidgetByTitle(cmd.title, widgetItems);
+    // reposition=true is auto/annotation. Explicit Refine (reposition=false)
+    // keeps the user-chosen widget even if the title disagrees.
+    if (titled && (reposition || !targetBox || targetBox.w <= 0 || targetBox.h <= 0)) {
+      targetBox = titled;
+    }
+    if ((!targetBox || targetBox.w <= 0 || targetBox.h <= 0) && widgetItems.length > 0) {
+      if (changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
+        let closest = widgetItems[0];
+        let minD = Infinity;
+        for (const wItem of widgetItems) {
+          const d = Math.hypot(
+            wItem.x + wItem.w / 2 - (changedBox.x + changedBox.w / 2),
+            wItem.y + wItem.h / 2 - (changedBox.y + changedBox.h / 2)
           );
-          if (matched) targetBox = matched;
-        }
-        if (!targetBox && changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
-          let closest = widgetItems[0];
-          let minD = Infinity;
-          for (const wItem of widgetItems) {
-            const d = Math.hypot(
-              wItem.x + wItem.w / 2 - (changedBox.x + changedBox.w / 2),
-              wItem.y + wItem.h / 2 - (changedBox.y + changedBox.h / 2)
-            );
-            if (d < minD) {
-              minD = d;
-              closest = wItem;
-            }
+          if (d < minD) {
+            minD = d;
+            closest = wItem;
           }
-          targetBox = closest;
-        } else if (!targetBox) {
-          targetBox = widgetItems[0];
         }
+        targetBox = closest;
+      } else {
+        targetBox = widgetItems[0];
       }
     }
     if (targetBox && targetBox.w > 0 && targetBox.h > 0) {

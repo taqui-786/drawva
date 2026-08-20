@@ -147,6 +147,40 @@ assert.ok(explicitRefineOmitted);
 assert.equal(explicitRefineOmitted.x, widgetEditBox.x);
 assert.equal(explicitRefineOmitted.y, widgetEditBox.y, "explicit Refine with no side still snaps in place");
 
+// Snapshot shows Neural Pipeline, but widgetEdit still points at a different
+// off-screen flowchart. in_place must follow the command title, not the stale box.
+const neuralView = { x: 8618, y: 11351, w: 2557, h: 1172 };
+const specDiagram = { kind: "diagram", x: 8237, y: 9778, w: 1882, h: 409, title: "System Spec v2.4 - Agent Flowchart" };
+const neuralDiagram = { kind: "diagram", x: 9087, y: 11450, w: 1170, h: 951, title: "Neural Pipeline Network" };
+const staleInk = { x: 8827, y: 9680, w: 553, h: 135 };
+const specBox = { x: specDiagram.x, y: specDiagram.y, w: specDiagram.w, h: specDiagram.h };
+
+const skipOntoVisible = fitWidgetGeometry(
+  { w: 1170, h: 951, placement: "in_place", title: "Neural Pipeline Network" },
+  neuralView,
+  staleInk,
+  true,
+  specBox,
+  [specDiagram, neuralDiagram]
+);
+assert.ok(skipOntoVisible);
+assert.equal(skipOntoVisible.x, neuralDiagram.x, "in_place must land on the named visible diagram");
+assert.equal(skipOntoVisible.y, neuralDiagram.y);
+assert.equal(skipOntoVisible.w, neuralDiagram.w);
+assert.equal(skipOntoVisible.h, neuralDiagram.h, "must not copy the off-screen flowchart box");
+
+const explicitKeepsChosen = fitWidgetGeometry(
+  { w: 1170, h: 951, placement: "in_place", title: "Neural Pipeline Network" },
+  neuralView,
+  staleInk,
+  false,
+  specBox,
+  [specDiagram, neuralDiagram]
+);
+assert.ok(explicitKeepsChosen);
+assert.equal(explicitKeepsChosen.x, specBox.x, "explicit Refine still freezes the chosen widget");
+assert.equal(explicitKeepsChosen.y, specBox.y);
+
 const dumpWithNeighbor = fitWidgetGeometry(
   { w: 1440, h: 680, placement: "below" },
   playgroundView,
