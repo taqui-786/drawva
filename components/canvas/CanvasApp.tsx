@@ -330,27 +330,26 @@ export function CanvasApp() {
         };
       }
     } else if (wm && box.w > 0 && box.h > 0 && box.w < 6000 && box.h < 6000) {
-      // Check for an explicitly selected widget OR direct significant overlap (ink drawn on top of widget)
+      // Check for an explicitly selected widget OR nearby widget in annotation proximity (<= 300px or overlapping)
       const selectedId = wm.getSelectedId();
       let targetWidget: WidgetItem | null = null;
       if (selectedId) {
         targetWidget = wm.get(selectedId) ?? null;
       } else {
+        let closestWidget: WidgetItem | null = null;
+        let minDistance = Infinity;
+
         for (const w of wm.all()) {
-          const ix0 = Math.max(box.x, w.x);
-          const iy0 = Math.max(box.y, w.y);
-          const ix1 = Math.min(box.x + box.w, w.x + w.w);
-          const iy1 = Math.min(box.y + box.h, w.y + w.h);
-          if (ix1 > ix0 && iy1 > iy0) {
-            const overlapArea = (ix1 - ix0) * (iy1 - iy0);
-            const inkArea = Math.max(1, box.w * box.h);
-            // Ink is drawn directly on/inside the widget (>= 40% of ink area)
-            if (overlapArea / inkArea >= 0.4) {
-              targetWidget = w;
-              break;
-            }
+          const dx = Math.max(0, Math.max(box.x - (w.x + w.w), w.x - (box.x + box.w)));
+          const dy = Math.max(0, Math.max(box.y - (w.y + w.h), w.y - (box.y + box.h)));
+          const dist = Math.hypot(dx, dy);
+
+          if (dist <= 300 && dist < minDistance) {
+            minDistance = dist;
+            closestWidget = w;
           }
         }
+        targetWidget = closestWidget;
       }
       if (targetWidget) {
         const detectedFormat = targetWidget.kind === "diagram"
@@ -881,8 +880,34 @@ export function CanvasApp() {
       activeEditTargetRef.current = null;
       const isInPlace = (cmd as { placement?: string }).placement === "in_place";
       let oldWidget: WidgetItem | null = null;
-      if (isInPlace && targetId) {
-        oldWidget = wm.get(targetId) ?? null;
+      if (isInPlace) {
+        if (targetId) {
+          oldWidget = wm.get(targetId) ?? null;
+        }
+        if (!oldWidget && cmd.title) {
+          const cmdTitle = cmd.title.toLowerCase();
+          for (const w of wm.all()) {
+            if (w.kind === "html" || w.kind === "diagram") {
+              const wTitle = (w.title || "").toLowerCase();
+              if (wTitle && (cmdTitle.includes(wTitle) || wTitle.includes(cmdTitle))) {
+                oldWidget = w;
+                break;
+              }
+            }
+          }
+        }
+        if (!oldWidget) {
+          let closest: WidgetItem | null = null;
+          let minD = Infinity;
+          for (const w of wm.all()) {
+            const d = Math.hypot(w.x - cmd.x, w.y - cmd.y);
+            if (d < 600 && d < minD) {
+              minD = d;
+              closest = w;
+            }
+          }
+          oldWidget = closest;
+        }
       }
       if (oldWidget) {
         wm.remove(oldWidget.id);
@@ -986,8 +1011,36 @@ export function CanvasApp() {
       activeEditTargetRef.current = null;
       const isInPlace = (cmd as { placement?: string }).placement === "in_place";
       let oldWidget: WidgetItem | null = null;
-      if (isInPlace && targetId) {
-        oldWidget = wm.get(targetId) ?? null;
+      if (isInPlace) {
+        if (targetId) {
+          oldWidget = wm.get(targetId) ?? null;
+        }
+        if (!oldWidget && cmd.title) {
+          const cmdTitle = cmd.title.toLowerCase();
+          for (const w of wm.all()) {
+            if (w.kind === "diagram") {
+              const wTitle = (w.title || "").toLowerCase();
+              if (wTitle && (cmdTitle.includes(wTitle) || wTitle.includes(cmdTitle))) {
+                oldWidget = w;
+                break;
+              }
+            }
+          }
+        }
+        if (!oldWidget) {
+          let closest: WidgetItem | null = null;
+          let minD = Infinity;
+          for (const w of wm.all()) {
+            if (w.kind === "diagram") {
+              const d = Math.hypot(w.x - cmd.x, w.y - cmd.y);
+              if (d < 600 && d < minD) {
+                minD = d;
+                closest = w;
+              }
+            }
+          }
+          oldWidget = closest;
+        }
       }
       if (oldWidget) {
         wm.remove(oldWidget.id);

@@ -24,7 +24,7 @@ function clampBox(b: unknown): { x: number; y: number; w: number; h: number } {
   return { x: n(c.x), y: n(c.y), w: n(c.w), h: n(c.h) };
 }
 
-function parseSceneItems(scene?: string): Array<{ kind: string; x: number; y: number; w: number; h: number }> {
+function parseSceneItems(scene?: string): Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }> {
   if (!scene) return [];
   try {
     const parsed = JSON.parse(scene);
@@ -35,6 +35,7 @@ function parseSceneItems(scene?: string): Array<{ kind: string; x: number; y: nu
         y: Number(i.y) || 0,
         w: Number(i.w) || 0,
         h: Number(i.h) || 0,
+        title: typeof i.title === "string" ? i.title : undefined,
       }));
     }
   } catch {}

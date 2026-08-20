@@ -92,6 +92,7 @@ export interface HtmlWidgetCommand {
   frameworkVersion?: string;
   copyText?: string;
   copyLabel?: string;
+  placement?: string;
 }
 
 export interface DiagramSourceCommand {
@@ -107,6 +108,7 @@ export interface DiagramSourceCommand {
   sourceFormat: DiagramFormat;
   source: string;
   diagramKind?: string;
+  placement?: string;
 }
 
 export type CanvasCommand =
@@ -396,23 +398,55 @@ function placeInVisible(view: Box, w: number, h: number, blockers: Box[]): { x: 
 }
 
 export function fitWidgetGeometry(
-  cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown; placement?: unknown },
+  cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown; placement?: unknown; title?: unknown },
   visibleRect?: Box,
   changedBox?: Box,
   reposition = true,
   widgetEditBox?: Box,
-  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>
+  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }>
 ): Box | null {
   const placement = String(cmd.placement || "").toLowerCase();
 
-  // Refinement mode: snap to the original widget's box if explicitly provided.
-  if ((!reposition || placement === "in_place") && widgetEditBox && widgetEditBox.w > 0 && widgetEditBox.h > 0) {
-    return {
-      x: Math.round(widgetEditBox.x),
-      y: Math.round(widgetEditBox.y),
-      w: Math.round(widgetEditBox.w),
-      h: Math.round(widgetEditBox.h),
-    };
+  // Refinement mode: snap to the target widget's box
+  if (!reposition || placement === "in_place") {
+    let targetBox = widgetEditBox;
+    if ((!targetBox || targetBox.w <= 0 || targetBox.h <= 0) && Array.isArray(sceneItems) && sceneItems.length > 0) {
+      const widgetItems = sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html");
+      if (widgetItems.length > 0) {
+        const cmdTitle = typeof cmd.title === "string" ? cmd.title.toLowerCase().trim() : "";
+        if (cmdTitle) {
+          const matched = widgetItems.find(
+            (w) => w.title && (cmdTitle.includes(w.title.toLowerCase()) || w.title.toLowerCase().includes(cmdTitle))
+          );
+          if (matched) targetBox = matched;
+        }
+        if (!targetBox && changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
+          let closest = widgetItems[0];
+          let minD = Infinity;
+          for (const wItem of widgetItems) {
+            const d = Math.hypot(
+              wItem.x + wItem.w / 2 - (changedBox.x + changedBox.w / 2),
+              wItem.y + wItem.h / 2 - (changedBox.y + changedBox.h / 2)
+            );
+            if (d < minD) {
+              minD = d;
+              closest = wItem;
+            }
+          }
+          targetBox = closest;
+        } else if (!targetBox) {
+          targetBox = widgetItems[0];
+        }
+      }
+    }
+    if (targetBox && targetBox.w > 0 && targetBox.h > 0) {
+      return {
+        x: Math.round(targetBox.x),
+        y: Math.round(targetBox.y),
+        w: Math.round(targetBox.w),
+        h: Math.round(targetBox.h),
+      };
+    }
   }
 
   const viewportW = Math.max(visibleRect?.w ?? 2000, 1);
@@ -614,6 +648,7 @@ export function validateCommand(
         title: (c.title as string).trim(),
         refreshSeconds: Math.round(Number(c.refreshSeconds ?? 0)),
         html: c.html as string,
+        ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
       };
       if (diagramKind) out.diagramKind = diagramKind;
       if (sourceFormat) out.sourceFormat = sourceFormat;
@@ -668,6 +703,7 @@ export function validateCommand(
         sourceFormat,
         source: c.source as string,
         ...(diagramKind ? { diagramKind } : {}),
+        ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
       };
     }
     case "erase": {
