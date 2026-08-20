@@ -11,7 +11,7 @@ const socials = [
 export function Footer() {
   return (
     <footer className="w-full border-t border-border/50 bg-background/50 backdrop-blur-md">
-      <div className="mx-auto flex w-full max-w-[1440px] flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 py-3 md:px-10">
+      <div className="mx-auto flex w-full max-w-360 flex-wrap items-center justify-between gap-x-6 gap-y-2 px-6 py-3 md:px-10">
         <div className="flex items-baseline gap-3">
           <Link
             href="/"
@@ -21,10 +21,10 @@ export function Footer() {
             Drawva
           </Link>
           <span
-            title="Drawva Engine v3.0.0"
+            title="Drawva Engine v4.0.0"
             className="rounded border border-border/40 bg-muted/40 px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none text-muted-foreground/70 select-none"
           >
-            v3.7
+            v4.0
           </span>
           <p className="hidden text-[11px] text-muted-foreground sm:block">
             Infinite whiteboard powered by a multimodal AI perception agent.
