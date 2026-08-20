@@ -4,12 +4,11 @@ import "./globals.css";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { cn } from "@/lib/utils";
+import { StructuredData } from "@/components/seo/StructuredData";
 
-const museoModerno = MuseoModerno({subsets:['latin'],variable:'--font-brand'});
-
-const jetbrainsMonoHeading = JetBrains_Mono({subsets:['latin'],variable:'--font-heading'});
-
-const outfit = Outfit({subsets:['latin'],variable:'--font-sans'});
+const museoModerno = MuseoModerno({ subsets: ["latin"], variable: "--font-brand" });
+const jetbrainsMonoHeading = JetBrains_Mono({ subsets: ["latin"], variable: "--font-heading" });
+const outfit = Outfit({ subsets: ["latin"], variable: "--font-sans" });
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,9 +20,61 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+const defaultTitle = "Drawva — AI Infinite Canvas Whiteboard Engine";
+const defaultDescription =
+  "Drawva is an open-source, tile-based infinite whiteboard engine powered by a multimodal AI perception agent. Draw vector ink, sketch diagrams, and automatically generate 7+ diagram formats (Mermaid, Graphviz, Vega-Lite, Cytoscape, GeoJSON), LaTeX math formulas, and code applets.";
+
 export const metadata: Metadata = {
-  title: "Drawva",
-  description: "Drawva - AI infinite canvas whiteboard engine",
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "https://drawva.com"),
+  title: {
+    default: defaultTitle,
+    template: "%s | Drawva",
+  },
+  description: defaultDescription,
+  keywords: [
+    "Drawva",
+    "AI Whiteboard",
+    "AI Infinite Canvas",
+    "Multimodal AI Agent",
+    "Real-time Canvas AI",
+    "Interactive Diagram Generator",
+    "Mermaid Visualizer",
+    "Graphviz DOT Generator",
+    "Vega-Lite Charts",
+    "LaTeX Math Canvas",
+    "Open Source Whiteboard",
+    "Md Taqui Imam",
+    "Penecho alternative",
+  ],
+  authors: [{ name: "Md Taqui Imam", url: "https://taqui.in" }],
+  creator: "Md Taqui Imam",
+  publisher: "Md Taqui Imam",
+  alternates: {
+    canonical: "/",
+  },
+  openGraph: {
+    type: "website",
+    locale: "en_US",
+    url: "/",
+    siteName: "Drawva",
+    title: defaultTitle,
+    description: defaultDescription,
+    images: [
+      {
+        url: "/web-app-manifest-512x512.png",
+        width: 512,
+        height: 512,
+        alt: "Drawva — AI Infinite Canvas Logo",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: defaultTitle,
+    description: defaultDescription,
+    creator: "@md_taqui_imam",
+    images: ["/web-app-manifest-512x512.png"],
+  },
   icons: {
     icon: [
       { url: "/favicon.ico" },
@@ -36,7 +87,20 @@ export const metadata: Metadata = {
   manifest: "/site.webmanifest",
   appleWebApp: {
     title: "Drawva",
+    statusBarStyle: "black-translucent",
   },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
+  },
+  category: "developer-tools",
 };
 
 export default function RootLayout({
@@ -45,7 +109,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={cn(geistSans.variable, geistMono.variable, "font-sans", outfit.variable, jetbrainsMonoHeading.variable, museoModerno.variable)}>
+    <html
+      lang="en"
+      className={cn(
+        geistSans.variable,
+        geistMono.variable,
+        "font-sans",
+        outfit.variable,
+        jetbrainsMonoHeading.variable,
+        museoModerno.variable
+      )}
+    >
+      <head>
+        <StructuredData />
+      </head>
       <body className="min-h-full antialiased">
         <TooltipProvider>{children}</TooltipProvider>
         <Toaster richColors position="bottom-right" />

@@ -1,0 +1,44 @@
+# Drawva Technical Specification & Architecture Manual
+
+Drawva is an open-source, high-performance infinite whiteboard engine powered by a multimodal AI perception agent.
+
+## Architecture Map
+
+```
+Drawva Stack Architecture:
+ ┌──────────────────────────────────────────────────────────────────────────┐
+ │  UI Shell (React 19 App Router): CanvasHeader, CanvasProvider, CanvasApp  │
+ ├──────────────────────────────────────────────────────────────────────────┤
+ │  Canvas Engine (lib/canvas/engine.ts): multi-layer rAF rendering loop   │
+ │   ├── Grid Layer (gridCtx): infinite background grid pattern             │
+ │   ├── Tile Layer (tileCtx): 512px offscreen tile cache & strokes         │
+ │   ├── Object Layer (objectCtx): shapes, text, formulas, plots            │
+ │   └── Interaction Layer (interactionCtx): live strokes, marquee, drafts   │
+ ├──────────────────────────────────────────────────────────────────────────┤
+ │  Widget Manager (lib/canvas/widgets.ts & diagram.ts):                    │
+ │   └── Dynamic iframe host for 7 diagram formats & HTML applets           │
+ ├──────────────────────────────────────────────────────────────────────────┤
+ │  LangChain AI Agent (lib/ai/):                                           │
+ │   ├── Canvas Perception (Atlas image & Scene JSON)                       │
+ │   ├── Multimodal Reasoning (Spatial intent & gestures)                    │
+ │   └── Structured Command Output (7 diagram formats, MathJax & applets)   │
+ ├──────────────────────────────────────────────────────────────────────────┤
+ │  Persistence (lib/canvas/persistence.ts): IndexedDB autosave canvas-db   │
+ └──────────────────────────────────────────────────────────────────────────┘
+```
+
+## Core Capabilities & Diagram Support
+1. **Mermaid.js**: Flowcharts, sequence diagrams, state diagrams.
+2. **Graphviz DOT**: Dependency trees and directed network graphs via WebAssembly.
+3. **Vega-Lite**: Data visualization, bar charts, scatter plots, line charts.
+4. **SMILES**: Molecular chemical structure visualization.
+5. **BPMN XML**: Business Process Model and Notation workflow diagrams.
+6. **Cytoscape JSON**: Complex network topology graphs.
+7. **GeoJSON**: Geographic spatial maps via Leaflet.
+
+## Developer & Author Information
+- **Author**: Md Taqui Imam
+- **Role**: Fullstack GenAI Developer
+- **Portfolio**: https://taqui.in
+- **GitHub**: https://github.com/taqui-786/drawva
+- **License**: MIT License

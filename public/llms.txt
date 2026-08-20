@@ -1,0 +1,26 @@
+# Drawva — AI Infinite Canvas Whiteboard Engine
+
+> Drawva is an open-source, tile-based infinite whiteboard engine powered by a multimodal AI perception agent.
+
+## Overview
+Drawva enables developers, researchers, and creators to sketch freely on an infinite 2D canvas while a multimodal AI perception agent interprets drawing ink, spatial layout, and annotations in real time. It renders interactive diagrams, LaTeX math equations, function plots, and dynamic code applets directly below the user's ink.
+
+## Key Features
+- **Multimodal AI Perception Agent**: Continuous visual observation of canvas ink and spatial context.
+- **7 Diagram Formats**:
+  - Mermaid (Flowcharts, Sequence Diagrams)
+  - Graphviz DOT (Tree networks, Dependencies)
+  - Vega-Lite (Statistical & Bar Charts)
+  - SMILES (Chemical molecular structures)
+  - BPMN XML (Workflow diagrams)
+  - Cytoscape JSON (Network graphs)
+  - GeoJSON (Geographic spatial maps)
+- **Math & Science Support**: LaTeX equation typesetting via MathJax and 2D function graph plotting.
+- **Local-First & Private**: Autosafe IndexedDB storage (`drawva-canvas-db`), BYO OpenAI-compatible API key.
+- **Real-Time P2P Sync**: Peer-to-peer live canvas collaboration.
+- **Open Source**: 100% MIT Licensed.
+
+## Technical Details
+- **Stack**: Next.js 15 (React 19), TypeScript, Tailwind CSS v4, Base UI, LangChain.
+- **Developer**: Md Taqui Imam (https://taqui.in)
+- **Repository**: https://github.com/taqui-786/drawva
