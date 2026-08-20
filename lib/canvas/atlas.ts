@@ -31,11 +31,50 @@ export interface AtlasResult {
   latestInput: LatestInputMeta | null;
 }
 
+/** Fit a bitmap into a widget box without stretching it into an oval. */
+export function fittedImageRect(
+  imageW: number,
+  imageH: number,
+  box: { x: number; y: number; w: number; h: number }
+): { x: number; y: number; w: number; h: number } {
+  if (imageW < 2 || imageH < 2 || box.w < 2 || box.h < 2) return { x: box.x, y: box.y, w: box.w, h: box.h };
+  const imageAspect = imageW / imageH;
+  const boxAspect = box.w / box.h;
+  if (Math.abs(imageAspect - boxAspect) <= 0.12) return { x: box.x, y: box.y, w: box.w, h: box.h };
+  const scale = Math.min(box.w / imageW, box.h / imageH);
+  const w = imageW * scale;
+  const h = imageH * scale;
+  return { x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h };
+}
+
+function bitmapSize(img: CanvasImageSource): { w: number; h: number } {
+  if (img instanceof HTMLImageElement) return { w: img.naturalWidth || img.width, h: img.naturalHeight || img.height };
+  if (img instanceof HTMLCanvasElement) return { w: img.width, h: img.height };
+  const anyImg = img as { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number };
+  return {
+    w: Number(anyImg.naturalWidth || anyImg.width) || 0,
+    h: Number(anyImg.naturalHeight || anyImg.height) || 0,
+  };
+}
+
+function drawWidgetBitmap(
+  q: CanvasRenderingContext2D,
+  img: CanvasImageSource,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+): void {
+  const size = bitmapSize(img);
+  const dest = fittedImageRect(size.w, size.h, { x, y, w, h });
+  q.drawImage(img, dest.x, dest.y, dest.w, dest.h);
+}
+
 export async function renderWidgetToContext(
   widget: WidgetItem,
   q: CanvasRenderingContext2D
 ): Promise<void> {
-  if (!widget || !widget.html || typeof document === "undefined") return;
+  if (!widget || typeof document === "undefined") return;
   const w = Math.max(1, Math.round(widget.w || widget.contentW || 400));
   const h = Math.max(1, Math.round(widget.h || widget.contentH || 300));
   const wx = widget.x;
@@ -43,76 +82,12 @@ export async function renderWidgetToContext(
 
   if (widget.cachedImage) {
     try {
-      q.drawImage(widget.cachedImage, wx, wy, w, h);
+      drawWidgetBitmap(q, widget.cachedImage, wx, wy, w, h);
       return;
     } catch {}
   }
 
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(widget.html, "text/html");
-  const svgEl = doc.querySelector("svg");
-
-  if (svgEl) {
-    try {
-      const clone = svgEl.cloneNode(true) as SVGSVGElement;
-      clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
-
-      const styles = Array.from(doc.querySelectorAll("style"))
-        .map((s) => s.textContent || "")
-        .join("\n");
-      if (styles.trim()) {
-        const defs = doc.createElementNS("http://www.w3.org/2000/svg", "defs");
-        const styleTag = doc.createElementNS("http://www.w3.org/2000/svg", "style");
-        styleTag.textContent = styles;
-        defs.appendChild(styleTag);
-        clone.insertBefore(defs, clone.firstChild);
-      }
-
-      const foreignObjects = Array.from(clone.querySelectorAll("foreignObject"));
-      for (const fo of foreignObjects) {
-        const foW = parseFloat(fo.getAttribute("width") || "0");
-        const foH = parseFloat(fo.getAttribute("height") || "0");
-        const cx = foW > 0 ? foW / 2 : 0;
-        const cy = foH > 0 ? foH / 2 : 0;
-        const text = (fo.textContent || "").replace(/\s+/g, " ").trim();
-
-        const textEl = doc.createElementNS("http://www.w3.org/2000/svg", "text");
-        textEl.setAttribute("x", String(cx));
-        textEl.setAttribute("y", String(cy));
-        textEl.setAttribute("font-family", "system-ui, -apple-system, sans-serif");
-        textEl.setAttribute("font-size", "14");
-        textEl.setAttribute("font-weight", "500");
-        textEl.setAttribute("fill", "#1e293b");
-        textEl.setAttribute("text-anchor", "middle");
-        textEl.setAttribute("dominant-baseline", "central");
-        textEl.textContent = text;
-
-        fo.parentElement?.replaceChild(textEl, fo);
-      }
-
-      const vb = clone.viewBox?.baseVal;
-      if (vb && vb.width > 0 && vb.height > 0) {
-        clone.setAttribute("width", String(vb.width));
-        clone.setAttribute("height", String(vb.height));
-      } else {
-        clone.setAttribute("width", String(w));
-        clone.setAttribute("height", String(h));
-      }
-
-      const svgSource = new XMLSerializer().serializeToString(clone);
-      const blob = new Blob([svgSource], { type: "image/svg+xml;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const img = new Image();
-      img.src = url;
-      await img.decode();
-      URL.revokeObjectURL(url);
-      q.drawImage(img, wx, wy, w, h);
-      return;
-    } catch (err) {
-      console.warn("[renderWidgetToContext] SVG draw failed, falling back to DOM walker:", err);
-    }
-  }
+  if (!widget.html) return;
 
   try {
     await renderHtmlToContext(widget, q);
@@ -153,9 +128,10 @@ async function renderHtmlToContext(
 
     doc.open();
     doc.write(
-      `<!doctype html><html><head><meta charset="utf-8"><style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style></head><body>${widget.html}</body></html>`
+      `<!doctype html><html><head><meta charset="utf-8"><style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style></head><body>${widget.html}</body></html>`
     );
     doc.close();
+    await new Promise((resolve) => window.setTimeout(resolve, 80));
 
     wrapTextNodes(doc.body);
 
@@ -324,19 +300,31 @@ function wrapTextNodes(parent: Node): void {
 async function drawWidgets(
   wm: WidgetManager | WidgetItem[] | null | undefined,
   q: CanvasRenderingContext2D,
-  rect: Rect
+  rect: Rect,
+  refreshedIds?: Set<string>
 ): Promise<void> {
   if (!wm) return;
+  const manager = Array.isArray(wm) ? null : wm;
   const items = Array.isArray(wm) ? wm : wm.all();
-  for (const w of items) {
-    if (
-      w.x + w.w < rect.x ||
-      w.x > rect.x + rect.w ||
-      w.y + w.h < rect.y ||
-      w.y > rect.y + rect.h
-    ) {
-      continue;
+  const visible = items.filter(
+    (w) =>
+      !(
+        w.x + w.w < rect.x ||
+        w.x > rect.x + rect.w ||
+        w.y + w.h < rect.y ||
+        w.y > rect.y + rect.h
+      )
+  );
+  if (manager && refreshedIds) {
+    const pending: Promise<unknown>[] = [];
+    for (const w of visible) {
+      if (refreshedIds.has(w.id)) continue;
+      refreshedIds.add(w.id);
+      pending.push(manager.refreshSnapshot(w.id, 1100));
     }
+    if (pending.length) await Promise.all(pending);
+  }
+  for (const w of visible) {
     await renderWidgetToContext(w, q);
   }
 }
@@ -419,10 +407,11 @@ export async function buildAtlas(
   q.setTransform(imageScale, 0, 0, imageScale, -sourceRect.x * imageScale, -sourceRect.y * imageScale);
 
   const hasFocus = latestVisible.w > 0 && latestVisible.h > 0 && latest !== null;
+  const refreshedIds = new Set<string>();
   q.save();
   if (hasFocus) q.globalAlpha = 0.42;
   drawTiles(engine, q, sourceRect);
-  await drawWidgets(widgets, q, sourceRect);
+  await drawWidgets(widgets, q, sourceRect, refreshedIds);
   drawObjects(objects, q, sourceRect);
   q.restore();
 
@@ -432,7 +421,7 @@ export async function buildAtlas(
     q.rect(latestVisible.x, latestVisible.y, latestVisible.w, latestVisible.h);
     q.clip();
     drawTiles(engine, q, latestVisible);
-    await drawWidgets(widgets, q, latestVisible);
+    await drawWidgets(widgets, q, latestVisible, refreshedIds);
     drawObjects(objects, q, latestVisible);
     q.restore();
   }

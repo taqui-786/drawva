@@ -244,6 +244,9 @@ export async function exportPng(
     if (c) q.drawImage(c, tx * TILE, ty * TILE);
   }
 
+  if (widgets) {
+    await Promise.all(widgetList.map((w) => widgets.refreshSnapshot(w.id, 1100)));
+  }
   for (const w of widgetList) {
     await renderWidgetToContext(w, q);
   }

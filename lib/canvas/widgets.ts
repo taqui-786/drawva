@@ -109,6 +109,7 @@ export class WidgetManager {
   private style: HTMLStyleElement;
   private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
+  private snapshotWaiters = new Map<string, Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>>();
 
   constructor(private opts: WidgetMountOptions) {
     this.hostRoot = document.createElement("div");
@@ -200,19 +201,23 @@ export class WidgetManager {
         }
       }
     } else if (e.data?.type === "drawva-widget-snapshot") {
-      // Inner iframe posted a rendered-SVG dataURL back — store it for atlas capture.
       const { dataUrl } = e.data as { dataUrl: string | null };
-      if (!dataUrl) return;
-      // Find which widget this snapshot belongs to by matching the source iframe.
       for (const [id, shell] of this.shells) {
         const iframe = shell.querySelector("iframe");
         if (iframe && iframe.contentWindow === e.source) {
           const widget = this.widgets.get(id);
-          if (widget) {
-            const img = new Image();
-            img.onload = () => { widget.cachedImage = img; };
-            img.src = dataUrl;
+          if (!widget) break;
+          if (!dataUrl) {
+            this.resolveSnapshot(id, widget.cachedImage ?? null);
+            break;
           }
+          const img = new Image();
+          img.onload = () => {
+            widget.cachedImage = img;
+            this.resolveSnapshot(id, img);
+          };
+          img.onerror = () => this.resolveSnapshot(id, widget.cachedImage ?? null);
+          img.src = dataUrl;
           break;
         }
       }
@@ -618,7 +623,51 @@ export class WidgetManager {
     this.applyMode(widget.id);
   }
 
+  refreshSnapshot(id: string, timeoutMs = 1100): Promise<HTMLImageElement | HTMLCanvasElement | null> {
+    const widget = this.widgets.get(id);
+    const iframe = this.shells.get(id)?.querySelector("iframe");
+    if (!widget) return Promise.resolve(null);
+    if (!iframe?.contentWindow) return Promise.resolve(widget.cachedImage ?? null);
+    const reqId = `atlas-${id}-${Date.now()}`;
+    return new Promise((resolve) => {
+      const timer = window.setTimeout(() => {
+        this.dropSnapshotWaiter(id, onReady);
+        resolve(widget.cachedImage ?? null);
+      }, Math.max(250, timeoutMs));
+      const onReady = (img: HTMLImageElement | HTMLCanvasElement | null) => {
+        window.clearTimeout(timer);
+        resolve(img || widget.cachedImage || null);
+      };
+      const list = this.snapshotWaiters.get(id) ?? [];
+      list.push(onReady);
+      this.snapshotWaiters.set(id, list);
+      iframe.contentWindow!.postMessage(
+        { type: "drawva-widget-snapshot-request", reqId },
+        location.origin
+      );
+    });
+  }
+
+  private resolveSnapshot(id: string, img: HTMLImageElement | HTMLCanvasElement | null): void {
+    const waiters = this.snapshotWaiters.get(id);
+    if (!waiters || waiters.length === 0) return;
+    this.snapshotWaiters.delete(id);
+    for (const fn of waiters) fn(img);
+  }
+
+  private dropSnapshotWaiter(
+    id: string,
+    waiter: (img: HTMLImageElement | HTMLCanvasElement | null) => void
+  ): void {
+    const list = this.snapshotWaiters.get(id);
+    if (!list) return;
+    const next = list.filter((fn) => fn !== waiter);
+    if (next.length) this.snapshotWaiters.set(id, next);
+    else this.snapshotWaiters.delete(id);
+  }
+
   private unmount(id: string): void {
+    this.resolveSnapshot(id, this.widgets.get(id)?.cachedImage ?? null);
     this.shells.get(id)?.remove();
     this.shells.delete(id);
     this.toolbars.delete(id);

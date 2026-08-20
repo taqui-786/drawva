@@ -185,68 +185,221 @@
           } catch(e) {}
         }
 
-        // ── Snapshot: serialize first SVG to a canvas data URL, post it back ──
-        function postSnapshot(reqId) {
+        function postSnapshotResult(reqId, dataUrl, w, h) {
+          window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: dataUrl, w: w, h: h }, '*');
+        }
+
+        function svgNaturalSize(svg) {
+          const r = svg.getBoundingClientRect();
+          let w = parseFloat(svg.getAttribute('width')) || 0;
+          let h = parseFloat(svg.getAttribute('height')) || 0;
+          if ((!w || !h) && svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
+            w = svg.viewBox.baseVal.width;
+            h = svg.viewBox.baseVal.height;
+          }
+          if (!w || !h) {
+            w = r.width || 400;
+            h = r.height || 300;
+          }
+          return { w: w, h: h, r: r };
+        }
+
+        function cloneLiveSvg(svg) {
+          const clone = svg.cloneNode(true);
+          clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+          clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+          const nat = svgNaturalSize(svg);
+          clone.setAttribute('width', String(nat.w));
+          clone.setAttribute('height', String(nat.h));
+          const css = Array.from(document.querySelectorAll('style')).map(function(s) { return s.textContent || ''; }).join('\\n');
+          if (css.trim()) {
+            const styleTag = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+            styleTag.textContent = css;
+            clone.insertBefore(styleTag, clone.firstChild);
+          }
+          return clone;
+        }
+
+        function svgToImage(svg) {
+          return new Promise(function(resolve) {
+            try {
+              const clone = cloneLiveSvg(svg);
+              const serialized = new XMLSerializer().serializeToString(clone);
+              const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const img = new Image();
+              img.onload = function() { URL.revokeObjectURL(url); resolve(img); };
+              img.onerror = function() { URL.revokeObjectURL(url); resolve(null); };
+              img.src = url;
+            } catch (e) {
+              resolve(null);
+            }
+          });
+        }
+
+        function isInsideSvg(el) {
+          var p = el.parentElement;
+          while (p) {
+            if (p.tagName === 'svg' || p.tagName === 'SVG') return true;
+            p = p.parentElement;
+          }
+          return false;
+        }
+
+        function pageSize() {
+          const root = document.documentElement;
+          const body = document.body;
+          const w = Math.max(1, Math.ceil(Math.max(root.scrollWidth, root.clientWidth, body ? body.scrollWidth : 0)));
+          const h = Math.max(1, Math.ceil(Math.max(root.scrollHeight, root.clientHeight, body ? body.scrollHeight : 0)));
+          return { w: w, h: h };
+        }
+
+        function canvasToDataUrl(canvas) {
           try {
-            const svg = document.querySelector('svg');
-            if (!svg) {
-              const canvasEl = document.querySelector('canvas');
-              if (canvasEl && canvasEl.width > 2 && canvasEl.height > 2) {
-                try {
-                  const dataUrl = canvasEl.toDataURL('image/webp', 0.9);
-                  window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: dataUrl, w: canvasEl.width, h: canvasEl.height }, '*');
-                  return;
-                } catch (e2) {}
+            return canvas.toDataURL('image/webp', 0.92);
+          } catch (e) {
+            try { return canvas.toDataURL('image/png'); } catch (e2) { return null; }
+          }
+        }
+
+        async function rasterizeSingleSvg(svg) {
+          const nat = svgNaturalSize(svg);
+          const img = await svgToImage(svg);
+          if (!img) return null;
+          const scale = Math.min(2, 2048 / Math.max(1, nat.w), 2048 / Math.max(1, nat.h));
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(nat.w * scale));
+          canvas.height = Math.max(1, Math.round(nat.h * scale));
+          const ctx2d = canvas.getContext('2d');
+          ctx2d.drawImage(img, 0, 0, canvas.width, canvas.height);
+          return { canvas: canvas, w: nat.w, h: nat.h };
+        }
+
+        async function rasterizeDocument() {
+          const page = pageSize();
+          let scale = Math.min(2, 2048 / page.w, 2048 / page.h);
+          if (page.w * scale * page.h * scale > 12000000) {
+            scale = Math.sqrt(12000000 / Math.max(1, page.w * page.h));
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(page.w * scale));
+          canvas.height = Math.max(1, Math.round(page.h * scale));
+          const ctx2d = canvas.getContext('2d');
+          ctx2d.scale(scale, scale);
+
+          const nodes = document.body ? document.body.querySelectorAll('*') : [];
+          for (let i = 0; i < nodes.length; i++) {
+            const el = nodes[i];
+            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') continue;
+            if (isInsideSvg(el)) continue;
+            const style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            const bg = style.backgroundColor;
+            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+              ctx2d.fillStyle = bg;
+              const radius = parseFloat(style.borderRadius) || 0;
+              if (radius > 0 && ctx2d.roundRect) {
+                ctx2d.beginPath();
+                ctx2d.roundRect(r.left, r.top, r.width, r.height, radius);
+                ctx2d.fill();
+              } else {
+                ctx2d.fillRect(r.left, r.top, r.width, r.height);
               }
-              window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
+            }
+            const bw = parseFloat(style.borderTopWidth) || 0;
+            if (bw > 0 && style.borderTopStyle !== 'none') {
+              ctx2d.strokeStyle = style.borderTopColor || '#000';
+              ctx2d.lineWidth = bw;
+              ctx2d.strokeRect(r.left + bw / 2, r.top + bw / 2, r.width - bw, r.height - bw);
+            }
+          }
+
+          const svgs = document.querySelectorAll('svg');
+          for (let s = 0; s < svgs.length; s++) {
+            const svg = svgs[s];
+            if (isInsideSvg(svg)) continue;
+            const r = svg.getBoundingClientRect();
+            if (r.width <= 1 || r.height <= 1) continue;
+            const img = await svgToImage(svg);
+            if (img) ctx2d.drawImage(img, r.left, r.top, r.width, r.height);
+          }
+
+          const canvases = document.querySelectorAll('canvas');
+          for (let c = 0; c < canvases.length; c++) {
+            const el = canvases[c];
+            const r = el.getBoundingClientRect();
+            if (r.width <= 1 || r.height <= 1) continue;
+            try { ctx2d.drawImage(el, r.left, r.top, r.width, r.height); } catch (e) {}
+          }
+
+          const images = document.querySelectorAll('img');
+          for (let m = 0; m < images.length; m++) {
+            const el = images[m];
+            if (!el.naturalWidth) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width <= 1 || r.height <= 1) continue;
+            try { ctx2d.drawImage(el, r.left, r.top, r.width, r.height); } catch (e) {}
+          }
+
+          if (document.body) {
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            let node;
+            while ((node = walker.nextNode())) {
+              const parent = node.parentElement;
+              if (!parent || parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') continue;
+              if (isInsideSvg(parent) || parent.closest && parent.closest('svg')) continue;
+              const text = (node.textContent || '').replace(/\\s+/g, ' ').trim();
+              if (!text) continue;
+              const style = window.getComputedStyle(parent);
+              if (style.display === 'none' || style.visibility === 'hidden') continue;
+              const range = document.createRange();
+              range.selectNodeContents(node);
+              const r = range.getBoundingClientRect();
+              if (r.width <= 0 || r.height <= 0) continue;
+              ctx2d.font = (style.fontWeight || '400') + ' ' + (style.fontSize || '16px') + ' ' + (style.fontFamily || 'system-ui, sans-serif');
+              ctx2d.fillStyle = style.color || '#0f172a';
+              ctx2d.textBaseline = 'middle';
+              ctx2d.fillText(text, r.left, r.top + r.height / 2);
+            }
+          }
+
+          return { canvas: canvas, w: page.w, h: page.h };
+        }
+
+        function postSnapshot(reqId) {
+          snapshotLive(reqId).catch(function() {
+            postSnapshotResult(reqId, null, 0, 0);
+          });
+        }
+
+        async function snapshotLive(reqId) {
+          const svgs = document.querySelectorAll('svg');
+          const canvases = document.querySelectorAll('canvas');
+          const imgs = document.querySelectorAll('img');
+          const extra = canvases.length + imgs.length;
+          let shot = null;
+          if (svgs.length === 1 && extra === 0) {
+            shot = await rasterizeSingleSvg(svgs[0]);
+          } else if (svgs.length === 0 && canvases.length === 1 && imgs.length === 0) {
+            const el = canvases[0];
+            if (el.width > 2 && el.height > 2) {
+              postSnapshotResult(reqId, canvasToDataUrl(el), el.width, el.height);
               return;
             }
-            const clone = svg.cloneNode(true);
-            clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-            clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-            let svgW = parseFloat(svg.getAttribute('width')) || 0;
-            let svgH = parseFloat(svg.getAttribute('height')) || 0;
-            if ((!svgW || !svgH) && svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
-              svgW = svg.viewBox.baseVal.width;
-              svgH = svg.viewBox.baseVal.height;
-            }
-            if (!svgW || !svgH) {
-              const r = svg.getBoundingClientRect();
-              svgW = r.width || 400;
-              svgH = r.height || 300;
-            }
-            clone.setAttribute('width', String(svgW));
-            clone.setAttribute('height', String(svgH));
-            const serialized = new XMLSerializer().serializeToString(clone);
-            const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
-            const url = URL.createObjectURL(blob);
-            const img = new Image();
-            img.onload = function() {
-              try {
-                const scale = Math.min(1, 2048 / Math.max(1, svgW), 2048 / Math.max(1, svgH));
-                const cw = Math.max(1, Math.round(svgW * scale));
-                const ch = Math.max(1, Math.round(svgH * scale));
-                const canvas = document.createElement('canvas');
-                canvas.width = cw;
-                canvas.height = ch;
-                const ctx2d = canvas.getContext('2d');
-                ctx2d.drawImage(img, 0, 0, cw, ch);
-                URL.revokeObjectURL(url);
-                const dataUrl = canvas.toDataURL('image/webp', 0.9);
-                window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: dataUrl, w: svgW, h: svgH }, '*');
-              } catch(e2) {
-                URL.revokeObjectURL(url);
-                window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
-              }
-            };
-            img.onerror = function() {
-              URL.revokeObjectURL(url);
-              window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
-            };
-            img.src = url;
-          } catch(e) {
-            window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: null }, '*');
           }
+          if (!shot) shot = await rasterizeDocument();
+          if (!shot || !shot.canvas) {
+            postSnapshotResult(reqId, null, 0, 0);
+            return;
+          }
+          const dataUrl = canvasToDataUrl(shot.canvas);
+          if (!dataUrl || dataUrl.length > 28 * 1024 * 1024) {
+            postSnapshotResult(reqId, null, 0, 0);
+            return;
+          }
+          postSnapshotResult(reqId, dataUrl, shot.w, shot.h);
         }
 
         window.addEventListener('message', function(ev) {
