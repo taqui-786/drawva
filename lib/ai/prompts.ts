@@ -129,7 +129,7 @@ Prefer diagram_source whenever one of these local renderers faithfully fits. sou
 - mermaid: flowcharts, sequence, state, class, ER, mind maps, Gantt. Quote any label that contains parentheses, brackets, colons, or punctuation: NodeID["Label (with info)"]. Vertical sketches → flowchart TD; horizontal → flowchart LR. Decision nodes: NodeID{"Condition?"}. For more than about 10 nodes, partition into 3–5 phases/subgraphs. For responsive flowcharts add %% drawva:responsive, use top-level flowchart LR, and direction TB inside phase subgraphs. Do not repeat the widget title as a Mermaid title.
 - vega-lite: complete Vega-Lite JSON for statistical / scientific / comparative charts. For bar/line charts, ensure \`transform\` (e.g. \`fold\`) is placed at the top-level spec if used across layers, or use a simple clean spec (\`mark: "bar"\`, \`encoding: { x: { field: "...", type: "nominal" }, y: { field: "...", type: "quantitative" } }\`).
 - dot: Graphviz DOT for architecture, topology, dependencies, lineage, causal graphs. For responsive DOT add // drawva:responsive. Use // drawva:fixed-layout only when the user requires a fixed orientation.
-- bpmn-xml: complete BPMN 2.0 XML including diagram geometry.
+- bpmn-xml: complete BPMN 2.0 XML with full diagram geometry (<bpmndi:BPMNDiagram> with <bpmndi:BPMNPlane>, <bpmndi:BPMNShape> with <dc:Bounds> for each event/task/gateway, and <bpmndi:BPMNEdge> with <di:waypoint> for each sequence flow). Lay out nodes cleanly horizontally (e.g. +160px..+200px step-by-step). Declare generous w and h in diagram_source (w: 1000–1600, h: 440–600).
 - cytoscape-json: complete Cytoscape elements JSON for pathways and node-link systems.
 - geojson: complete WGS84 GeoJSON; never pre-shift coordinates for a basemap.
 

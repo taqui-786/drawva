@@ -358,7 +358,14 @@ export function estimateDiagramDimensions(
     return { width: 580, height: 360 };
   }
 
-  if (format === "bpmn-xml" || format === "cytoscape-json" || format === "geojson") {
+  if (format === "bpmn-xml") {
+    const shapes = (source.match(/<(?:bpmn:)?(?:task|userTask|serviceTask|exclusiveGateway|parallelGateway|startEvent|endEvent|intermediateCatchEvent)/gi) || []).length;
+    const estW = Math.min(1800, Math.max(680, 240 + shapes * 160));
+    const estH = Math.min(900, Math.max(400, 240 + Math.ceil(shapes / 4) * 80));
+    return { width: estW, height: estH };
+  }
+
+  if (format === "cytoscape-json" || format === "geojson") {
     return { width: 680, height: 440 };
   }
 
@@ -462,6 +469,7 @@ function clientDiagramRuntimeHtml(opts: {
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; background: transparent !important; font-family: system-ui, -apple-system, sans-serif; box-sizing: border-box; }
     #stage { width: max-content; max-width: 100%; height: max-content; max-height: 100%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; background: transparent !important; position: relative; margin: 0; }
     #stage svg, #stage canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; display: block; margin: auto; }
+    .bjs-breadcrumbs, .bjs-powered-by, .bjs-container > .bjs-powered-by { display: none !important; opacity: 0 !important; pointer-events: none !important; }
     .err-msg { color: #b91c1c; font-size: 14px; text-align: center; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; max-width: 420px; }
     .wait-msg { color: #64748b; font-size: 14px; text-align: center; padding: 20px; }
   </style>
@@ -653,32 +661,59 @@ function clientDiagramRuntimeHtml(opts: {
       }
       if (hoisted.length) spec.transform = hoisted;
     }
-    await window.vegaEmbed(stage, spec, { actions: false, renderer: "svg" });
+    var vegaDiv = document.createElement("div");
+    stage.replaceChildren(vegaDiv);
+    await window.vegaEmbed(vegaDiv, spec, { actions: false, renderer: "svg" });
     fitContent();
     setTimeout(fitContent, 80);
   }
   async function renderBpmn() {
-    stage.style.width = estW + "px";
-    stage.style.height = estH + "px";
     await Promise.all([
       loadStyleFallback("bpmn-js@17.11.1/dist/assets/diagram-js.css"),
       loadStyleFallback("bpmn-js@17.11.1/dist/assets/bpmn-font/css/bpmn.css"),
       loadScriptFallback("bpmn-js@17.11.1/dist/bpmn-viewer.development.js")
     ]);
     if (typeof window.BpmnJS !== "function") throw new Error("BPMN renderer did not initialize");
-    var viewer = new window.BpmnJS({ container: stage });
+    var bpmnDiv = document.createElement("div");
+    bpmnDiv.style.width = estW + "px";
+    bpmnDiv.style.height = estH + "px";
+    bpmnDiv.style.position = "relative";
+    stage.replaceChildren(bpmnDiv);
+
+    var viewer = new window.BpmnJS({ container: bpmnDiv });
     await viewer.importXML(source);
-    viewer.get("canvas").zoom("fit-viewport");
+    var canvas = viewer.get("canvas");
+    canvas.zoom("fit-viewport", "auto");
+
+    try {
+      var vb = canvas.viewbox();
+      if (vb && vb.inner && vb.inner.width > 20 && vb.inner.height > 20) {
+        var pad = 40;
+        var naturalW = Math.min(2400, Math.max(estW, Math.ceil(vb.inner.width + pad * 2)));
+        var naturalH = Math.min(1600, Math.max(estH, Math.ceil(vb.inner.height + pad * 2)));
+        bpmnDiv.style.width = naturalW + "px";
+        bpmnDiv.style.height = naturalH + "px";
+        stage.style.width = naturalW + "px";
+        stage.style.height = naturalH + "px";
+        canvas.zoom("fit-viewport", "auto");
+        postNatural(naturalW, naturalH);
+        return;
+      }
+    } catch (e) {}
+
     postNatural(estW, estH);
   }
   async function renderCytoscape() {
-    stage.style.width = estW + "px";
-    stage.style.height = estH + "px";
     await loadScriptFallback("cytoscape@3.30.4/dist/cytoscape.min.js");
     if (typeof window.cytoscape !== "function") throw new Error("Cytoscape renderer did not initialize");
+    var cyDiv = document.createElement("div");
+    cyDiv.style.width = estW + "px";
+    cyDiv.style.height = estH + "px";
+    stage.replaceChildren(cyDiv);
+
     var elements = parseJson();
-    window.cytoscape({
-      container: stage,
+    var cy = window.cytoscape({
+      container: cyDiv,
       elements: Array.isArray(elements) ? elements : (elements.elements || []),
       layout: { name: "cose", animate: false, fit: true, padding: 24 },
       style: [
@@ -686,6 +721,7 @@ function clientDiagramRuntimeHtml(opts: {
         { selector: "edge", style: { width: 2, "line-color": "#94a3b8", "target-arrow-color": "#94a3b8", "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)" } }
       ]
     });
+    cy.fit(undefined, 24);
     postNatural(estW, estH);
   }
   async function renderGeo() {
