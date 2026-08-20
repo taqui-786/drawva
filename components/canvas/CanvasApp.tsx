@@ -872,9 +872,13 @@ export function CanvasApp() {
       }
       if (oldWidget) {
         wm.remove(oldWidget.id);
+        syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });
       } else {
         for (const w of wm.all()) {
-          if (w.status === "draft" && w.kind === "html") wm.remove(w.id);
+          if (w.status === "draft" && w.kind === "html") {
+            wm.remove(w.id);
+            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: w.id });
+          }
         }
       }
       activeEditTargetRef.current = null;
@@ -987,6 +991,7 @@ export function CanvasApp() {
       }
       if (oldWidget) {
         wm.remove(oldWidget.id);
+        syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });
       }
       activeEditTargetRef.current = null;
       const res = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
@@ -1141,7 +1146,8 @@ export function CanvasApp() {
       onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
         const currentItem = widgets.current?.get(id);
         if (!currentItem || !widgets.current) return;
-        widgets.current.move(id, x - currentItem.x, y - currentItem.y);
+        currentItem.x = x;
+        currentItem.y = y;
         widgets.current.resize(
           id,
           w,

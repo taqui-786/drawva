@@ -358,8 +358,10 @@ export class SelectionController {
 
   private liftSelection(): void {
     if (this.hasErasedOriginal || !this.selection) return;
-    eraseRegion(this.engine, this.selection.rect);
+    const rect = { ...this.selection.rect };
+    eraseRegion(this.engine, rect);
     this.hasErasedOriginal = true;
+    this.inkListener?.({ kind: "erase", rect });
   }
 
   updateMove(world: Point): void {

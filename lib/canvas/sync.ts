@@ -128,7 +128,7 @@ export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
       }),
     });
   }
-  return cloneJson(packet);
+  return packet;
 }
 
 export interface StoredP2PSession {

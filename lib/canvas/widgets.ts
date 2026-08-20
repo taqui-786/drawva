@@ -227,6 +227,7 @@ export class WidgetManager {
     this.widgets.set(widget.id, normalized);
     this.mount(normalized);
     this.position(normalized);
+    this.applyMode(normalized.id);
   }
 
   remove(id: string): void {
@@ -396,6 +397,7 @@ export class WidgetManager {
     const shell = document.createElement("div");
     shell.dataset.hovered = "false";
     shell.dataset.ready = "false";
+    shell.dataset.status = widget.status;
     shell.className = "drawva-widget-shell";
     shell.style.cssText =
       "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;opacity:0;transition:opacity 0.12s ease;touch-action:none;overscroll-behavior:contain;";

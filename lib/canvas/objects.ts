@@ -150,6 +150,7 @@ export class ObjectManager {
     this.items.set(item.id, item);
     this.mount(item);
     this.position(item);
+    this.applyMode(item.id);
   }
 
   remove(id: string): void {
