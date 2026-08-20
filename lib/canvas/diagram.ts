@@ -467,8 +467,10 @@ function clientDiagramRuntimeHtml(opts: {
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html, body { margin: 0; padding: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; background: transparent !important; font-family: system-ui, -apple-system, sans-serif; box-sizing: border-box; }
-    #stage { width: max-content; max-width: 100%; height: max-content; max-height: 100%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; background: transparent !important; position: relative; margin: 0; }
-    #stage svg, #stage canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; display: block; margin: auto; }
+    #stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; background: transparent !important; position: relative; margin: 0; overflow: hidden; }
+    #stage > svg, #stage > canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; display: block; margin: auto; }
+    .bjs-container, .djs-container { width: 100% !important; height: 100% !important; background: transparent !important; }
+    .djs-container svg { width: 100% !important; height: 100% !important; display: block !important; }
     .bjs-breadcrumbs, .bjs-powered-by, .bjs-container > .bjs-powered-by { display: none !important; opacity: 0 !important; pointer-events: none !important; }
     .err-msg { color: #b91c1c; font-size: 14px; text-align: center; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; max-width: 420px; }
     .wait-msg { color: #64748b; font-size: 14px; text-align: center; padding: 20px; }
@@ -670,13 +672,14 @@ function clientDiagramRuntimeHtml(opts: {
   async function renderBpmn() {
     await Promise.all([
       loadStyleFallback("bpmn-js@17.11.1/dist/assets/diagram-js.css"),
+      loadStyleFallback("bpmn-js@17.11.1/dist/assets/bpmn-js.css"),
       loadStyleFallback("bpmn-js@17.11.1/dist/assets/bpmn-font/css/bpmn.css"),
-      loadScriptFallback("bpmn-js@17.11.1/dist/bpmn-viewer.development.js")
+      loadScriptFallback("bpmn-js@17.11.1/dist/bpmn-viewer.production.min.js")
     ]);
     if (typeof window.BpmnJS !== "function") throw new Error("BPMN renderer did not initialize");
     var bpmnDiv = document.createElement("div");
-    bpmnDiv.style.width = estW + "px";
-    bpmnDiv.style.height = estH + "px";
+    bpmnDiv.style.width = "100%";
+    bpmnDiv.style.height = "100%";
     bpmnDiv.style.position = "relative";
     stage.replaceChildren(bpmnDiv);
 
@@ -685,18 +688,20 @@ function clientDiagramRuntimeHtml(opts: {
     var canvas = viewer.get("canvas");
     canvas.zoom("fit-viewport", "auto");
 
+    window.addEventListener("resize", function () {
+      try { canvas.zoom("fit-viewport", "auto"); } catch (e) {}
+    });
+
     try {
       var vb = canvas.viewbox();
       if (vb && vb.inner && vb.inner.width > 20 && vb.inner.height > 20) {
         var pad = 40;
-        var naturalW = Math.min(2400, Math.max(estW, Math.ceil(vb.inner.width + pad * 2)));
-        var naturalH = Math.min(1600, Math.max(estH, Math.ceil(vb.inner.height + pad * 2)));
-        bpmnDiv.style.width = naturalW + "px";
-        bpmnDiv.style.height = naturalH + "px";
-        stage.style.width = naturalW + "px";
-        stage.style.height = naturalH + "px";
-        canvas.zoom("fit-viewport", "auto");
+        var naturalW = Math.min(3200, Math.max(estW, Math.ceil(vb.inner.width + pad * 2)));
+        var naturalH = Math.min(2400, Math.max(estH, Math.ceil(vb.inner.height + pad * 2)));
         postNatural(naturalW, naturalH);
+        setTimeout(function () {
+          try { canvas.zoom("fit-viewport", "auto"); } catch (e2) {}
+        }, 80);
         return;
       }
     } catch (e) {}
@@ -707,8 +712,8 @@ function clientDiagramRuntimeHtml(opts: {
     await loadScriptFallback("cytoscape@3.30.4/dist/cytoscape.min.js");
     if (typeof window.cytoscape !== "function") throw new Error("Cytoscape renderer did not initialize");
     var cyDiv = document.createElement("div");
-    cyDiv.style.width = estW + "px";
-    cyDiv.style.height = estH + "px";
+    cyDiv.style.width = "100%";
+    cyDiv.style.height = "100%";
     stage.replaceChildren(cyDiv);
 
     var elements = parseJson();
@@ -761,10 +766,10 @@ function clientDiagramRuntimeHtml(opts: {
     }
   }, 4000);
 
-  withTimeout(render(), 12000, ${JSON.stringify(opts.label)})
+  withTimeout(render(), 15000, ${JSON.stringify(opts.label)})
     .then(function () { finished = true; })
     .catch(function (err) {
-      if (finished && stage.querySelector("svg, canvas, .vega-embed, .leaflet-container")) return;
+      if (finished && stage.querySelector("svg, canvas, .vega-embed, .leaflet-container, .djs-container")) return;
       showError((${JSON.stringify(opts.label)}) + " could not be rendered. " + (err && err.message ? err.message : String(err)));
     });
 })();
