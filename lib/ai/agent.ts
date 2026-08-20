@@ -157,8 +157,8 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     userPrompt: req.userPrompt || null,
     scene: safeJson(req.scene || sceneText),
     note: widgetEdit
-      ? "widgetEdit provides the existing target widget state for refinement reference. If the user's latest input modifies or refines this widget, return placement in_place. If the user asks to draw or create a new independent visual, return a new command with placement below, right, or match_sketch. The attached image is the only visual; focusInset, when present, is a magnified corner overlay for transcription only."
-      : "The attached image is the only visual. latestInput.imageRect is the authoritative attention region. focusInset, when present, is a magnified duplicate composited into a corner of that same image for handwriting transcription only. Use placement tokens; the client computes exact x/y and avoids collisions.",
+      ? "widgetEdit provides the existing target widget state for refinement reference. If the user's latest input modifies, annotates, or refines this widget (including multiple annotations like colors, labels, dates, fields, or structural edits), synthesize all of them and return placement in_place. If the user asks to draw or create a new independent visual, return a new command with placement below, right, or match_sketch. The attached image is the full high-resolution visual of the canvas."
+      : "The attached image is the full visual of the canvas. Inspect all user handwriting, markings, arrows, and annotations across the image. Use placement tokens; the client computes exact x/y and avoids collisions.",
   };
 
   if (widgetEdit) {
@@ -175,10 +175,10 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     modelInput.widgetEditPolicy =
       widgetEdit.widgetType === "diagram_source"
         ? `The user is interacting near or targeting the supplied diagram_source widget ("${widgetEdit.title || "diagram"}"). The supplied source and sourceFormat are the current state.
-- If the user's latest input is an update, refinement, or modification of this diagram (e.g. "add step X", "remove node", "compact", structural edits, or direct annotations), return ONE complete replacement diagram_source with pluginId "${pluginId}", sourceFormat "${format}", and placement "in_place".
+- If the user's input contains updates, refinements, additions, or modifications of this diagram (including multiple annotations across different parts of the diagram), synthesize ALL of them into ONE complete replacement diagram_source with pluginId "${pluginId}", sourceFormat "${format}", and placement "in_place".
 - If the user's latest input is a NEW independent drawing or separate request (e.g. "Draw <new topic>", "Create ...", a new sketch in open space), generate a NEW item with placement "below", "right", or "match_sketch". DO NOT replace or overwrite the existing diagram.`
         : `The user is interacting near or targeting the supplied html_widget ("${widgetEdit.title || "widget"}"). The supplied HTML/source is the current state.
-- If the user's latest input is an update, refinement, or modification of this widget, return ONE complete replacement html_widget for the same plugin with placement "in_place".
+- If the user's input contains updates, annotations, colors, labels, dates, or refinements for this widget (including multiple simultaneous annotations across different parts of the widget), synthesize ALL of them into ONE complete updated replacement html_widget for the same plugin with placement "in_place".
 - If the user's latest input is a NEW independent visual or separate request, generate a NEW item with placement "below", "right", or "match_sketch". DO NOT replace or overwrite the existing widget.`;
   }
 

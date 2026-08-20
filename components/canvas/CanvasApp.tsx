@@ -423,7 +423,7 @@ export function CanvasApp() {
       // Annotation proximity only: leftover selection of a distant widget must
       // not turn an independent "Draw …" request into an in-place refine.
       // Off-screen ink must not lock onto a widget the snapshot will not show.
-      const ANNOTATION_PX = 120;
+      const ANNOTATION_PX = 400;
       const inkInView = rectsOverlap(box, viewport);
       const selectedId = wm.getSelectedId();
       let targetWidget: WidgetItem | null = null;
@@ -551,6 +551,7 @@ export function CanvasApp() {
         history.current?.recordWidgets();
         draft.setPending(data.commands as CanvasCommand[]);
         await draft.accept(engineAtCall);
+        inkBoxRef.current = null;
         afterBoardChange();
       }
       setAiStatus("done");
@@ -634,7 +635,7 @@ export function CanvasApp() {
     const selected = objects.current?.getSelectedGeometry() || widgets.current?.getSelectedGeometry();
     const recentInk =
       inkBoxRef.current &&
-      Date.now() - lastStrokeTimeRef.current < 20000 &&
+      Date.now() - lastStrokeTimeRef.current < 60000 &&
       inkBoxRef.current.w > 4 &&
       inkBoxRef.current.h > 4;
     // Recent handwriting wins over a leftover widget selection so Ask AI on
@@ -1589,7 +1590,14 @@ export function CanvasApp() {
         status: "accepted",
         image: block.canvas,
       });
-      inkBoxRef.current = { x: textAnchor.x, y: textAnchor.y, w: block.w, h: block.h };
+      const textBox = { x: textAnchor.x, y: textAnchor.y, w: block.w, h: block.h };
+      const now = Date.now();
+      if (inkBoxRef.current && now - lastStrokeTimeRef.current < 25000) {
+        inkBoxRef.current = unionRect(inkBoxRef.current, textBox);
+      } else {
+        inkBoxRef.current = textBox;
+      }
+      lastStrokeTimeRef.current = now;
       afterBoardChangeRef.current();
       if (appState.autoOn) scheduleAi(inkBoxRef.current);
     }
@@ -1808,8 +1816,7 @@ export function CanvasApp() {
           const now = Date.now();
           if (
             inkBoxRef.current &&
-            now - lastStrokeTimeRef.current < 20000 &&
-            distanceBetweenRects(inkBoxRef.current, singleStrokeBox) <= 180
+            now - lastStrokeTimeRef.current < 25000
           ) {
             inkBoxRef.current = unionRect(inkBoxRef.current, singleStrokeBox);
           } else {

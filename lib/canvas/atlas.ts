@@ -406,29 +406,11 @@ export async function buildAtlas(
   q.fillRect(0, 0, out.width, out.height);
   q.setTransform(imageScale, 0, 0, imageScale, -sourceRect.x * imageScale, -sourceRect.y * imageScale);
 
-  const hasFocus = latestVisible.w > 0 && latestVisible.h > 0 && latest !== null;
   const refreshedIds = new Set<string>();
-  q.save();
-  if (hasFocus) q.globalAlpha = 0.42;
   drawTiles(engine, q, sourceRect);
   await drawWidgets(widgets, q, sourceRect, refreshedIds);
   drawObjects(objects, q, sourceRect);
-  q.restore();
 
-  if (hasFocus) {
-    q.save();
-    q.beginPath();
-    q.rect(latestVisible.x, latestVisible.y, latestVisible.w, latestVisible.h);
-    q.clip();
-    drawTiles(engine, q, latestVisible);
-    await drawWidgets(widgets, q, latestVisible, refreshedIds);
-    drawObjects(objects, q, latestVisible);
-    q.restore();
-  }
-
-  const focusInset = hasFocus
-    ? drawFocusInset(out, engine, objects, latestVisible, sourceRect, imageScale)
-    : null;
   q.setTransform(1, 0, 0, 1, 0, 0);
 
   let data = "";
@@ -447,7 +429,7 @@ export async function buildAtlas(
     sourceRect,
     changedBox: latestVisible,
     imageScale,
-    focusInset,
+    focusInset: null,
     latestInput: latestInputMetadata(latestVisible, sourceRect, imageScale, imageSize),
   };
 }
@@ -474,105 +456,6 @@ export function latestInputMetadata(
   };
 }
 
-function drawFocusInset(
-  out: HTMLCanvasElement,
-  engine: CanvasEngine,
-  objects: ObjectManager | ObjectItem[] | null | undefined,
-  latestBox: Rect,
-  sourceRect: Rect,
-  mainScale: number
-): FocusInsetMeta | null {
-  if (latestBox.w <= 0 || latestBox.h <= 0) return null;
-  const largeInput = latestBox.w > 1800 || latestBox.h > 1200;
-  const padding = largeInput
-    ? Math.max(40, Math.min(120, Math.max(latestBox.w, latestBox.h) * 0.04))
-    : Math.max(50, Math.min(280, Math.max(latestBox.w, latestBox.h) * 0.18));
-  const w = Math.min(sourceRect.w, Math.max(220, latestBox.w + padding * 2));
-  const h = Math.min(sourceRect.h, Math.max(160, latestBox.h + padding * 2));
-  const focusRect = clip({
-    x: Math.max(sourceRect.x, Math.min(sourceRect.x + sourceRect.w - w, latestBox.x + latestBox.w / 2 - w / 2)),
-    y: Math.max(sourceRect.y, Math.min(sourceRect.y + sourceRect.h - h, latestBox.y + latestBox.h / 2 - h / 2)),
-    w,
-    h,
-  });
-  const targetW = largeInput ? Math.min(1500, out.width * 0.72) : 640;
-  const targetH = largeInput ? Math.min(1000, out.height * 0.82) : 420;
-  const focusScale = Math.min(
-    3,
-    targetW / Math.max(1, focusRect.w),
-    targetH / Math.max(1, focusRect.h),
-    Math.max(0.01, (out.width - 24) / Math.max(1, focusRect.w)),
-    Math.max(0.01, (out.height - 24) / Math.max(1, focusRect.h))
-  );
-  const latestPixels = { w: latestBox.w * mainScale, h: latestBox.h * mainScale };
-  if (
-    focusScale <= mainScale * 1.05 ||
-    (!largeInput && focusScale <= mainScale * 1.35 && latestPixels.w >= 180 && latestPixels.h >= 100)
-  ) {
-    return null;
-  }
-
-  const contentW = Math.max(1, Math.ceil(focusRect.w * focusScale));
-  const contentH = Math.max(1, Math.ceil(focusRect.h * focusScale));
-  const latestCenter = {
-    x: (latestBox.x + latestBox.w / 2 - sourceRect.x) * mainScale,
-    y: (latestBox.y + latestBox.h / 2 - sourceRect.y) * mainScale,
-  };
-  const insetPadding = 12;
-  const positions = [
-    { x: insetPadding, y: insetPadding },
-    { x: out.width - contentW - insetPadding, y: insetPadding },
-    { x: insetPadding, y: out.height - contentH - insetPadding },
-    { x: out.width - contentW - insetPadding, y: out.height - contentH - insetPadding },
-  ].filter((p) => p.x >= insetPadding && p.y >= insetPadding);
-  if (!positions.length) return null;
-  const dist = (p: { x: number; y: number }) =>
-    Math.hypot(p.x + contentW / 2 - latestCenter.x, p.y + contentH / 2 - latestCenter.y);
-  const position = positions.sort((a, b) => dist(b) - dist(a))[0];
-
-  const q = out.getContext("2d");
-  if (!q) return null;
-  q.save();
-  q.setTransform(1, 0, 0, 1, 0, 0);
-  q.fillStyle = "#fff";
-  q.fillRect(position.x - 5, position.y - 5, contentW + 10, contentH + 10);
-  q.beginPath();
-  q.rect(position.x, position.y, contentW, contentH);
-  q.clip();
-  q.setTransform(
-    focusScale,
-    0,
-    0,
-    focusScale,
-    position.x - focusRect.x * focusScale,
-    position.y - focusRect.y * focusScale
-  );
-  q.globalAlpha = 0.32;
-  drawTiles(engine, q, focusRect);
-  drawObjects(objects, q, focusRect);
-  q.globalAlpha = 1;
-  q.save();
-  q.beginPath();
-  q.rect(latestBox.x, latestBox.y, latestBox.w, latestBox.h);
-  q.clip();
-  drawTiles(engine, q, latestBox);
-  drawObjects(objects, q, latestBox);
-  q.restore();
-  q.restore();
-  q.save();
-  q.setTransform(1, 0, 0, 1, 0, 0);
-  q.strokeStyle = "#64748b";
-  q.lineWidth = 2;
-  q.strokeRect(position.x - 4, position.y - 4, contentW + 8, contentH + 8);
-  q.restore();
-
-  return {
-    sourceRect: focusRect,
-    imageRect: { x: position.x, y: position.y, w: contentW, h: contentH },
-    imageScale: focusScale,
-    purpose: "magnified duplicate of latestInput for handwriting transcription only",
-  };
-}
 
 function visibleInkBounds(engine: CanvasEngine, visible: Rect): Rect | null {
   let bounds: Rect | null = null;
