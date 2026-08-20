@@ -1072,8 +1072,9 @@ export function CanvasApp() {
       }
       const res = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
       const html = typeof res === "string" ? res : res.html;
-      const initialW = oldWidget ? oldWidget.w : Math.round(cmd.w || 540);
-      const initialH = oldWidget ? oldWidget.h : Math.round(cmd.h || 360);
+      const fromDoc = typeof res === "object" && res ? res : null;
+      const initialW = oldWidget ? oldWidget.w : Math.round(fromDoc?.width || cmd.w || 540);
+      const initialH = oldWidget ? oldWidget.h : Math.round(fromDoc?.height || cmd.h || 360);
 
       const item: WidgetItem = {
         id: oldWidget?.id || `diagram-${Date.now()}`,

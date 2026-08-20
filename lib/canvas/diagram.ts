@@ -203,15 +203,91 @@ async function renderSmilesSvg(
     width,
     height,
     bondThickness: 2,
-    padding: 24,
+    padding: 16,
     compactDrawing: compact,
   }).draw(tree, svg, "light", null, false, []);
   if (!svg.childNodes.length) return null;
+  cropSvgElement(svg, 12);
   return svg.outerHTML;
 }
 
+function cropSvgElement(svg: SVGSVGElement, pad = 12): { width: number; height: number } | null {
+  if (typeof document === "undefined") return null;
+  const detached = !svg.isConnected;
+  if (detached) {
+    svg.style.position = "absolute";
+    svg.style.visibility = "hidden";
+    svg.style.pointerEvents = "none";
+    svg.style.left = "-9999px";
+    document.body.append(svg);
+  }
+  try {
+    const b = svg.getBBox();
+    if (!(b.width > 2 && b.height > 2)) return null;
+    const x = b.x - pad;
+    const y = b.y - pad;
+    const w = b.width + pad * 2;
+    const h = b.height + pad * 2;
+    svg.setAttribute("viewBox", `${x} ${y} ${w} ${h}`);
+    svg.setAttribute("width", String(Math.ceil(w)));
+    svg.setAttribute("height", String(Math.ceil(h)));
+    svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+    svg.removeAttribute("style");
+    return { width: Math.ceil(w + 16), height: Math.ceil(h + 16) };
+  } catch {
+    return null;
+  } finally {
+    if (detached) svg.remove();
+  }
+}
+
 function wrapStaticSvg(svg: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:max-content;max-width:100%;height:auto;min-height:0;overflow:hidden;background:transparent!important;box-sizing:border-box}#stage{width:max-content;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:8px}#stage svg{width:auto;height:auto;display:block;margin:auto}</style></head><body><div id="stage">${svg}</div><script>function fitServerSvg(){try{const s=document.querySelector("#stage svg");if(!s)return;let w=0,h=0;if(s.viewBox&&s.viewBox.baseVal&&s.viewBox.baseVal.width>2){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}if(!w){const a=s.getAttribute("viewBox");if(a){const p=a.split(/[\\s,]+/).map(Number);if(p.length===4&&p[2]>2&&p[3]>2){w=p[2];h=p[3]}}}if(!w){const aw=parseFloat(s.getAttribute("width"));const ah=parseFloat(s.getAttribute("height"));if(aw>2&&ah>2&&!String(s.getAttribute("width")||"").includes("%")){w=aw;h=ah}}if(w>2&&h>2){s.setAttribute("width",String(w));s.setAttribute("height",String(h));s.style.width=w+"px";s.style.height=h+"px";s.style.maxWidth="none";window.parent?.postMessage({type:"drawva-widget-resize-content",width:Math.ceil(w+16),height:Math.ceil(h+16)},"*")}}catch(e){}}window.addEventListener("DOMContentLoaded",fitServerSvg);setTimeout(fitServerSvg,50);setTimeout(fitServerSvg,300);</script></body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;padding:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:transparent!important;box-sizing:border-box}
+#stage{width:max-content;max-width:100%;height:max-content;max-height:100%;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}
+#stage svg{width:auto;height:auto;max-width:100%;max-height:100%;display:block;margin:auto}
+</style></head><body><div id="stage">${svg}</div><script>
+function fitServerSvg(){
+  try{
+    var s=document.querySelector("#stage svg");
+    if(!s)return;
+    var w=0,h=0,pad=12;
+    try{
+      var b=s.getBBox();
+      if(b && b.width>2 && b.height>2){
+        var x=b.x-pad,y=b.y-pad;
+        w=b.width+pad*2;h=b.height+pad*2;
+        s.setAttribute("viewBox",x+" "+y+" "+w+" "+h);
+      }
+    }catch(e0){}
+    if(!w){
+      if(s.viewBox&&s.viewBox.baseVal&&s.viewBox.baseVal.width>2){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}
+    }
+    if(!w){
+      var a=s.getAttribute("viewBox");
+      if(a){var p=a.split(/[\\s,]+/).map(Number);if(p.length===4&&p[2]>2&&p[3]>2){w=p[2];h=p[3]}}
+    }
+    if(!w){
+      var aw=parseFloat(s.getAttribute("width"));
+      var ah=parseFloat(s.getAttribute("height"));
+      if(aw>2&&ah>2&&String(s.getAttribute("width")||"").indexOf("%")<0){w=aw;h=ah}
+    }
+    if(w>2&&h>2){
+      s.setAttribute("width",String(Math.ceil(w)));
+      s.setAttribute("height",String(Math.ceil(h)));
+      s.setAttribute("preserveAspectRatio","xMidYMid meet");
+      s.style.width=Math.ceil(w)+"px";
+      s.style.height=Math.ceil(h)+"px";
+      s.style.maxWidth="100%";
+      s.style.maxHeight="100%";
+      window.parent&&window.parent.postMessage({type:"drawva-widget-resize-content",width:Math.ceil(w+16),height:Math.ceil(h+16)},"*");
+    }
+  }catch(e){}
+}
+window.addEventListener("DOMContentLoaded",fitServerSvg);
+setTimeout(fitServerSvg,50);
+setTimeout(fitServerSvg,300);
+</script></body></html>`;
 }
 
 function errorDocument(message: string): string {
@@ -383,9 +459,9 @@ function clientDiagramRuntimeHtml(opts: {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
-    html, body { margin: 0; padding: 0; width: max-content; max-width: 100%; height: auto; min-height: 0; overflow: hidden; background: transparent !important; font-family: system-ui, -apple-system, sans-serif; }
-    #stage { width: max-content; height: auto; min-height: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; background: transparent !important; position: relative; }
-    #stage svg, #stage canvas { width: auto; height: auto; display: block; }
+    html, body { margin: 0; padding: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; overflow: hidden; background: transparent !important; font-family: system-ui, -apple-system, sans-serif; box-sizing: border-box; }
+    #stage { width: max-content; max-width: 100%; height: max-content; max-height: 100%; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; background: transparent !important; position: relative; margin: 0; }
+    #stage svg, #stage canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; display: block; margin: auto; }
     .err-msg { color: #b91c1c; font-size: 14px; text-align: center; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; max-width: 420px; }
     .wait-msg { color: #64748b; font-size: 14px; text-align: center; padding: 20px; }
   </style>
@@ -472,8 +548,24 @@ function clientDiagramRuntimeHtml(opts: {
       var svgEl = stage.querySelector("svg");
       var canvasEl = stage.querySelector("canvas");
       if (svgEl) {
-        var naturalW = 0, naturalH = 0;
-        if (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width > 2) {
+        var naturalW = 0, naturalH = 0, pad = 12;
+        try {
+          var b = svgEl.getBBox();
+          if (b && b.width > 2 && b.height > 2) {
+            var declaredW = 0, declaredH = 0;
+            if (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width > 2) {
+              declaredW = svgEl.viewBox.baseVal.width;
+              declaredH = svgEl.viewBox.baseVal.height;
+            }
+            var cropW = b.width + pad * 2, cropH = b.height + pad * 2;
+            if (!declaredW || cropW < declaredW * 0.82 || cropH < declaredH * 0.82) {
+              svgEl.setAttribute("viewBox", (b.x - pad) + " " + (b.y - pad) + " " + cropW + " " + cropH);
+              naturalW = cropW;
+              naturalH = cropH;
+            }
+          }
+        } catch (e0) {}
+        if (!naturalW && svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width > 2) {
           naturalW = svgEl.viewBox.baseVal.width;
           naturalH = svgEl.viewBox.baseVal.height;
         }
@@ -491,24 +583,14 @@ function clientDiagramRuntimeHtml(opts: {
             naturalW = aw; naturalH = ah;
           }
         }
-        if (!naturalW) {
-          try {
-            var r = svgEl.getBoundingClientRect();
-            if (r.width > 2 && r.height > 2) { naturalW = r.width; naturalH = r.height; }
-          } catch (e1) {}
-        }
-        if (!naturalW) {
-          try {
-            var b = svgEl.getBBox();
-            if (b && b.width > 2 && b.height > 2) { naturalW = b.width; naturalH = b.height; }
-          } catch (e2) {}
-        }
         if (naturalW > 2 && naturalH > 2) {
-          svgEl.setAttribute("width", String(naturalW));
-          svgEl.setAttribute("height", String(naturalH));
-          svgEl.style.width = naturalW + "px";
-          svgEl.style.height = naturalH + "px";
-          svgEl.style.maxWidth = "none";
+          svgEl.setAttribute("width", String(Math.ceil(naturalW)));
+          svgEl.setAttribute("height", String(Math.ceil(naturalH)));
+          svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
+          svgEl.style.width = Math.ceil(naturalW) + "px";
+          svgEl.style.height = Math.ceil(naturalH) + "px";
+          svgEl.style.maxWidth = "100%";
+          svgEl.style.maxHeight = "100%";
           postNatural(naturalW + 16, naturalH + 16);
           return;
         }

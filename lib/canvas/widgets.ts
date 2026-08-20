@@ -453,9 +453,13 @@ export class WidgetManager {
               typeof width === "number" && width > 0
                 ? Math.min(3200, Math.max(80, Math.round(width)))
                 : w.contentW;
-            // Fragment measures (first SVG of a multi-item applet) are smaller than
-            // the declared box. Grow freely; refuse to collapse a new widget onto a shard.
-            if (!w.userResized && (measuredW < w.contentW * 0.6 || measuredH < w.contentH * 0.6)) {
+            // Multi-item HTML applets can report a fragment of one card. Keep their
+            // declared box. Single-graphic diagrams (SMILES, mermaid, one chart)
+            // must be allowed to shrink onto the drawing or they keep empty margins.
+            const fragment =
+              w.kind === "html" &&
+              (measuredW < w.contentW * 0.6 || measuredH < w.contentH * 0.6);
+            if (!w.userResized && fragment) {
               measuredW = Math.max(measuredW, w.contentW);
               measuredH = Math.max(measuredH, w.contentH);
             }

@@ -59,6 +59,36 @@
           return null;
         }
 
+        function cropSvgToDrawing(svg) {
+          if (!svg || svg.getAttribute('data-drawva-cropped') === '1') return svgSize(svg);
+          try {
+            const b = svg.getBBox();
+            if (!(b.width > 2 && b.height > 2)) return svgSize(svg);
+            const pad = 12;
+            const x = b.x - pad;
+            const y = b.y - pad;
+            const w = b.width + pad * 2;
+            const h = b.height + pad * 2;
+            const declared = svgSize(svg);
+            if (declared && w >= declared.w * 0.82 && h >= declared.h * 0.82) {
+              svg.setAttribute('data-drawva-cropped', '1');
+              return declared;
+            }
+            svg.setAttribute('viewBox', x + ' ' + y + ' ' + w + ' ' + h);
+            svg.setAttribute('width', String(Math.ceil(w)));
+            svg.setAttribute('height', String(Math.ceil(h)));
+            svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+            svg.style.width = Math.ceil(w) + 'px';
+            svg.style.height = Math.ceil(h) + 'px';
+            svg.style.maxWidth = '100%';
+            svg.style.maxHeight = '100%';
+            svg.setAttribute('data-drawva-cropped', '1');
+            return { w: Math.ceil(w), h: Math.ceil(h) };
+          } catch (e) {
+            return svgSize(svg);
+          }
+        }
+
         let measureTimer = 0;
         function emitSize(width, height) {
           const w = Math.min(3200, Math.max(80, Math.ceil(width)));
@@ -115,17 +145,18 @@
             const stage = document.getElementById('stage');
             if (stage && (stage.querySelector('[data-drawva-wait]') || (/^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed, .leaflet-container')))) return;
 
-            // Single standalone SVG (mermaid/dot/etc): use its intrinsic size.
-            // NEVER take the first of several SVGs — analog clocks, dashboards,
-            // and multi-card applets would collapse to one face and clip the rest.
-            const svgs = document.querySelectorAll('#stage svg, .vega-embed svg, svg');
-            const text = String(body.innerText || '').replace(/\s+/g, ' ').trim();
-            const extraVisual = body.querySelector('canvas, img, video');
-            if (svgs.length === 1 && !extraVisual && text.length < 8) {
-              const nat = svgSize(svgs[0]);
-              if (nat) {
-                emitSize(nat.w + 16, nat.h + 16);
-                return;
+            // Single graphic in #stage (SMILES, mermaid, one chart): crop empty
+            // SVG canvas and size the iframe to the drawing. Multiple SVGs are
+            // a dashboard — never collapse those to the first face.
+            if (stage) {
+              const stageSvgs = stage.querySelectorAll('svg');
+              const extraVisual = stage.querySelector('canvas, img, video');
+              if (stageSvgs.length === 1 && !extraVisual) {
+                const nat = cropSvgToDrawing(stageSvgs[0]);
+                if (nat) {
+                  emitSize(nat.w + 16, nat.h + 16);
+                  return;
+                }
               }
             }
 
@@ -285,7 +316,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:0;box-sizing:border-box;width:max-content;min-width:0;max-width:none;height:auto;min-height:0;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:none;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;height:100%;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:100%;height:max-content;max-height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;
