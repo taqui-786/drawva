@@ -3,20 +3,23 @@ import { HugeiconsIcon } from "@hugeicons/react";
 import { GithubIcon, SparklesIcon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/landing/theme";
-import { CONTAINER } from "@/components/landing/container";
 
 export function Nav() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-border/60 bg-background/80 backdrop-blur-xl">
-      <div className={`${CONTAINER} flex h-16 items-center justify-between gap-4`}>
+    <header className="relative z-50 w-full px-4 pt-4 md:px-6">
+      <nav
+        aria-label="Main"
+        className="mx-auto flex h-13 w-full max-w-[1440px] items-center justify-between gap-4 rounded-2xl border border-border/70 bg-background/70 pl-5 pr-2 shadow-[0_1px_2px_color-mix(in_oklch,var(--foreground)_6%,transparent),0_12px_32px_-16px_color-mix(in_oklch,var(--primary)_35%,transparent)] backdrop-blur-xl"
+      >
         <Link
           href="/"
-          className="group flex items-center gap-2 outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md"
+          className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Drawva home"
         >
-          <span className="brand-wordmark text-2xl leading-none">Drawva</span>
+          <span className="brand-wordmark text-xl leading-none">Drawva</span>
         </Link>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           <Button
             size="sm"
             variant="ghost"
@@ -38,13 +41,13 @@ export function Nav() {
           <Button
             size="sm"
             render={<Link href="/canvas" />}
-            className="gap-1.5 font-medium shadow-sm transition-transform hover:scale-[1.02] active:scale-95"
+            className="gap-1.5 rounded-full font-medium shadow-sm transition-transform hover:scale-[1.03] active:scale-95"
           >
             <HugeiconsIcon icon={SparklesIcon} className="size-3.5" aria-hidden />
             <span>Launch Canvas</span>
           </Button>
         </div>
-      </div>
+      </nav>
     </header>
   );
 }

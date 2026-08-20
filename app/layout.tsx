@@ -23,7 +23,20 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Drawva",
-  description: "Drawva — AI infinite canvas",
+  description: "Drawva - AI infinite canvas whiteboard engine",
+  icons: {
+    icon: [
+      { url: "/favicon.ico" },
+      { url: "/favicon-96x96.png", sizes: "96x96", type: "image/png" },
+      { url: "/favicon.svg", type: "image/svg+xml" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-touch-icon.png",
+  },
+  manifest: "/site.webmanifest",
+  appleWebApp: {
+    title: "Drawva",
+  },
 };
 
 export default function RootLayout({

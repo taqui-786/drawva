@@ -21,6 +21,7 @@ import { placeImageAt } from "@/lib/canvas/images";
 import { CanvasHeader, type AiRunState } from "./CanvasHeader";
 import { SettingsDialog } from "./SettingsDialog";
 import { LogsDialog } from "./LogsDialog";
+import { UserManualDialog } from "./UserManualDialog";
 import { CanvasFooter } from "./CanvasFooter";
 import { WidgetManager, type WidgetItem, extractHtmlDimensions } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
@@ -224,6 +225,14 @@ export function CanvasApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [latestLog, setLatestLog] = useState<AiLogEntry | null>(null);
+  const [manualOpen, setManualOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return localStorage.getItem("theDrawvaManual") !== "true";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     const refresh = () => {
@@ -1712,6 +1721,7 @@ export function CanvasApp() {
         onOpenConnect={() => setConnectOpen(true)}
         onOpenLogs={() => setLogsOpen(true)}
         hasLogs={!!latestLog}
+        onOpenManual={() => setManualOpen(true)}
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -1803,6 +1813,10 @@ export function CanvasApp() {
         onHost={() => syncManager.current!.hostSession()}
         onJoin={(code) => syncManager.current!.joinSession(code)}
         onDisconnect={() => syncManager.current!.disconnect()}
+      />
+      <UserManualDialog
+        open={manualOpen}
+        onOpenChange={setManualOpen}
       />
     </div>
   );

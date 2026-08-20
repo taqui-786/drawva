@@ -36,14 +36,14 @@ export function ScatteredHeadline() {
 
   if (reduce) {
     return (
-      <h1 className="font-heading text-3xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-6xl">
+      <h1 className="font-heading text-balance text-3xl font-bold leading-[1.06] tracking-tight sm:text-4xl lg:text-[3.2rem]">
         A canvas that <span className="text-primary">reads your ink</span>.
       </h1>
     );
   }
 
   return (
-    <h1 className="font-heading flex flex-wrap items-center justify-center text-3xl font-bold leading-[1.08] tracking-tight sm:text-5xl lg:text-[3.4rem]">
+    <h1 className="font-heading flex flex-wrap items-baseline justify-start text-balance text-3xl font-bold leading-[1.06] tracking-tight sm:text-4xl lg:text-[3.2rem]">
       {WORDS.map((w, i) => (
         <motion.span
           key={w.text}
@@ -55,7 +55,9 @@ export function ScatteredHeadline() {
             damping: 13,
             delay: 0.05 + i * 0.015,
           }}
-          className={`mr-[0.28em] last:mr-0 ${w.primary ? "text-primary" : ""}`}
+          className={`mr-[0.26em] last:mr-0 ${
+            w.primary ? "text-primary [font-variation-settings:'wght'_700]" : ""
+          }`}
         >
           {w.text}
         </motion.span>

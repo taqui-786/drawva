@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#141923" />
+      <stop offset="100%" stop-color="#0B0E14" />
+    </linearGradient>
+    <linearGradient id="strokeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#BEF264" />
+      <stop offset="50%" stop-color="#84CC16" />
+      <stop offset="100%" stop-color="#4D7C0F" />
+    </linearGradient>
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="6" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+  <!-- Background Squircle -->
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="url(#bgGrad)" stroke="#1F2937" stroke-width="4" />
+  
+  <g filter="url(#neonGlow)">
+    <!-- Fluid 'D' stroke curve -->
+    <path d="M 175 160 C 270 90 395 125 405 215 C 415 300 340 400 240 410 C 170 415 130 380 145 315 C 160 250 205 180 230 115 C 240 90 220 90 195 130 C 170 170 140 250 145 385" 
+          fill="none" 
+          stroke="url(#strokeGrad)" 
+          stroke-width="26" 
+          stroke-linecap="round" 
+          stroke-linejoin="round" />
+
+    <!-- Stylized Pen Nib -->
+    <g transform="translate(170, 162) rotate(-35)">
+      <path d="M 0 0 L -11 -22 L 0 -34 L 11 -22 Z" fill="#E2E8F0" />
+      <line x1="0" y1="0" x2="0" y2="-18" stroke="#0F172A" stroke-width="2.5" />
+      <circle cx="0" cy="-18" r="2.5" fill="#0F172A" />
+    </g>
+
+    <!-- AI Sparkles -->
+    <g transform="translate(385, 365)">
+      <path d="M 0 -20 Q 0 0 20 0 Q 0 0 0 20 Q 0 0 -20 0 Q 0 0 0 -20 Z" fill="#BEF264" />
+      <circle cx="0" cy="0" r="3" fill="#FFFFFF" />
+    </g>
+    <g transform="translate(418, 335) scale(0.5)">
+      <path d="M 0 -20 Q 0 0 20 0 Q 0 0 0 20 Q 0 0 -20 0 Q 0 0 0 -20 Z" fill="#A3E635" />
+    </g>
+  </g>
+</svg>

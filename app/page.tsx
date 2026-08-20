@@ -2,32 +2,29 @@ import { Nav } from "@/components/landing/nav";
 import { HeroIntro } from "@/components/landing/hero-intro";
 import { VideoDemo } from "@/components/landing/video-demo";
 import { Footer } from "@/components/landing/footer";
+import { DoodleBg } from "@/components/landing/doodle-bg";
 
 export default function LandingPage() {
   return (
-    <div className="relative flex min-h-[100svh] w-full flex-col overflow-hidden bg-background text-foreground selection:bg-primary/20 selection:text-primary">
-      {/* Ambient top glow background */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[42rem] bg-[radial-gradient(ellipse_at_top,var(--primary-20,rgba(16,185,129,0.16)),transparent_62%)]"
-      />
-      {/* Subtle graph paper overlay */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:44px_44px] opacity-40 [mask-image:radial-gradient(ellipse_at_top,black,transparent_78%)]"
-      />
+    <div className="relative grid h-[100svh] w-full grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-background text-foreground selection:bg-primary/20 selection:text-primary">
+      {/* Ambient background: faint whiteboard grid + self-drawing doodles */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10">
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,var(--border)_1px,transparent_1px),linear-gradient(to_bottom,var(--border)_1px,transparent_1px)] bg-[size:44px_44px] opacity-30 [mask-image:radial-gradient(ellipse_80%_75%_at_50%_40%,black,transparent_85%)]" />
+      </div>
+      <DoodleBg />
 
       <Nav />
 
-      {/* Single no-scroll screen: centered hero → demo video → footer */}
-      <main className="flex w-full flex-1 flex-col justify-between gap-5 py-6 md:py-8">
-        {/* Centered hero */}
-        <section className="mx-auto flex w-full max-w-[1440px] flex-1 flex-col items-center justify-center px-6 md:px-10">
-          <HeroIntro />
-        </section>
-
-        {/* Demo video mock */}
-        <VideoDemo />
+      {/* Single no-scroll screen: editorial hero left, demo reel right */}
+      <main className="min-h-0 w-full">
+        <div className="mx-auto grid h-full w-full max-w-[1440px] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] items-center gap-6 px-6 py-4 md:px-10 lg:grid-cols-[minmax(0,46fr)_minmax(0,54fr)] lg:grid-rows-1 lg:gap-12 lg:py-6">
+          <section className="min-w-0">
+            <HeroIntro />
+          </section>
+          <section className="min-h-0 min-w-0">
+            <VideoDemo />
+          </section>
+        </div>
       </main>
 
       <Footer />

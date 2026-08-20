@@ -38,6 +38,7 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
+  BookOpen01Icon,
   ChevronDownIcon,
   CursorIcon,
   ColorsIcon,
@@ -189,6 +190,7 @@ export function CanvasHeader({
   onOpenConnect,
   onOpenLogs,
   hasLogs,
+  onOpenManual,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
@@ -224,6 +226,7 @@ export function CanvasHeader({
   onOpenConnect: () => void;
   onOpenLogs?: () => void;
   hasLogs?: boolean;
+  onOpenManual?: () => void;
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -260,37 +263,6 @@ export function CanvasHeader({
         <span className="brand-wordmark pr-1 text-lg font-bold leading-none">
           Drawva
         </span>
-
-        {/* Version Indicator Tag */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="cursor-pointer font-mono text-[10px] font-semibold text-muted-foreground/60 hover:text-foreground transition-colors px-1.5 py-0.5 rounded border border-transparent hover:border-border/40 hover:bg-muted/40 select-none">
-                v3.6
-              </span>
-            }
-          />
-          <TooltipContent
-            side="bottom"
-            align="start"
-            className="w-56 p-2.5 flex flex-col gap-1.5 bg-popover text-popover-foreground border border-border shadow-xs rounded-md font-mono text-xs"
-          >
-            <div className="flex items-center justify-between text-xs font-semibold">
-              <span>Drawva Engine</span>
-              <span className="text-[10px] text-muted-foreground font-normal">v3.0.0</span>
-            </div>
-            <div className="flex flex-col gap-1 border-t border-border/40 pt-1.5 text-[10px] text-muted-foreground">
-              <div className="flex justify-between">
-                <span>Build:</span>
-                <span className="text-foreground">v3.0.0</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Environment:</span>
-                <span className="text-foreground">Production</span>
-              </div>
-            </div>
-          </TooltipContent>
-        </Tooltip>
 
         {/* Compact Main Menu Bar */}
         <DropdownMenu>
@@ -361,6 +333,12 @@ export function CanvasHeader({
                 <DropdownMenuItem onClick={onOpenLogs}>
                   <HugeiconsIcon icon={TerminalIcon} />
                   AI Request Logs
+                </DropdownMenuItem>
+              )}
+              {onOpenManual && (
+                <DropdownMenuItem onClick={onOpenManual}>
+                  <HugeiconsIcon icon={BookOpen01Icon} />
+                  User Manual & Guide
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem
@@ -679,12 +657,23 @@ export function CanvasHeader({
                     onValueChange={onModelChange}
                     items={models.map((m) => ({ label: m, value: m }))}
                   >
-                    <SelectTrigger size="sm" className="w-auto min-w-36 max-w-64 font-mono text-xs">
+                    <SelectTrigger
+                      size="sm"
+                      className="w-auto min-w-36 max-w-64 font-mono text-xs"
+                    >
                       <SelectValue />
                     </SelectTrigger>
-                    <SelectContent align="end" alignItemWithTrigger={false} className="w-auto min-w-[280px] max-w-lg font-mono text-xs">
+                    <SelectContent
+                      align="end"
+                      alignItemWithTrigger={false}
+                      className="w-auto min-w-[280px] max-w-lg font-mono text-xs"
+                    >
                       {models.map((m) => (
-                        <SelectItem key={m} value={m} className="font-mono text-xs whitespace-nowrap">
+                        <SelectItem
+                          key={m}
+                          value={m}
+                          className="font-mono text-xs whitespace-nowrap"
+                        >
                           {m}
                         </SelectItem>
                       ))}

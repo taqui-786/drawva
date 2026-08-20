@@ -43,9 +43,9 @@ function InkSplashOnClick() {
         <Button
           size="lg"
           onClick={go}
-          className="gap-2 px-7 shadow-lg shadow-primary/20 transition-transform hover:scale-[1.04] active:scale-95"
+          className="gap-2 px-6 shadow-lg shadow-primary/20 transition-transform hover:scale-[1.04] active:scale-95"
         >
-          <HugeiconsIcon icon={PencilIcon} className="size-5" aria-hidden />
+          <HugeiconsIcon icon={PencilIcon} className="size-4.5" aria-hidden />
           <span>Start drawing</span>
           <HugeiconsIcon icon={ArrowRight01Icon} className="size-4 opacity-80" aria-hidden />
         </Button>
@@ -67,26 +67,62 @@ function InkSplashOnClick() {
   );
 }
 
-/* ── centered hero copy ──────────────────────────────────────────────── */
+/* ── staggered entry helper ──────────────────────────────────────────── */
+
+function Rise({
+  delay,
+  className,
+  children,
+}: {
+  delay: number;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const reduce = useReducedMotion();
+  return (
+    <motion.div
+      initial={reduce ? false : { opacity: 0, y: 18 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.6, delay, ease: [0.16, 1, 0.3, 1] }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/* ── editorial hero copy (left-aligned) ──────────────────────────────── */
+
+const SPECS = [
+  { k: "01", label: "BYO API key" },
+  { k: "02", label: "Autosaves locally" },
+  { k: "03", label: "P2P sync, zero cloud" },
+];
 
 export function HeroIntro() {
   return (
-    <div className="flex flex-col items-center justify-center gap-5 text-center py-2 md:py-6">
-      <p className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3.5 py-1 font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-primary">
-        <span className="relative flex size-1.5">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-          <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
-        </span>
-        AI-Powered Infinite Whiteboard
-      </p>
+    <div className="flex flex-col items-start gap-4 lg:gap-5">
+      <Rise delay={0.05}>
+        <p className="inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-3.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-primary">
+          <span className="relative flex size-1.5">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-primary" />
+          </span>
+          AI-powered infinite whiteboard
+        </p>
+      </Rise>
 
       <ScatteredHeadline />
 
-      <p className="max-w-[58ch] text-pretty text-base leading-relaxed text-muted-foreground sm:text-lg">
-        Sketch, drop a formula, or draw a flowchart — Drawva&apos;s multimodal AI agent converts your handwritten ink into live diagrams, equations, and interactive applets right on your infinite board.
-      </p>
+      <Rise delay={0.22}>
+        <p className="max-w-[46ch] text-pretty text-sm leading-relaxed text-muted-foreground md:text-base">
+          Sketch, drop a formula, or draw a flowchart — Drawva&apos;s multimodal AI agent
+          converts your handwritten ink into live diagrams, equations, and interactive
+          applets right on your infinite board.
+        </p>
+      </Rise>
 
-      <div className="flex flex-wrap items-center justify-center gap-3.5 pt-1">
+      <Rise delay={0.3} className="flex flex-wrap items-center gap-3 pt-1">
         <InkSplashOnClick />
         <Button
           size="lg"
@@ -98,21 +134,23 @@ export function HeroIntro() {
               rel="noopener noreferrer"
             />
           }
-          className="gap-2 px-6 hover:bg-muted/80"
+          className="gap-2 px-5 hover:bg-muted/80"
         >
-          <HugeiconsIcon icon={StarIcon} className="size-5" aria-hidden />
+          <HugeiconsIcon icon={StarIcon} className="size-4.5" aria-hidden />
           <span>Star on GitHub</span>
         </Button>
-      </div>
+      </Rise>
 
-      <div className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2 pt-3 text-xs text-muted-foreground">
-        {["BYO OpenAI API Key", "IndexedDB Auto-Save", "Zero-Cloud P2P Sync"].map((label) => (
-          <div key={label} className="flex items-center gap-1.5">
-            <span className="size-2 rounded-full bg-emerald-500" />
-            <span>{label}</span>
-          </div>
-        ))}
-      </div>
+      <Rise delay={0.38} className="w-full pt-2 lg:pt-4">
+        <ul className="flex flex-wrap items-center gap-x-7 gap-y-2 border-t border-border/60 pt-3.5">
+          {SPECS.map((s) => (
+            <li key={s.k} className="flex items-baseline gap-2 text-xs text-muted-foreground">
+              <span className="font-mono text-[10px] font-semibold text-primary/80">{s.k}</span>
+              <span>{s.label}</span>
+            </li>
+          ))}
+        </ul>
+      </Rise>
     </div>
   );
 }
