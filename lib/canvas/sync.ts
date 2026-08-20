@@ -15,10 +15,14 @@ export interface RemoteCursor {
   timestamp: number;
 }
 
-/** Soft ceiling for a single PeerJS JSON payload (browser SCTP limits vary). */
-export const MAX_PACKET_CHARS = 48_000;
-const HTML_CHUNK_CHARS = 36_000;
-const DATA_URL_CHUNK_CHARS = 36_000;
+/**
+ * Soft ceiling for a single PeerJS JSON payload.
+ * Many browsers still negotiate ~16KiB RTCDataChannel messages; stay under that
+ * after JSON framing or AI widget HTML never arrives while tiny eraser packets do.
+ */
+export const MAX_PACKET_CHARS = 12_000;
+const HTML_CHUNK_CHARS = 8_000;
+const DATA_URL_CHUNK_CHARS = 8_000;
 /** One tile per packet keeps PNG dataURLs under PeerJS payload limits. */
 const TILE_CHUNK = 1;
 const CURSOR_MIN_MS = 50;
@@ -184,15 +188,43 @@ function stripObject(object: ObjectItem): ObjectItem {
   return rest as ObjectItem;
 }
 
+/**
+ * Diagram iframes ship a huge pre-rendered HTML document (inline SVG / CDN loaders).
+ * Sync the compact source instead and re-render with diagramDocument on the peer.
+ */
+export function compactWidgetForSync(widget: WidgetItem): WidgetItem {
+  const base = stripWidget(widget);
+  const hasSource = typeof base.copyText === "string" && base.copyText.length > 0;
+  const canRebuild =
+    hasSource &&
+    (base.kind === "diagram" ||
+      !!base.sourceFormat ||
+      base.pluginId === "flowchart" ||
+      base.pluginId === "diagram");
+  if (canRebuild) {
+    return { ...base, html: "" };
+  }
+  return base;
+}
+
+export function widgetNeedsHydration(widget: WidgetItem): boolean {
+  const hasSource = typeof widget.copyText === "string" && widget.copyText.length > 0;
+  if (!hasSource) return false;
+  const html = widget.html || "";
+  return html.length < 32;
+}
+
 export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
   if (packet.type === "SYNC_OBJECT_ADD") {
     return cloneJson({ ...packet, object: stripObject(packet.object) });
   }
   if (packet.type === "SYNC_WIDGET_ADD") {
-    return cloneJson({ ...packet, widget: stripWidget(packet.widget) });
+    return cloneJson({ ...packet, widget: compactWidgetForSync(packet.widget) });
   }
   if (packet.type === "SYNC_WIDGET_PART") {
-    const meta = packet.meta ? (stripWidget(packet.meta as WidgetItem) as WidgetMeta) : undefined;
+    const meta = packet.meta
+      ? (compactWidgetForSync(packet.meta as WidgetItem) as WidgetMeta)
+      : undefined;
     return cloneJson({ ...packet, meta });
   }
   if (packet.type === "SYNC_INIT_STATE") {
@@ -201,7 +233,7 @@ export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
       ...packet,
       snapshot: {
         ...snap,
-        widgets: (snap.widgets || []).map(stripWidget),
+        widgets: (snap.widgets || []).map(compactWidgetForSync),
         objects: (snap.objects || []).map(stripObject),
       },
     });
@@ -209,7 +241,7 @@ export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
   if (packet.type === "SYNC_SCENE") {
     return cloneJson({
       ...packet,
-      widgets: packet.widgets.map(stripWidget),
+      widgets: packet.widgets.map(compactWidgetForSync),
       objects: packet.objects.map(stripObject),
     });
   }
@@ -233,14 +265,28 @@ export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
   return cloneJson(packet);
 }
 
-/** Expand oversized packets into PeerJS-safe pieces (widgets / ink moves). */
+/** Expand oversized packets into PeerJS-safe pieces (widgets / ink moves / scenes). */
 export function expandPacket(packet: SyncPacket): SyncPacket[] {
   const safe = sanitizePacket(packet);
   if (!safe) return [];
 
+  // Never ship a mega SCENE blob — clear, then fan out each widget/object.
+  if (safe.type === "SYNC_SCENE") {
+    const out: SyncPacket[] = [{ type: "SYNC_SCENE", widgets: [], objects: [] }];
+    for (const widget of safe.widgets || []) {
+      out.push(...expandPacket({ type: "SYNC_WIDGET_ADD", widget }));
+    }
+    for (const object of safe.objects || []) {
+      out.push(...expandPacket({ type: "SYNC_OBJECT_ADD", object }));
+    }
+    return out;
+  }
+
   if (safe.type === "SYNC_WIDGET_ADD") {
-    if (packetChars(safe) <= MAX_PACKET_CHARS) return [safe];
-    const widget = stripWidget(safe.widget);
+    const widget = compactWidgetForSync(safe.widget);
+    const asAdd: SyncPacket = { type: "SYNC_WIDGET_ADD", widget };
+    // Compact diagrams (empty html + source) usually fit; applets still chunk.
+    if (packetChars(asAdd) <= MAX_PACKET_CHARS) return [asAdd];
     const { html = "", ...meta } = widget;
     const chunks = chunkString(html, HTML_CHUNK_CHARS);
     return chunks.map((htmlChunk, index) => ({
@@ -599,6 +645,67 @@ export class SyncManager {
     }
   }
 
+  private outbound: Array<{ peerId: string; packet: SyncPacket }> = [];
+  private pumpTimer: ReturnType<typeof setTimeout> | null = null;
+
+  private rawSend(conn: PeerConnection, packet: SyncPacket): void {
+    if (!conn.open) {
+      const q = this.pending.get(conn.peer) ?? [];
+      q.push(packet);
+      this.pending.set(conn.peer, q);
+      return;
+    }
+    try {
+      conn.send(packet);
+    } catch (err) {
+      console.warn("[SyncManager] Send failed:", packet.type, err);
+      const q = this.pending.get(conn.peer) ?? [];
+      q.push(packet);
+      this.pending.set(conn.peer, q);
+    }
+  }
+
+  private enqueueSend(conn: PeerConnection, packet: SyncPacket): void {
+    // Pace multi-part / heavy payloads so the RTCDataChannel buffer does not
+    // silently drop AI widget chunks. Lightweight strokes stay immediate.
+    const heavy =
+      packet.type === "SYNC_WIDGET_ADD" ||
+      packet.type === "SYNC_WIDGET_PART" ||
+      packet.type === "SYNC_TILES" ||
+      packet.type === "SYNC_TILE_PART" ||
+      packet.type === "SYNC_INK_MOVE" ||
+      packet.type === "SYNC_INK_MOVE_PART" ||
+      packet.type === "SYNC_SCENE" ||
+      packet.type === "SYNC_OBJECT_ADD";
+    if (!heavy) {
+      this.rawSend(conn, packet);
+      return;
+    }
+    this.outbound.push({ peerId: conn.peer, packet });
+    this.schedulePump();
+  }
+
+  private schedulePump(): void {
+    if (this.pumpTimer != null) return;
+    this.pumpTimer = setTimeout(() => {
+      this.pumpTimer = null;
+      this.pumpOutbound();
+    }, 0);
+  }
+
+  private pumpOutbound(): void {
+    const next = this.outbound.shift();
+    if (!next) return;
+    const conn = this.connections.get(next.peerId);
+    if (conn) this.rawSend(conn, next.packet);
+    if (this.outbound.length) {
+      this.pumpTimer = setTimeout(() => {
+        this.pumpTimer = null;
+        this.pumpOutbound();
+      }, 6);
+    }
+  }
+
   private sendTo(conn: PeerConnection, packet: SyncPacket): void {
     const pieces = expandPacket(packet);
     if (!pieces.length) {
@@ -607,22 +714,7 @@ export class SyncManager {
       }
       return;
     }
-    for (const piece of pieces) {
-      if (!conn.open) {
-        const q = this.pending.get(conn.peer) ?? [];
-        q.push(piece);
-        this.pending.set(conn.peer, q);
-        continue;
-      }
-      try {
-        conn.send(piece);
-      } catch (err) {
-        console.warn("[SyncManager] Send failed:", piece.type, err);
-        const q = this.pending.get(conn.peer) ?? [];
-        q.push(piece);
-        this.pending.set(conn.peer, q);
-      }
-    }
+    for (const piece of pieces) this.enqueueSend(conn, piece);
   }
 
   private flushPending(conn: PeerConnection): void {
@@ -891,6 +983,11 @@ export class SyncManager {
     }
     this.connections.clear();
     this.pending.clear();
+    this.outbound = [];
+    if (this.pumpTimer != null) {
+      clearTimeout(this.pumpTimer);
+      this.pumpTimer = null;
+    }
     this.remoteCursors.clear();
     this.widgetParts.clear();
     this.inkMoveParts.clear();

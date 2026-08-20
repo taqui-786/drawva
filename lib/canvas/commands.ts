@@ -179,8 +179,9 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
-export const PLACE_GAP = 40;
-const SLIDE_GAP = 24;
+/** Breathing room between the user's ink and a new AI item. Tight enough to stay related, wide enough not to kiss the handwriting. */
+export const PLACE_GAP = 96;
+const SLIDE_GAP = 32;
 const TELEPORT_PX = 280;
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -324,12 +325,24 @@ export function placeAroundAnchor(
   return { x: clampNum(fallback.x, 0, SIZE - w), y: clampNum(fallback.y, 0, SIZE - h) };
 }
 
+function isViewportDump(box: Box, view?: Box): boolean {
+  if (!view) return false;
+  const vw = Math.max(view.w, 1);
+  const vh = Math.max(view.h, 1);
+  return box.w >= vw * 0.8 && box.h >= vh * 0.8;
+}
+
 function occupancy(
   changedBox?: { x: number; y: number; w: number; h: number },
-  sceneItems?: Array<{ x: number; y: number; w: number; h: number }>
+  sceneItems?: Array<{ x: number; y: number; w: number; h: number }>,
+  visibleRect?: Box
 ): Array<{ x: number; y: number; w: number; h: number }> {
   const items = [...(sceneItems || [])];
-  if (changedBox && changedBox.w > 4 && changedBox.h > 4) items.push(changedBox);
+  // A full-viewport capture is not occupancy — treating it as a blocker
+  // makes every nearby slot look taken and dumps the widget on top of older work.
+  if (changedBox && changedBox.w > 4 && changedBox.h > 4 && !isViewportDump(changedBox, visibleRect)) {
+    items.push(changedBox);
+  }
   return items;
 }
 
@@ -349,7 +362,7 @@ function placeContent(
   h: number,
   ctx: CommandValidationContext
 ): { x: number; y: number } {
-  const blockers = occupancy(ctx.changedBox, ctx.sceneItems);
+  const blockers = occupancy(ctx.changedBox, ctx.sceneItems, ctx.visibleRect);
   const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
   if (anchor) {
     const preferred = pickPreferredSide(
@@ -383,7 +396,7 @@ function placementAnchor(
   const vh = Math.max(visibleRect?.h ?? 1200, 1);
   // Full-viewport dumps are not a handwriting box — don't sit the widget
   // thousands of pixels below the whole capture.
-  if (changedBox.w >= vw * 0.8 && changedBox.h >= vh * 0.8) return null;
+  if (isViewportDump(changedBox, visibleRect || { x: 0, y: 0, w: vw, h: vh })) return null;
   return changedBox;
 }
 
@@ -406,9 +419,20 @@ export function fitWidgetGeometry(
   sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }>
 ): Box | null {
   const placement = String(cmd.placement || "").toLowerCase();
+  const newItemSide =
+    placement === "below" ||
+    placement === "right" ||
+    placement === "left" ||
+    placement === "top" ||
+    placement === "match_sketch";
+  // Freeze to the existing widget ONLY for a real in-place refine.
+  // widgetEdit on the request is context — a nearby/selected widget must not
+  // steal a new independent generation (placement "below"/"right"/…).
+  // keepPosition (explicit Refine button) still snaps when the model omits a side.
+  const snapInPlace = placement === "in_place" || (!reposition && !newItemSide);
 
   // Refinement mode: snap to the target widget's box
-  if (!reposition || placement === "in_place") {
+  if (snapInPlace) {
     let targetBox = widgetEditBox;
     if ((!targetBox || targetBox.w <= 0 || targetBox.h <= 0) && Array.isArray(sceneItems) && sceneItems.length > 0) {
       const widgetItems = sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html");
@@ -483,7 +507,7 @@ export function fitWidgetGeometry(
   const w = clampNum(rawW, MIN_WIDGET_WIDTH, maxW);
   const h = clampNum(rawH, MIN_WIDGET_HEIGHT, maxH);
 
-  const blockers = occupancy(changedBox, sceneItems);
+  const blockers = occupancy(changedBox, sceneItems, visibleRect);
 
   let x: number;
   let y: number;

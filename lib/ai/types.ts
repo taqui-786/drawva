@@ -72,6 +72,8 @@ export interface AiRequest {
   trigger: "manual" | "user_paused";
   uiTheme?: string;
   widgetEdit?: WidgetEditContext;
+  /** True only for the explicit Refine control. Nearby widgetEdit is context, not a freeze. */
+  keepPosition?: boolean;
   focusInset?: FocusInsetMeta | null;
   providerType?: ProviderType;
   baseUrl?: string;

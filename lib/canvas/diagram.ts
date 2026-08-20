@@ -114,6 +114,53 @@ export function sanitizeMermaidSource(raw: string): string {
   return s;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(ms / 1000)}s`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+const loadedScripts = new Map<string, Promise<void>>();
+
+function loadBrowserScript(url: string): Promise<void> {
+  const existing = loadedScripts.get(url);
+  if (existing) return existing;
+  const pending = new Promise<void>((resolve, reject) => {
+    if (typeof document === "undefined") {
+      reject(new Error("no document"));
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = url;
+    script.async = true;
+    script.crossOrigin = "anonymous";
+    script.referrerPolicy = "no-referrer";
+    script.onload = () => resolve();
+    script.onerror = () => {
+      loadedScripts.delete(url);
+      reject(new Error(`Could not load ${url}`));
+    };
+    document.head.append(script);
+  });
+  loadedScripts.set(url, pending);
+  return pending;
+}
+
+type SmilesDrawerGlobal = {
+  parse: (source: string, onOk: (tree: unknown) => void, onErr: (err: unknown) => void) => void;
+  SvgDrawer: new (opts: object) => { draw: (...args: unknown[]) => void };
+};
+
 async function renderMermaid(source: string): Promise<string> {
   const mermaid = (await import("mermaid")).default;
   mermaid.initialize({
@@ -125,6 +172,46 @@ async function renderMermaid(source: string): Promise<string> {
   const id = `dm-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
   const result = await mermaid.render(id, source);
   return result.svg || "";
+}
+
+async function renderSmilesSvg(
+  source: string,
+  width: number,
+  height: number,
+  compact: boolean
+): Promise<string | null> {
+  if (typeof window === "undefined" || typeof document === "undefined") return null;
+  const primary = "https://cdn.jsdelivr.net/npm/smiles-drawer@2.1.7/dist/smiles-drawer.min.js";
+  const fallback = "https://unpkg.com/smiles-drawer@2.1.7/dist/smiles-drawer.min.js";
+  try {
+    await loadBrowserScript(primary);
+  } catch {
+    await loadBrowserScript(fallback);
+  }
+  const SD = (window as unknown as { SmilesDrawer?: SmilesDrawerGlobal }).SmilesDrawer;
+  if (!SD?.parse || typeof SD.SvgDrawer !== "function") return null;
+  const tree = await new Promise((resolve, reject) => {
+    try {
+      SD.parse(source, resolve, reject);
+    } catch (err) {
+      reject(err);
+    }
+  });
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+  new SD.SvgDrawer({
+    width,
+    height,
+    bondThickness: 2,
+    padding: 24,
+    compactDrawing: compact,
+  }).draw(tree, svg, "light", null, false, []);
+  if (!svg.childNodes.length) return null;
+  return svg.outerHTML;
+}
+
+function wrapStaticSvg(svg: string): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:max-content;max-width:100%;height:auto;min-height:0;overflow:hidden;background:transparent!important;box-sizing:border-box}#stage{width:max-content;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:8px}#stage svg{width:auto;height:auto;display:block;margin:auto}</style></head><body><div id="stage">${svg}</div><script>function fitServerSvg(){try{const s=document.querySelector("#stage svg");if(!s)return;let w=0,h=0;if(s.viewBox&&s.viewBox.baseVal&&s.viewBox.baseVal.width>2){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}if(!w){const a=s.getAttribute("viewBox");if(a){const p=a.split(/[\\s,]+/).map(Number);if(p.length===4&&p[2]>2&&p[3]>2){w=p[2];h=p[3]}}}if(!w){const aw=parseFloat(s.getAttribute("width"));const ah=parseFloat(s.getAttribute("height"));if(aw>2&&ah>2&&!String(s.getAttribute("width")||"").includes("%")){w=aw;h=ah}}if(w>2&&h>2){s.setAttribute("width",String(w));s.setAttribute("height",String(h));s.style.width=w+"px";s.style.height=h+"px";s.style.maxWidth="none";window.parent?.postMessage({type:"drawva-widget-resize-content",width:Math.ceil(w+16),height:Math.ceil(h+16)},"*")}}catch(e){}}window.addEventListener("DOMContentLoaded",fitServerSvg);setTimeout(fitServerSvg,50);setTimeout(fitServerSvg,300);</script></body></html>`;
 }
 
 function errorDocument(message: string): string {
@@ -232,207 +319,189 @@ export async function diagramDocument(
 
   const effectiveSource = format === "mermaid" ? sanitizeMermaidSource(source) : source;
 
-  if (format === "mermaid") {
+  if (format === "mermaid" && typeof document !== "undefined") {
     const { source: responsive } = responsiveMermaidSource(effectiveSource, 800, 500);
     try {
-      const svg = await renderMermaid(responsive);
+      const svg = await withTimeout(renderMermaid(responsive), 8000, "Mermaid");
       if (svg) {
         const dims = extractSvgDimensions(svg) ?? estimateDiagramDimensions("mermaid", effectiveSource, diagramKind);
-        const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;width:max-content;max-width:100%;height:auto;min-height:0;overflow:hidden;background:transparent!important;box-sizing:border-box}#stage{width:max-content;height:auto;min-height:0;display:flex;align-items:center;justify-content:center;box-sizing:border-box;padding:8px}#stage svg{width:auto;height:auto;display:block;margin:auto}</style></head><body><div id="stage">${svg}</div><script>function fitServerSvg(){try{const s=document.querySelector("#stage svg");if(!s)return;let w=0,h=0;if(s.viewBox&&s.viewBox.baseVal&&s.viewBox.baseVal.width>2){w=s.viewBox.baseVal.width;h=s.viewBox.baseVal.height}if(!w){const a=s.getAttribute("viewBox");if(a){const p=a.split(/[\\s,]+/).map(Number);if(p.length===4&&p[2]>2&&p[3]>2){w=p[2];h=p[3]}}}if(!w){const aw=parseFloat(s.getAttribute("width"));const ah=parseFloat(s.getAttribute("height"));if(aw>2&&ah>2&&!String(s.getAttribute("width")||"").includes("%")){w=aw;h=ah}}if(w>2&&h>2){s.setAttribute("width",String(w));s.setAttribute("height",String(h));s.style.width=w+"px";s.style.height=h+"px";s.style.maxWidth="none";window.parent?.postMessage({type:"drawva-widget-resize-content",width:Math.ceil(w+16),height:Math.ceil(h+16)},"*")}}catch(e){}}window.addEventListener("DOMContentLoaded",fitServerSvg);setTimeout(fitServerSvg,50);setTimeout(fitServerSvg,300);</script></body></html>`;
-        return { html, width: dims.width, height: dims.height };
+        return { html: wrapStaticSvg(svg), width: dims.width, height: dims.height };
       }
     } catch (e) {
-      console.warn("[Diagram Renderer] Mermaid pre-render failed, using fallback:", e);
+      console.warn("[Diagram Renderer] Mermaid pre-render failed, using iframe runtime:", e);
+    }
+  }
+
+  const isCompact =
+    diagramKind === "molecular-structure-compact" ||
+    diagramKind === "compact" ||
+    /compact/i.test(diagramKind || "");
+
+  if (format === "smiles") {
+    const smileDims = estimateDiagramDimensions("smiles", effectiveSource, diagramKind);
+    try {
+      const svg = await withTimeout(
+        renderSmilesSvg(effectiveSource, smileDims.width, smileDims.height, isCompact),
+        2500,
+        "SMILES"
+      );
+      if (svg) {
+        const dims = extractSvgDimensions(svg) ?? smileDims;
+        return { html: wrapStaticSvg(svg), width: dims.width, height: dims.height };
+      }
+    } catch (e) {
+      console.warn("[Diagram Renderer] SMILES pre-render failed, using iframe runtime:", e);
     }
   }
 
   const dims = estimateDiagramDimensions(format, effectiveSource, diagramKind);
   const encodedSource = JSON.stringify(effectiveSource);
-  const isCompact =
-    diagramKind === "molecular-structure-compact" ||
-    diagramKind === "compact" ||
-    /compact/i.test(diagramKind || "");
   const estW = dims.width;
   const estH = dims.height;
+  const html = clientDiagramRuntimeHtml({
+    sourceJson: encodedSource,
+    format,
+    label: formatLabel(format),
+    estW,
+    estH,
+    compact: isCompact,
+  });
+  return { html, width: estW, height: estH };
+}
 
-  const html = `<!doctype html>
+function clientDiagramRuntimeHtml(opts: {
+  sourceJson: string;
+  format: string;
+  label: string;
+  estW: number;
+  estH: number;
+  compact: boolean;
+}): string {
+  return `<!doctype html>
 <html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <style>
     html, body { margin: 0; padding: 0; width: max-content; max-width: 100%; height: auto; min-height: 0; overflow: hidden; background: transparent !important; font-family: system-ui, -apple-system, sans-serif; }
-    #stage { width: max-content; height: auto; min-height: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; background: transparent !important; }
+    #stage { width: max-content; height: auto; min-height: 0; display: flex; align-items: center; justify-content: center; box-sizing: border-box; padding: 8px; background: transparent !important; position: relative; }
     #stage svg, #stage canvas { width: auto; height: auto; display: block; }
-    .err-msg { color: #b91c1c; font-size: 14px; text-align: center; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; }
+    .err-msg { color: #b91c1c; font-size: 14px; text-align: center; padding: 20px; background: #fef2f2; border-radius: 8px; border: 1px solid #fecaca; max-width: 420px; }
+    .wait-msg { color: #64748b; font-size: 14px; text-align: center; padding: 20px; }
   </style>
 </head>
 <body>
-<div id="stage">Rendering ${escapeHtml(formatLabel(format))}...</div>
-<script type="module">
-(async () => {
-  const stage = document.getElementById("stage");
-  const source = ${encodedSource};
-  const format = ${JSON.stringify(format)};
-  const estW = ${estW};
-  const estH = ${estH};
+<div id="stage"><div class="wait-msg" data-drawva-wait="1">Rendering ${escapeHtml(opts.label)}...</div></div>
+<script>
+(function () {
+  var stage = document.getElementById("stage");
+  var source = ${opts.sourceJson};
+  var format = ${JSON.stringify(opts.format)};
+  var estW = ${opts.estW};
+  var estH = ${opts.estH};
+  var compact = ${opts.compact ? "true" : "false"};
+  var finished = false;
 
-  function showError(msg) {
-    stage.innerHTML = '<div class="err-msg">⚠️ ' + String(msg || "").replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]) + '</div>';
+  function escapeMsg(msg) {
+    return String(msg || "").replace(/[&<>"']/g, function (c) {
+      return ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c];
+    });
   }
-
+  function showError(msg) {
+    finished = true;
+    stage.innerHTML = '<div class="err-msg">⚠️ ' + escapeMsg(msg) + "</div>";
+  }
   function postNatural(w, h) {
     if (!(w > 2 && h > 2)) return;
-    window.parent?.postMessage({
+    window.parent && window.parent.postMessage({
       type: "drawva-widget-resize-content",
       width: Math.min(3200, Math.max(120, Math.ceil(w))),
-      height: Math.min(5000, Math.max(80, Math.ceil(h))),
+      height: Math.min(5000, Math.max(80, Math.ceil(h)))
     }, "*");
-    window.parent?.postMessage({ type: "drawva-widget-updated" }, "*");
+    window.parent && window.parent.postMessage({ type: "drawva-widget-updated" }, "*");
   }
-
-  try {
-    if (format === "mermaid") {
-      const { default: mermaid } = await import("https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.esm.min.mjs");
-      mermaid.initialize({
-        startOnLoad: false,
-        securityLevel: "loose",
-        theme: "base",
-        flowchart: { htmlLabels: false },
-      });
-      const id = "m-" + Math.random().toString(36).substring(2, 9);
-      const res = await mermaid.render(id, source);
-      stage.innerHTML = res.svg;
-      fitContent();
-    } else if (format === "dot") {
-      const { instance } = await import("https://cdn.jsdelivr.net/npm/@viz-js/viz@3.9.0/lib/viz-standalone.mjs");
-      const viz = await instance();
-      const svgElement = viz.renderSVGElement(source);
-      stage.replaceChildren(svgElement);
-      fitContent();
-    } else if (format === "smiles") {
-      const { default: SmilesDrawer } = await import("https://cdn.jsdelivr.net/npm/smiles-drawer@2.1.7/+esm");
-      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-      svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-      SmilesDrawer.parse(source, (tree) => {
-        new SmilesDrawer.SvgDrawer({ width: estW, height: estH, bondThickness: 2, compactDrawing: ${isCompact} })
-          .draw(tree, svg, "light", null, false, []);
-        stage.replaceChildren(svg);
-        fitContent();
-      }, (err) => showError("SMILES Parse Error: " + err));
-    } else if (format === "vega-lite") {
-      const [{ default: vega }, { default: vegaLite }, { default: vegaEmbed }] = await Promise.all([
-        import("https://cdn.jsdelivr.net/npm/vega@5.30.0/+esm"),
-        import("https://cdn.jsdelivr.net/npm/vega-lite@5.19.0/+esm"),
-        import("https://cdn.jsdelivr.net/npm/vega-embed@6.26.0/+esm")
-      ]);
-      const rawSpec = typeof source === "string" ? JSON.parse(source) : source;
-      const spec = { ...rawSpec };
-      if (!spec.width) spec.width = 560;
-      if (!spec.height) spec.height = 320;
-      // Hoist transforms from layers if missing at top level (e.g. fold transforms)
-      if (Array.isArray(spec.layer) && (!spec.transform || !spec.transform.length)) {
-        const hoisted: any[] = [];
-        for (const lyr of spec.layer) {
-          if (Array.isArray(lyr?.transform)) hoisted.push(...lyr.transform);
-        }
-        if (hoisted.length > 0) spec.transform = hoisted;
-      }
-      await vegaEmbed(stage, spec, { actions: false, renderer: "svg" });
-      setTimeout(fitContent, 80);
-      fitContent();
-    } else if (format === "bpmn-xml") {
-      stage.style.width = estW + "px";
-      stage.style.height = estH + "px";
-      const { default: BpmnJS } = await import("https://cdn.jsdelivr.net/npm/bpmn-js@17.11.1/+esm");
-      const viewer = new BpmnJS({ container: stage });
-      await viewer.importXML(source);
-      viewer.get('canvas').zoom('fit-viewport');
-      postNatural(estW, estH);
-    } else if (format === "cytoscape-json") {
-      stage.style.width = estW + "px";
-      stage.style.height = estH + "px";
-      const { default: cytoscape } = await import("https://cdn.jsdelivr.net/npm/cytoscape@3.30.4/+esm");
-      const elements = typeof source === "string" ? JSON.parse(source) : source;
-      cytoscape({
-        container: stage,
-        elements: Array.isArray(elements) ? elements : (elements.elements || []),
-        layout: { name: 'cose', animate: false, fit: true, padding: 24 },
-        style: [
-          { selector: 'node', style: { 'background-color': '#ffffff', 'border-color': '#2563eb', 'border-width': 2, 'label': 'data(label)', 'color': '#0f172a', 'font-size': 14 } },
-          { selector: 'edge', style: { 'width': 2, 'line-color': '#94a3b8', 'target-arrow-color': '#94a3b8', 'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'label': 'data(label)' } }
-        ]
-      });
-      postNatural(estW, estH);
-    } else if (format === "geojson") {
-      stage.style.width = estW + "px";
-      stage.style.height = estH + "px";
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(link);
-      const { default: L } = await import("https://cdn.jsdelivr.net/npm/leaflet@1.9.4/+esm");
-      const mapDiv = document.createElement("div");
-      mapDiv.style.width = "100%";
-      mapDiv.style.height = "100%";
-      stage.replaceChildren(mapDiv);
-      const map = L.map(mapDiv).setView([20, 0], 2);
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-      const geoData = typeof source === "string" ? JSON.parse(source) : source;
-      const layer = L.geoJSON(geoData).addTo(map);
-      if (layer.getBounds().isValid()) map.fitBounds(layer.getBounds());
-      postNatural(estW, estH);
-    }
-  } catch (err) {
-    showError(err.message || String(err));
+  function loadScript(url) {
+    return new Promise(function (resolve, reject) {
+      var s = document.createElement("script");
+      s.src = url;
+      s.async = true;
+      s.referrerPolicy = "no-referrer";
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error("Could not load " + url)); };
+      document.head.appendChild(s);
+    });
+  }
+  function loadStyle(url) {
+    return new Promise(function (resolve, reject) {
+      var l = document.createElement("link");
+      l.rel = "stylesheet";
+      l.href = url;
+      l.referrerPolicy = "no-referrer";
+      l.onload = function () { resolve(); };
+      l.onerror = function () { reject(new Error("Could not load " + url)); };
+      document.head.appendChild(l);
+    });
+  }
+  function npmUrl(pkgPath) {
+    return "https://cdn.jsdelivr.net/npm/" + pkgPath;
+  }
+  function unpkgUrl(pkgPath) {
+    return "https://unpkg.com/" + pkgPath;
+  }
+  function loadScriptFallback(pkgPath) {
+    return loadScript(npmUrl(pkgPath)).catch(function () { return loadScript(unpkgUrl(pkgPath)); });
+  }
+  function loadStyleFallback(pkgPath) {
+    return loadStyle(npmUrl(pkgPath)).catch(function () { return loadStyle(unpkgUrl(pkgPath)); });
+  }
+  function withTimeout(promise, ms, label) {
+    return Promise.race([
+      promise,
+      new Promise(function (_, reject) {
+        setTimeout(function () { reject(new Error(label + " timed out")); }, ms);
+      })
+    ]);
+  }
+  function parseJson() {
+    try { return typeof source === "string" ? JSON.parse(source) : source; }
+    catch (e) { throw new Error(format + " source is not valid JSON"); }
   }
 
   function fitContent() {
     try {
-      const svgEl = stage.querySelector("svg");
-      const canvasEl = stage.querySelector("canvas");
+      var svgEl = stage.querySelector("svg");
+      var canvasEl = stage.querySelector("canvas");
       if (svgEl) {
-        let naturalW = 0;
-        let naturalH = 0;
+        var naturalW = 0, naturalH = 0;
         if (svgEl.viewBox && svgEl.viewBox.baseVal && svgEl.viewBox.baseVal.width > 2) {
           naturalW = svgEl.viewBox.baseVal.width;
           naturalH = svgEl.viewBox.baseVal.height;
         }
         if (!naturalW) {
-          const attr = svgEl.getAttribute("viewBox");
+          var attr = svgEl.getAttribute("viewBox");
           if (attr) {
-            const p = attr.split(/[\s,]+/).map(Number);
-            if (p.length === 4 && p[2] > 2 && p[3] > 2) {
-              naturalW = p[2];
-              naturalH = p[3];
-            }
+            var p = attr.split(/[\\s,]+/).map(Number);
+            if (p.length === 4 && p[2] > 2 && p[3] > 2) { naturalW = p[2]; naturalH = p[3]; }
           }
         }
         if (!naturalW) {
-          const aw = parseFloat(svgEl.getAttribute("width") || "");
-          const ah = parseFloat(svgEl.getAttribute("height") || "");
-          if (aw > 2 && ah > 2 && !String(svgEl.getAttribute("width") || "").includes("%")) {
-            naturalW = aw;
-            naturalH = ah;
+          var aw = parseFloat(svgEl.getAttribute("width") || "");
+          var ah = parseFloat(svgEl.getAttribute("height") || "");
+          if (aw > 2 && ah > 2 && String(svgEl.getAttribute("width") || "").indexOf("%") < 0) {
+            naturalW = aw; naturalH = ah;
           }
         }
         if (!naturalW) {
           try {
-            const r = svgEl.getBoundingClientRect();
-            if (r.width > 2 && r.height > 2) {
-              naturalW = r.width;
-              naturalH = r.height;
-            }
-          } catch (e) {}
+            var r = svgEl.getBoundingClientRect();
+            if (r.width > 2 && r.height > 2) { naturalW = r.width; naturalH = r.height; }
+          } catch (e1) {}
         }
         if (!naturalW) {
           try {
-            const b = svgEl.getBBox();
-            if (b && b.width > 2 && b.height > 2) {
-              naturalW = b.width;
-              naturalH = b.height;
-            }
-          } catch (e) {}
+            var b = svgEl.getBBox();
+            if (b && b.width > 2 && b.height > 2) { naturalW = b.width; naturalH = b.height; }
+          } catch (e2) {}
         }
         if (naturalW > 2 && naturalH > 2) {
           svgEl.setAttribute("width", String(naturalW));
@@ -445,21 +514,145 @@ export async function diagramDocument(
         }
       }
       if (canvasEl) {
-        const cw = canvasEl.width || canvasEl.getBoundingClientRect().width;
-        const ch = canvasEl.height || canvasEl.getBoundingClientRect().height;
-        if (cw > 2 && ch > 2) {
-          postNatural(cw + 16, ch + 16);
-          return;
+        var cw = canvasEl.width || canvasEl.getBoundingClientRect().width;
+        var ch = canvasEl.height || canvasEl.getBoundingClientRect().height;
+        if (cw > 2 && ch > 2) { postNatural(cw + 16, ch + 16); }
+      }
+    } catch (e3) {}
+  }
+
+  async function renderMermaid() {
+    await loadScriptFallback("mermaid@10.9.1/dist/mermaid.min.js");
+    var mermaid = window.mermaid;
+    if (!mermaid || !mermaid.render) throw new Error("Mermaid did not initialize");
+    mermaid.initialize({ startOnLoad: false, securityLevel: "loose", theme: "base", flowchart: { htmlLabels: false } });
+    var res = await mermaid.render("m-" + Math.random().toString(36).slice(2, 9), source);
+    stage.innerHTML = res.svg;
+    fitContent();
+  }
+  async function renderDot() {
+    var mod = await import("https://cdn.jsdelivr.net/npm/@viz-js/viz@3.9.0/lib/viz-standalone.mjs");
+    var viz = await mod.instance();
+    var svgElement = viz.renderSVGElement(source);
+    stage.replaceChildren(svgElement);
+    fitContent();
+  }
+  async function renderSmiles() {
+    await loadScriptFallback("smiles-drawer@2.1.7/dist/smiles-drawer.min.js");
+    var SD = window.SmilesDrawer;
+    if (!SD || !SD.parse || typeof SD.SvgDrawer !== "function") throw new Error("SMILES renderer did not initialize");
+    var tree = await new Promise(function (resolve, reject) {
+      try { SD.parse(source, resolve, reject); }
+      catch (err) { reject(err); }
+    });
+    var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+    new SD.SvgDrawer({ width: estW, height: estH, bondThickness: 2, padding: 24, compactDrawing: compact })
+      .draw(tree, svg, "light", null, false, []);
+    if (!svg.childNodes.length) throw new Error("SMILES produced an empty drawing");
+    stage.replaceChildren(svg);
+    fitContent();
+  }
+  async function renderVega() {
+    await loadScriptFallback("vega@5.30.0/build/vega.min.js");
+    await loadScriptFallback("vega-lite@5.20.1/build/vega-lite.min.js");
+    await loadScriptFallback("vega-embed@6.26.0/build/vega-embed.min.js");
+    if (typeof window.vegaEmbed !== "function") throw new Error("Vega-Lite renderer did not initialize");
+    var spec = parseJson();
+    if (!spec.width) spec.width = 560;
+    if (!spec.height) spec.height = 320;
+    if (Array.isArray(spec.layer) && (!spec.transform || !spec.transform.length)) {
+      var hoisted = [];
+      for (var i = 0; i < spec.layer.length; i++) {
+        var lyr = spec.layer[i];
+        if (lyr && Array.isArray(lyr.transform)) {
+          for (var j = 0; j < lyr.transform.length; j++) hoisted.push(lyr.transform[j]);
         }
       }
-    } catch (e) {}
+      if (hoisted.length) spec.transform = hoisted;
+    }
+    await window.vegaEmbed(stage, spec, { actions: false, renderer: "svg" });
+    fitContent();
+    setTimeout(fitContent, 80);
   }
+  async function renderBpmn() {
+    stage.style.width = estW + "px";
+    stage.style.height = estH + "px";
+    await Promise.all([
+      loadStyleFallback("bpmn-js@17.11.1/dist/assets/diagram-js.css"),
+      loadStyleFallback("bpmn-js@17.11.1/dist/assets/bpmn-font/css/bpmn.css"),
+      loadScriptFallback("bpmn-js@17.11.1/dist/bpmn-viewer.development.js")
+    ]);
+    if (typeof window.BpmnJS !== "function") throw new Error("BPMN renderer did not initialize");
+    var viewer = new window.BpmnJS({ container: stage });
+    await viewer.importXML(source);
+    viewer.get("canvas").zoom("fit-viewport");
+    postNatural(estW, estH);
+  }
+  async function renderCytoscape() {
+    stage.style.width = estW + "px";
+    stage.style.height = estH + "px";
+    await loadScriptFallback("cytoscape@3.30.4/dist/cytoscape.min.js");
+    if (typeof window.cytoscape !== "function") throw new Error("Cytoscape renderer did not initialize");
+    var elements = parseJson();
+    window.cytoscape({
+      container: stage,
+      elements: Array.isArray(elements) ? elements : (elements.elements || []),
+      layout: { name: "cose", animate: false, fit: true, padding: 24 },
+      style: [
+        { selector: "node", style: { "background-color": "#ffffff", "border-color": "#2563eb", "border-width": 2, label: "data(label)", color: "#0f172a", "font-size": 14 } },
+        { selector: "edge", style: { width: 2, "line-color": "#94a3b8", "target-arrow-color": "#94a3b8", "target-arrow-shape": "triangle", "curve-style": "bezier", label: "data(label)" } }
+      ]
+    });
+    postNatural(estW, estH);
+  }
+  async function renderGeo() {
+    stage.style.width = estW + "px";
+    stage.style.height = estH + "px";
+    await Promise.all([
+      loadStyleFallback("leaflet@1.9.4/dist/leaflet.css"),
+      loadScriptFallback("leaflet@1.9.4/dist/leaflet.js")
+    ]);
+    if (!window.L || !window.L.map) throw new Error("GeoJSON renderer did not initialize");
+    var mapDiv = document.createElement("div");
+    mapDiv.style.width = "100%";
+    mapDiv.style.height = "100%";
+    stage.replaceChildren(mapDiv);
+    var map = window.L.map(mapDiv).setView([20, 0], 2);
+    window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
+    var layer = window.L.geoJSON(parseJson()).addTo(map);
+    if (layer.getBounds().isValid()) map.fitBounds(layer.getBounds());
+    postNatural(estW, estH);
+  }
+
+  async function render() {
+    if (format === "mermaid") await renderMermaid();
+    else if (format === "dot") await renderDot();
+    else if (format === "smiles") await renderSmiles();
+    else if (format === "vega-lite") await renderVega();
+    else if (format === "bpmn-xml") await renderBpmn();
+    else if (format === "cytoscape-json") await renderCytoscape();
+    else if (format === "geojson") await renderGeo();
+    else throw new Error("Unsupported diagram format: " + format);
+  }
+
+  setTimeout(function () {
+    if (!finished && stage.querySelector("[data-drawva-wait]")) {
+      var wait = stage.querySelector("[data-drawva-wait]");
+      if (wait) wait.textContent = ${JSON.stringify(opts.label)} + " is still loading…";
+    }
+  }, 4000);
+
+  withTimeout(render(), 12000, ${JSON.stringify(opts.label)})
+    .then(function () { finished = true; })
+    .catch(function (err) {
+      if (finished && stage.querySelector("svg, canvas, .vega-embed, .leaflet-container")) return;
+      showError((${JSON.stringify(opts.label)}) + " could not be rendered. " + (err && err.message ? err.message : String(err)));
+    });
 })();
 </script>
 </body>
 </html>`;
-
-  return { html, width: estW, height: estH };
 }
 
 function escapeHtml(str: string): string {

@@ -43,6 +43,8 @@ import {
   SyncManager,
   type SyncStatus,
   getStoredP2PSession,
+  widgetNeedsHydration,
+  compactWidgetForSync,
 } from "@/lib/canvas/sync";
 import { ConnectDialog } from "./ConnectDialog";
 import { strokeSegment } from "@/lib/canvas/strokes";
@@ -309,8 +311,10 @@ export function CanvasApp() {
     const viewport = engineAtCall.camera.visibleWorldRect();
     const scene = buildScene(wm, objects.current);
 
+    const explicitRefine = Boolean(refineFocusRef.current);
+    const boxIsDump = box.w >= viewport.w * 0.75 && box.h >= viewport.h * 0.75;
     let widgetEditTarget: import("@/lib/ai/types").WidgetEditContext | undefined = undefined;
-    if (refineFocusRef.current && wm) {
+    if (explicitRefine && wm && refineFocusRef.current) {
       const targetItem = wm.get(refineFocusRef.current.widgetId);
       if (targetItem) {
         const detectedFormat = targetItem.kind === "diagram"
@@ -329,22 +333,21 @@ export function CanvasApp() {
           box: { x: targetItem.x, y: targetItem.y, w: targetItem.w, h: targetItem.h },
         };
       }
-    } else if (wm && box.w > 0 && box.h > 0 && box.w < 6000 && box.h < 6000) {
-      // Check for an explicitly selected widget OR nearby widget in annotation proximity (<= 300px or overlapping)
+    } else if (wm && !boxIsDump && box.w > 0 && box.h > 0) {
+      // Annotation proximity only: leftover selection of a distant widget must
+      // not turn an independent "Draw …" request into an in-place refine.
+      const ANNOTATION_PX = 120;
       const selectedId = wm.getSelectedId();
       let targetWidget: WidgetItem | null = null;
-      if (selectedId) {
-        targetWidget = wm.get(selectedId) ?? null;
+      const selected = selectedId ? wm.get(selectedId) ?? null : null;
+      if (selected && distanceBetweenRects(box, selected) <= ANNOTATION_PX) {
+        targetWidget = selected;
       } else {
         let closestWidget: WidgetItem | null = null;
         let minDistance = Infinity;
-
         for (const w of wm.all()) {
-          const dx = Math.max(0, Math.max(box.x - (w.x + w.w), w.x - (box.x + box.w)));
-          const dy = Math.max(0, Math.max(box.y - (w.y + w.h), w.y - (box.y + box.h)));
-          const dist = Math.hypot(dx, dy);
-
-          if (dist <= 300 && dist < minDistance) {
+          const dist = distanceBetweenRects(box, w);
+          if (dist <= ANNOTATION_PX && dist < minDistance) {
             minDistance = dist;
             closestWidget = w;
           }
@@ -390,6 +393,11 @@ export function CanvasApp() {
     const atlas = await buildAtlas(engineAtCall, viewport, effectiveBox, wm, objects.current);
 
     const reqTimestamp = Date.now();
+    // Placement anchors to the handwriting, not the capture/viewport. Atlas may
+    // expand changedBox to the full snapshot; that dump is what parked new
+    // widgets on top of older ones after the first generation.
+    const inkIsTight = !boxIsDump && box.w > 4 && box.h > 4;
+    const placementBox = inkIsTight ? { x: box.x, y: box.y, w: box.w, h: box.h } : atlas.changedBox;
     const payload: AiRequest = {
       requestId: `req-${requestId}`,
       atlasImage: atlas.atlasImage,
@@ -397,7 +405,7 @@ export function CanvasApp() {
       visibleRect: atlas.visibleRect,
       captureRect: atlas.captureRect,
       sourceRect: atlas.sourceRect,
-      changedBox: atlas.changedBox,
+      changedBox: placementBox,
       imageSize: atlas.imageSize,
       imageScale: atlas.imageScale,
       latestInput: atlas.latestInput,
@@ -405,6 +413,7 @@ export function CanvasApp() {
       scene: JSON.stringify(scene),
       trigger: userPrompt ? "manual" : "user_paused",
       ...(widgetEditTarget ? { widgetEdit: widgetEditTarget } : {}),
+      ...(explicitRefine ? { keepPosition: true } : {}),
       providerType: config.type,
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
@@ -534,8 +543,17 @@ export function CanvasApp() {
   function askAi() {
     const marquee = tools.current?.selection.hasSelection ? tools.current.selection.rect : null;
     const selected = objects.current?.getSelectedGeometry() || widgets.current?.getSelectedGeometry();
+    const recentInk =
+      inkBoxRef.current &&
+      Date.now() - lastStrokeTimeRef.current < 20000 &&
+      inkBoxRef.current.w > 4 &&
+      inkBoxRef.current.h > 4;
+    // Recent handwriting wins over a leftover widget selection so Ask AI on
+    // "Draw …" below an older diagram does not treat that diagram as the box.
     let box = marquee
       ? { x: marquee.x, y: marquee.y, w: marquee.w, h: marquee.h }
+      : recentInk && inkBoxRef.current
+      ? { ...inkBoxRef.current }
       : selected
       ? { x: selected.x, y: selected.y, w: selected.w, h: selected.h }
       : inkBoxRef.current;
@@ -736,7 +754,12 @@ export function CanvasApp() {
           history.current?.recordWidgets();
           wm.setStatus(id, "accepted");
           const item = wm.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
+          if (item) {
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_ADD",
+              widget: compactWidgetForSync(item),
+            });
+          }
           afterBoardChangeRef.current();
         },
         onAiRefine: (id) => {
@@ -937,7 +960,8 @@ export function CanvasApp() {
         userResized: oldWidget ? (oldWidget.userResized ?? true) : false,
       };
       wm.add(item);
-      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
+      // Diagrams sync source only (html rebuilt on peer); applets chunk if large.
+      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
       setMode("select");
     });
     draft.setRenderer("write_text", (_eng, cmd) => {
@@ -1071,7 +1095,7 @@ export function CanvasApp() {
         userResized: oldWidget ? (oldWidget.userResized ?? true) : false,
       };
       wm.add(item);
-      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
+      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
       setMode("select");
     });
     drafts.current = draft;
@@ -1091,6 +1115,40 @@ export function CanvasApp() {
 
     const sm = new SyncManager();
     syncManager.current = sm;
+
+    async function hydrateAndAddRemoteWidget(w: WidgetItem): Promise<void> {
+      let widget = w;
+      if (widgetNeedsHydration(w) && w.copyText) {
+        try {
+          const format = w.sourceFormat || w.pluginId || "mermaid";
+          const res = await diagramDocument(format, w.copyText, w.diagramKind, w.title);
+          widget = {
+            ...w,
+            kind: w.kind === "html" ? "html" : "diagram",
+            html: typeof res === "string" ? res : res.html,
+          };
+        } catch (err) {
+          console.warn("[P2P] Failed to hydrate remote widget HTML", w.id, err);
+        }
+      }
+      const existing = widgets.current?.get(widget.id);
+      if (existing && existing.html === widget.html && existing.title === widget.title) {
+        widgets.current?.setStatus(widget.id, widget.status);
+        existing.x = widget.x;
+        existing.y = widget.y;
+        widgets.current?.resize(
+          widget.id,
+          widget.w,
+          widget.h,
+          widget.contentW,
+          widget.contentH,
+          widget.userResized,
+          widget.resizeMode
+        );
+        return;
+      }
+      widgets.current?.add(widget);
+    }
 
     // AI/draft rect erases bypass strokeSegment — push them onto the wire explicitly.
     draft.setInkListener((op) => {
@@ -1120,11 +1178,14 @@ export function CanvasApp() {
       },
       onRemoteScene: (nextWidgets, nextObjects) => {
         if (!engine) return;
+        // Empty SCENE = clear board (snapshot fan-out sends widgets as individual ADDs after).
         engine.tiles.clear();
         widgets.current?.clear();
         objects.current?.clear();
-        for (const w of nextWidgets) widgets.current?.add(w);
         void (async () => {
+          for (const w of nextWidgets) {
+            await hydrateAndAddRemoteWidget(w);
+          }
           for (const obj of nextObjects) {
             const restored = await renderObject(engine, obj);
             if (restored) objects.current?.add(restored);
@@ -1193,24 +1254,7 @@ export function CanvasApp() {
         void mergeObjectToInk(id, { silent: true });
       },
       onRemoteWidgetAdd: (w) => {
-        const existing = widgets.current?.get(w.id);
-        if (existing && existing.html === w.html && existing.title === w.title) {
-          // Accept/status refresh for an identical widget — avoid a full iframe remount.
-          widgets.current?.setStatus(w.id, w.status);
-          existing.x = w.x;
-          existing.y = w.y;
-          widgets.current?.resize(
-            w.id,
-            w.w,
-            w.h,
-            w.contentW,
-            w.contentH,
-            w.userResized,
-            w.resizeMode
-          );
-          return;
-        }
-        widgets.current?.add(w);
+        void hydrateAndAddRemoteWidget(w);
       },
       onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
         const currentItem = widgets.current?.get(id);
@@ -1396,7 +1440,7 @@ export function CanvasApp() {
       status: "draft",
     };
     wm.add(item);
-    syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
+    syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
     setMode("select");
   };
 

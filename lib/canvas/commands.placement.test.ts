@@ -69,10 +69,96 @@ assert.equal(near.y, ink.y + ink.h + PLACE_GAP);
 
 const leftEdge = placeAroundAnchor({ x: 40, y: 5000, w: 120, h: 40 }, 900, 400, { x: 0, y: 4500, w: 1400, h: 900 }, [], "left");
 assert.ok(leftEdge.x >= 0, "must stay on canvas");
-assert.ok(Math.abs(leftEdge.y - 5040) <= 80 || Math.abs(leftEdge.x - 160) <= 80, "falls to below/right of the ink, not a distant park");
+assert.ok(
+  Math.abs(leftEdge.y - (5040 + PLACE_GAP)) <= 8 || Math.abs(leftEdge.x - (160 + PLACE_GAP)) <= 8,
+  "falls to below/right of the ink, not a distant park"
+);
 
 const overlapInk = fitWidgetGeometry({ w: 720, h: 400, placement: "below" }, view, ink);
 assert.ok(overlapInk);
 assert.ok(overlapInk.y >= ink.y + ink.h, "html applets must sit past the handwriting, not on top of it");
+
+// Reproduce the Neural Pipeline bug: model returns placement "below" while a
+// previous widget sits in widgetEdit / scene. The new iframe must NOT inherit
+// that widget's box.
+const playgroundView = { x: 6789, y: 11503, w: 5309, h: 2432 };
+const existingDiagram = { kind: "diagram", x: 8585, y: 9974, w: 2372, h: 774, title: "Agent Flowchart — System Spec v2.4" };
+const handwriting = { x: 7200, y: 12840, w: 1960, h: 180 };
+const widgetEditBox = { x: 8585, y: 9974, w: 2372, h: 774 };
+
+const independent = fitWidgetGeometry(
+  { w: 1440, h: 680, placement: "below", title: "Neural Pipeline Network" },
+  playgroundView,
+  handwriting,
+  true,
+  widgetEditBox,
+  [existingDiagram]
+);
+assert.ok(independent);
+assert.equal(independent.w, 1440, "must keep the model's content size, not copy the old widget");
+assert.equal(independent.h, 680);
+assert.equal(independent.x, handwriting.x, "left-aligned to the new handwriting");
+assert.equal(independent.y, handwriting.y + handwriting.h + PLACE_GAP, "sits below the new request, not on the old diagram");
+assert.ok(
+  independent.y >= handwriting.y + handwriting.h,
+  "must not cover the user's new ink"
+);
+assert.ok(
+  independent.y >= existingDiagram.y + existingDiagram.h ||
+    independent.x + independent.w <= existingDiagram.x ||
+    independent.x >= existingDiagram.x + existingDiagram.w,
+  "must not collapse onto the previous iframe"
+);
+
+const refined = fitWidgetGeometry(
+  { w: 1440, h: 680, placement: "in_place", title: "Agent Flowchart — System Spec v2.4" },
+  playgroundView,
+  handwriting,
+  true,
+  widgetEditBox,
+  [existingDiagram]
+);
+assert.ok(refined);
+assert.equal(refined.x, widgetEditBox.x);
+assert.equal(refined.y, widgetEditBox.y);
+assert.equal(refined.w, widgetEditBox.w);
+assert.equal(refined.h, widgetEditBox.h, "in_place still freezes the target box");
+
+const explicitRefineBelow = fitWidgetGeometry(
+  { w: 1440, h: 680, placement: "below" },
+  playgroundView,
+  handwriting,
+  false,
+  widgetEditBox,
+  [existingDiagram]
+);
+assert.ok(explicitRefineBelow);
+assert.equal(explicitRefineBelow.y, handwriting.y + handwriting.h + PLACE_GAP, "explicit Refine still honors an explicit new-item side");
+
+const explicitRefineOmitted = fitWidgetGeometry(
+  { w: 1440, h: 680 },
+  playgroundView,
+  handwriting,
+  false,
+  widgetEditBox,
+  [existingDiagram]
+);
+assert.ok(explicitRefineOmitted);
+assert.equal(explicitRefineOmitted.x, widgetEditBox.x);
+assert.equal(explicitRefineOmitted.y, widgetEditBox.y, "explicit Refine with no side still snaps in place");
+
+const dumpWithNeighbor = fitWidgetGeometry(
+  { w: 1440, h: 680, placement: "below" },
+  playgroundView,
+  playgroundView,
+  true,
+  widgetEditBox,
+  [existingDiagram]
+);
+assert.ok(dumpWithNeighbor);
+assert.ok(
+  dumpWithNeighbor.x !== existingDiagram.x || dumpWithNeighbor.y !== existingDiagram.y,
+  "a viewport dump plus widgetEdit must not park on the previous iframe"
+);
 
 console.log("commands.placement.test.ts: ok");

@@ -113,7 +113,7 @@
             const root = document.documentElement;
             if (!body) return;
             const stage = document.getElementById('stage');
-            if (stage && /^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed')) return;
+            if (stage && (stage.querySelector('[data-drawva-wait]') || (/^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed, .leaflet-container')))) return;
 
             // Single standalone SVG (mermaid/dot/etc): use its intrinsic size.
             // NEVER take the first of several SVGs — analog clocks, dashboards,
@@ -276,6 +276,9 @@
         setTimeout(scheduleSize, 300);
         setTimeout(scheduleSize, 600);
         setTimeout(scheduleSize, 1200);
+        setTimeout(scheduleSize, 2500);
+        setTimeout(scheduleSize, 5000);
+        setTimeout(scheduleSize, 9000);
         // Auto-snapshot after chart likely rendered
         setTimeout(function() { postSnapshot('auto'); }, 900);
         setTimeout(function() { postSnapshot('auto'); }, 2200);

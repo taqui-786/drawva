@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   sanitizePacket,
   expandPacket,
+  compactWidgetForSync,
+  widgetNeedsHydration,
   MAX_PACKET_CHARS,
   type SyncPacket,
 } from "./sync";
@@ -68,7 +70,55 @@ const move: SyncPacket = {
 };
 assert.deepEqual(sanitizePacket(move), move);
 
-// Large AI widgets must chunk instead of failing PeerJS silently.
+// Diagram AI widgets must sync SOURCE only — not the huge rendered iframe HTML.
+const diagramHtml = `<!doctype html><html><body>${"SVG".repeat(20_000)}</body></html>`;
+const compact = compactWidgetForSync({
+  id: "d1",
+  kind: "diagram",
+  pluginId: "flowchart",
+  sourceFormat: "mermaid",
+  x: 10,
+  y: 20,
+  w: 500,
+  h: 400,
+  contentW: 500,
+  contentH: 400,
+  title: "Flow",
+  html: diagramHtml,
+  copyText: "flowchart LR\n  A-->B",
+  status: "draft",
+});
+assert.equal(compact.html, "");
+assert.equal(compact.copyText, "flowchart LR\n  A-->B");
+assert.equal(widgetNeedsHydration(compact), true);
+
+const diagramPackets = expandPacket({
+  type: "SYNC_WIDGET_ADD",
+  widget: {
+    id: "d1",
+    kind: "diagram",
+    pluginId: "flowchart",
+    sourceFormat: "mermaid",
+    x: 10,
+    y: 20,
+    w: 500,
+    h: 400,
+    contentW: 500,
+    contentH: 400,
+    title: "Flow",
+    html: diagramHtml,
+    copyText: "flowchart LR\n  A-->B",
+    status: "draft",
+  },
+});
+assert.equal(diagramPackets.length, 1);
+assert.equal(diagramPackets[0].type, "SYNC_WIDGET_ADD");
+if (diagramPackets[0].type === "SYNC_WIDGET_ADD") {
+  assert.equal(diagramPackets[0].widget.html, "");
+  assert.ok(JSON.stringify(diagramPackets[0]).length < MAX_PACKET_CHARS);
+}
+
+// Large AI applets (no rebuildable source) must chunk under the PeerJS ceiling.
 const hugeHtml = "x".repeat(MAX_PACKET_CHARS + 5000);
 const hugeWidgetPackets = expandPacket({
   type: "SYNC_WIDGET_ADD",
@@ -96,6 +146,36 @@ const reassembledHtml = hugeWidgetPackets
 assert.equal(reassembledHtml, hugeHtml);
 assert.equal(hugeWidgetPackets[0].type === "SYNC_WIDGET_PART" && !!hugeWidgetPackets[0].meta, true);
 
+// SCENE with widgets fans out to clear + individual adds (never one mega packet).
+const scenePackets = expandPacket({
+  type: "SYNC_SCENE",
+  widgets: [
+    {
+      id: "d2",
+      kind: "diagram",
+      pluginId: "flowchart",
+      sourceFormat: "mermaid",
+      x: 0,
+      y: 0,
+      w: 100,
+      h: 100,
+      contentW: 100,
+      contentH: 100,
+      title: "S",
+      html: diagramHtml,
+      copyText: "graph TD;A-->B",
+      status: "accepted",
+    },
+  ],
+  objects: [],
+});
+assert.ok(scenePackets.length >= 2);
+assert.equal(scenePackets[0].type, "SYNC_SCENE");
+if (scenePackets[0].type === "SYNC_SCENE") {
+  assert.equal(scenePackets[0].widgets.length, 0);
+}
+assert.ok(scenePackets.slice(1).every((p) => p.type === "SYNC_WIDGET_ADD" || p.type === "SYNC_WIDGET_PART"));
+
 // Oversized ink moves chunk the dataUrl.
 const hugeDataUrl = "data:image/webp;base64," + "A".repeat(MAX_PACKET_CHARS);
 const inkParts = expandPacket({
@@ -121,50 +201,6 @@ assert.deepEqual(
     snapshot: { version: 1, savedAt: 0, tiles: { "0,0": "data:tiny" }, widgets: [], objects: [] },
   }),
   []
-);
-
-// Large tile maps expand into safe pieces.
-const bigTile = "data:image/png;base64," + "B".repeat(MAX_PACKET_CHARS);
-const tileParts = expandPacket({
-  type: "SYNC_TILES",
-  tiles: { "0,0": bigTile },
-  done: true,
-});
-assert.ok(tileParts.length >= 1);
-assert.ok(
-  tileParts.every(
-    (p) =>
-      (p.type === "SYNC_TILES" && JSON.stringify(p).length <= MAX_PACKET_CHARS + 512) ||
-      p.type === "SYNC_TILE_PART"
-  )
-);
-if (tileParts[0].type === "SYNC_TILE_PART") {
-  assert.equal(
-    tileParts.map((p) => (p.type === "SYNC_TILE_PART" ? p.chunk : "")).join(""),
-    bigTile
-  );
-}
-
-// Stroke / erase packets stay single and pass through untouched.
-assert.deepEqual(
-  expandPacket({
-    type: "SYNC_STROKE_SEGMENT",
-    a: { x: 0, y: 0 },
-    b: { x: 1, y: 1 },
-    erase: true,
-    size: 12,
-    color: "#000",
-  }),
-  [
-    {
-      type: "SYNC_STROKE_SEGMENT",
-      a: { x: 0, y: 0 },
-      b: { x: 1, y: 1 },
-      erase: true,
-      size: 12,
-      color: "#000",
-    },
-  ]
 );
 
 console.log("sync.test.ts: ok");

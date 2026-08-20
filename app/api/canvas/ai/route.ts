@@ -140,6 +140,7 @@ export async function POST(req: Request) {
     scene: typeof p.scene === "string" ? p.scene.slice(0, 20000) : "",
     trigger: p.trigger === "manual" ? "manual" : "user_paused",
     widgetEdit,
+    keepPosition: p.keepPosition === true,
     providerType,
     baseUrl,
     apiKey,
@@ -149,12 +150,17 @@ export async function POST(req: Request) {
   const model = createChatModel({ providerType, baseUrl, apiKey, model: modelId });
   const sceneText = aiRequest.scene || "";
 
+  // keepPosition is ONLY the explicit Refine button. A nearby/selected widgetEdit
+  // is model context — the command's placement token decides whether to freeze
+  // the existing box (in_place) or sit a new item beside the ink.
+  const keepPosition = p.keepPosition === true;
+
   if (p.stream === true) {
-    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, !!widgetEdit, widgetEdit?.box);
+    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, keepPosition, widgetEdit?.box);
   }
 
   const reply = await runAgent(aiRequest, sceneText, model);
-  return json(validateReply(reply, visibleRect, changedBox, !!widgetEdit, widgetEdit?.box, sceneText));
+  return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText));
 }
 
 function streamReply(
