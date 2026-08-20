@@ -2,18 +2,27 @@ import type { CanvasEngine } from "./engine";
 import type { CanvasCommand, DrawPoint } from "./commands";
 import { eraseRegion } from "./selection";
 import { strokeSegment } from "./strokes";
+import type { Rect } from "./types";
 
 export type RenderCommand = (
   engine: CanvasEngine,
   command: CanvasCommand
 ) => Promise<void> | void;
 
+export type DraftInkListener = (op: { kind: "erase"; rect: Rect }) => void;
+
 export class DraftManager {
   private pending: CanvasCommand[] = [];
   private renderers = new Map<string, RenderCommand>();
+  private inkListener: DraftInkListener | null = null;
 
   setRenderer(tool: string, fn: RenderCommand): void {
     this.renderers.set(tool, fn);
+  }
+
+  /** Fires for AI/draft rect erases that do not go through the stroke segment hook. */
+  setInkListener(fn: DraftInkListener | null): void {
+    this.inkListener = fn;
   }
 
   get hasPending(): boolean {
@@ -49,7 +58,9 @@ export class DraftManager {
         return true;
       case "erase":
         if (c.mode === "rect" && c.x !== undefined && c.y !== undefined && c.w !== undefined && c.h !== undefined) {
-          eraseRegion(engine, { x: c.x, y: c.y, w: c.w, h: c.h });
+          const rect = { x: c.x, y: c.y, w: c.w, h: c.h };
+          eraseRegion(engine, rect);
+          this.inkListener?.({ kind: "erase", rect });
           return true;
         }
         if (c.mode === "path" && c.points) {

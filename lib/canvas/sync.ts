@@ -15,20 +15,66 @@ export interface RemoteCursor {
   timestamp: number;
 }
 
+/** Soft ceiling for a single PeerJS JSON payload (browser SCTP limits vary). */
+export const MAX_PACKET_CHARS = 48_000;
+const HTML_CHUNK_CHARS = 36_000;
+const DATA_URL_CHUNK_CHARS = 36_000;
+/** One tile per packet keeps PNG dataURLs under PeerJS payload limits. */
+const TILE_CHUNK = 1;
+const CURSOR_MIN_MS = 50;
+const PEER_PREFIX = "drawva-room-";
+const COLORS = ["#ef4444", "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
+const SESSION_KEY = "drawva.p2pSession";
+const CONNECT_OPTS = { reliable: true, serialization: "json" } as const;
+const PART_TTL_MS = 60_000;
+
+type WidgetMeta = Omit<WidgetItem, "html" | "cachedImage">;
+
 export type SyncPacket =
   | { type: "SYNC_INIT_STATE"; snapshot: ProjectSnapshot }
   | { type: "SYNC_SCENE"; widgets: WidgetItem[]; objects: ObjectItem[] }
   | { type: "SYNC_TILES"; tiles: Record<string, string>; done: boolean }
+  | { type: "SYNC_TILE_PART"; key: string; index: number; total: number; chunk: string; done: boolean }
   | { type: "SYNC_STROKE_SEGMENT"; a: Point; b: Point; erase: boolean; size: number; color: string }
   | { type: "SYNC_INK_ERASE"; x: number; y: number; w: number; h: number }
   | { type: "SYNC_INK_MOVE"; from: Rect; x: number; y: number; w: number; h: number; dataUrl: string }
+  | {
+      type: "SYNC_INK_MOVE_PART";
+      from: Rect;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      index: number;
+      total: number;
+      chunk: string;
+    }
   | { type: "SYNC_OBJECT_ADD"; object: ObjectItem }
   | { type: "SYNC_OBJECT_MOVE"; id: string; x: number; y: number }
   | { type: "SYNC_OBJECT_RESIZE"; id: string; x: number; y: number; w: number; h: number }
   | { type: "SYNC_OBJECT_REMOVE"; id: string }
   | { type: "SYNC_OBJECT_MERGE"; id: string }
   | { type: "SYNC_WIDGET_ADD"; widget: WidgetItem }
-  | { type: "SYNC_WIDGET_MOVE"; id: string; x: number; y: number; w: number; h: number; contentW?: number; contentH?: number; userResized?: boolean; resizeMode?: WidgetItem["resizeMode"] }
+  | {
+      type: "SYNC_WIDGET_PART";
+      id: string;
+      index: number;
+      total: number;
+      meta?: WidgetMeta;
+      htmlChunk: string;
+    }
+  | {
+      type: "SYNC_WIDGET_MOVE";
+      id: string;
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+      contentW?: number;
+      contentH?: number;
+      userResized?: boolean;
+      resizeMode?: WidgetItem["resizeMode"];
+    }
   | { type: "SYNC_WIDGET_REMOVE"; id: string }
   | { type: "SYNC_CLEAR" }
   | { type: "SYNC_CURSOR"; x: number; y: number; mode: string; color: string; name: string };
@@ -46,7 +92,17 @@ export interface SyncHandlers {
   onRemoteObjectRemove?: (id: string) => void;
   onRemoteObjectMerge?: (id: string) => void;
   onRemoteWidgetAdd?: (widget: WidgetItem) => void;
-  onRemoteWidgetMove?: (id: string, x: number, y: number, w: number, h: number, contentW?: number, contentH?: number, userResized?: boolean, resizeMode?: WidgetItem["resizeMode"]) => void;
+  onRemoteWidgetMove?: (
+    id: string,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    contentW?: number,
+    contentH?: number,
+    userResized?: boolean,
+    resizeMode?: WidgetItem["resizeMode"]
+  ) => void;
   onRemoteWidgetRemove?: (id: string) => void;
   onRemoteClear?: () => void;
   onStatusChange?: (status: SyncStatus, code: string | null, peerCount: number, errorMsg?: string) => void;
@@ -68,12 +124,30 @@ export interface PeerInstance {
   destroy: () => void;
 }
 
-const PEER_PREFIX = "drawva-room-";
-const COLORS = ["#ef4444", "#3b82f6", "#10b981", "#8b5cf6", "#f59e0b", "#ec4899"];
-const SESSION_KEY = "drawva.p2pSession";
-const TILE_CHUNK = 4;
-const CURSOR_MIN_MS = 50;
-const CONNECT_OPTS = { reliable: true, serialization: "json" } as const;
+interface WidgetPartBuffer {
+  meta?: WidgetMeta;
+  chunks: string[];
+  total: number;
+  updatedAt: number;
+}
+
+interface InkMovePartBuffer {
+  from: Rect;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  chunks: string[];
+  total: number;
+  updatedAt: number;
+}
+
+interface TilePartBuffer {
+  chunks: string[];
+  total: number;
+  done: boolean;
+  updatedAt: number;
+}
 
 function cloneJson<T>(value: T): T | null {
   try {
@@ -83,16 +157,43 @@ function cloneJson<T>(value: T): T | null {
   }
 }
 
+function packetChars(packet: SyncPacket): number {
+  try {
+    return JSON.stringify(packet).length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function chunkString(value: string, size: number): string[] {
+  if (!value) return [""];
+  const parts: string[] = [];
+  for (let i = 0; i < value.length; i += size) parts.push(value.slice(i, i + size));
+  return parts.length ? parts : [""];
+}
+
+function stripWidget(widget: WidgetItem): WidgetItem {
+  const { cachedImage, ...rest } = widget;
+  void cachedImage;
+  return rest as WidgetItem;
+}
+
+function stripObject(object: ObjectItem): ObjectItem {
+  const { image, ...rest } = object;
+  void image;
+  return rest as ObjectItem;
+}
+
 export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
   if (packet.type === "SYNC_OBJECT_ADD") {
-    const { image, ...object } = packet.object;
-    void image;
-    return cloneJson({ ...packet, object: object as ObjectItem });
+    return cloneJson({ ...packet, object: stripObject(packet.object) });
   }
   if (packet.type === "SYNC_WIDGET_ADD") {
-    const { cachedImage, ...widget } = packet.widget;
-    void cachedImage;
-    return cloneJson({ ...packet, widget: widget as WidgetItem });
+    return cloneJson({ ...packet, widget: stripWidget(packet.widget) });
+  }
+  if (packet.type === "SYNC_WIDGET_PART") {
+    const meta = packet.meta ? (stripWidget(packet.meta as WidgetItem) as WidgetMeta) : undefined;
+    return cloneJson({ ...packet, meta });
   }
   if (packet.type === "SYNC_INIT_STATE") {
     const snap = packet.snapshot;
@@ -100,35 +201,110 @@ export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
       ...packet,
       snapshot: {
         ...snap,
-        widgets: (snap.widgets || []).map((w) => {
-          const { cachedImage, ...rest } = w;
-          void cachedImage;
-          return rest as WidgetItem;
-        }),
-        objects: (snap.objects || []).map((o) => {
-          const { image, ...rest } = o;
-          void image;
-          return rest as ObjectItem;
-        }),
+        widgets: (snap.widgets || []).map(stripWidget),
+        objects: (snap.objects || []).map(stripObject),
       },
     });
   }
   if (packet.type === "SYNC_SCENE") {
     return cloneJson({
       ...packet,
-      widgets: packet.widgets.map((w) => {
-        const { cachedImage, ...rest } = w;
-        void cachedImage;
-        return rest as WidgetItem;
-      }),
-      objects: packet.objects.map((o) => {
-        const { image, ...rest } = o;
-        void image;
-        return rest as ObjectItem;
-      }),
+      widgets: packet.widgets.map(stripWidget),
+      objects: packet.objects.map(stripObject),
     });
   }
-  return packet;
+  // Lightweight packets are already JSON-safe; avoid an extra clone on the hot stroke path.
+  if (
+    packet.type === "SYNC_STROKE_SEGMENT" ||
+    packet.type === "SYNC_INK_ERASE" ||
+    packet.type === "SYNC_OBJECT_MOVE" ||
+    packet.type === "SYNC_OBJECT_RESIZE" ||
+    packet.type === "SYNC_OBJECT_REMOVE" ||
+    packet.type === "SYNC_OBJECT_MERGE" ||
+    packet.type === "SYNC_WIDGET_MOVE" ||
+    packet.type === "SYNC_WIDGET_REMOVE" ||
+    packet.type === "SYNC_CLEAR" ||
+    packet.type === "SYNC_CURSOR" ||
+    packet.type === "SYNC_INK_MOVE_PART" ||
+    packet.type === "SYNC_TILE_PART"
+  ) {
+    return packet;
+  }
+  return cloneJson(packet);
+}
+
+/** Expand oversized packets into PeerJS-safe pieces (widgets / ink moves). */
+export function expandPacket(packet: SyncPacket): SyncPacket[] {
+  const safe = sanitizePacket(packet);
+  if (!safe) return [];
+
+  if (safe.type === "SYNC_WIDGET_ADD") {
+    if (packetChars(safe) <= MAX_PACKET_CHARS) return [safe];
+    const widget = stripWidget(safe.widget);
+    const { html = "", ...meta } = widget;
+    const chunks = chunkString(html, HTML_CHUNK_CHARS);
+    return chunks.map((htmlChunk, index) => ({
+      type: "SYNC_WIDGET_PART" as const,
+      id: widget.id,
+      index,
+      total: chunks.length,
+      meta: index === 0 ? (meta as WidgetMeta) : undefined,
+      htmlChunk,
+    }));
+  }
+
+  if (safe.type === "SYNC_INK_MOVE") {
+    if (packetChars(safe) <= MAX_PACKET_CHARS) return [safe];
+    const chunks = chunkString(safe.dataUrl, DATA_URL_CHUNK_CHARS);
+    return chunks.map((chunk, index) => ({
+      type: "SYNC_INK_MOVE_PART" as const,
+      from: safe.from,
+      x: safe.x,
+      y: safe.y,
+      w: safe.w,
+      h: safe.h,
+      index,
+      total: chunks.length,
+      chunk,
+    }));
+  }
+
+  if (safe.type === "SYNC_TILES") {
+    const entries = Object.entries(safe.tiles || {});
+    if (entries.length === 0) return [safe];
+    if (packetChars(safe) <= MAX_PACKET_CHARS) return [safe];
+
+    const out: SyncPacket[] = [];
+    for (let i = 0; i < entries.length; i++) {
+      const [key, dataUrl] = entries[i];
+      const isLastEntry = i === entries.length - 1;
+      const tileDone = safe.done && isLastEntry;
+      const single: SyncPacket = { type: "SYNC_TILES", tiles: { [key]: dataUrl }, done: tileDone };
+      if (packetChars(single) <= MAX_PACKET_CHARS) {
+        out.push(single);
+        continue;
+      }
+      const chunks = chunkString(dataUrl, DATA_URL_CHUNK_CHARS);
+      for (let index = 0; index < chunks.length; index++) {
+        out.push({
+          type: "SYNC_TILE_PART",
+          key,
+          index,
+          total: chunks.length,
+          chunk: chunks[index],
+          done: tileDone && index === chunks.length - 1,
+        });
+      }
+    }
+    return out;
+  }
+
+  // Full snapshots must be sent via broadcastSnapshot / sendSnapshot (SCENE + TILES).
+  if (safe.type === "SYNC_INIT_STATE") {
+    return [];
+  }
+
+  return [safe];
 }
 
 export interface StoredP2PSession {
@@ -173,6 +349,7 @@ export class SyncManager {
   private pending = new Map<string, SyncPacket[]>();
   private status: SyncStatus = "idle";
   private roomCode: string | null = null;
+  /** Depth of *synchronous* remote apply. Must never stay elevated across awaits. */
   private remoteDepth = 0;
   private handlers: SyncHandlers = {};
   private remoteCursors: Map<string, RemoteCursor> = new Map();
@@ -180,6 +357,9 @@ export class SyncManager {
   private localColor = COLORS[Math.floor(Math.random() * COLORS.length)];
   private errorMessage: string | undefined = undefined;
   private lastCursorAt = 0;
+  private widgetParts = new Map<string, WidgetPartBuffer>();
+  private inkMoveParts = new Map<string, InkMovePartBuffer>();
+  private tileParts = new Map<string, TilePartBuffer>();
 
   constructor() {}
 
@@ -219,6 +399,16 @@ export class SyncManager {
 
   endRemote(): void {
     this.remoteDepth = Math.max(0, this.remoteDepth - 1);
+  }
+
+  /** Run a synchronous remote apply that may re-enter local stroke/ink hooks. */
+  runRemote(fn: () => void): void {
+    this.beginRemote();
+    try {
+      fn();
+    } finally {
+      this.endRemote();
+    }
   }
 
   async restoreSession(): Promise<boolean> {
@@ -275,7 +465,10 @@ export class SyncManager {
 
     this.peer.on("error", (err: unknown) => {
       console.error("[SyncManager] Peer error:", err);
-      const msg = err && typeof err === "object" && "message" in err ? String(err.message) : "Failed to initialize host connection";
+      const msg =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Failed to initialize host connection";
       this.status = "error";
       this.errorMessage = msg;
       setStoredP2PSession(null);
@@ -387,22 +580,48 @@ export class SyncManager {
     }
   }
 
+  /** Fan-out a full board snapshot as SCENE + chunked TILES (never one giant INIT packet). */
+  broadcastSnapshot(snapshot: ProjectSnapshot): void {
+    if (this.isRemote || this.connections.size === 0) return;
+    this.broadcast({
+      type: "SYNC_SCENE",
+      widgets: snapshot.widgets || [],
+      objects: snapshot.objects || [],
+    });
+    const entries = Object.entries(snapshot.tiles || {});
+    if (entries.length === 0) {
+      this.broadcast({ type: "SYNC_TILES", tiles: {}, done: true });
+      return;
+    }
+    for (let i = 0; i < entries.length; i += TILE_CHUNK) {
+      const chunk = Object.fromEntries(entries.slice(i, i + TILE_CHUNK));
+      this.broadcast({ type: "SYNC_TILES", tiles: chunk, done: i + TILE_CHUNK >= entries.length });
+    }
+  }
+
   private sendTo(conn: PeerConnection, packet: SyncPacket): void {
-    const safe = sanitizePacket(packet);
-    if (!safe) {
-      console.warn("[SyncManager] Dropped unserializable packet", packet.type);
+    const pieces = expandPacket(packet);
+    if (!pieces.length) {
+      if (packet.type !== "SYNC_INIT_STATE") {
+        console.warn("[SyncManager] Dropped unserializable packet", packet.type);
+      }
       return;
     }
-    if (!conn.open) {
-      const q = this.pending.get(conn.peer) ?? [];
-      q.push(safe);
-      this.pending.set(conn.peer, q);
-      return;
-    }
-    try {
-      conn.send(safe);
-    } catch (err) {
-      console.warn("[SyncManager] Send failed:", packet.type, err);
+    for (const piece of pieces) {
+      if (!conn.open) {
+        const q = this.pending.get(conn.peer) ?? [];
+        q.push(piece);
+        this.pending.set(conn.peer, q);
+        continue;
+      }
+      try {
+        conn.send(piece);
+      } catch (err) {
+        console.warn("[SyncManager] Send failed:", piece.type, err);
+        const q = this.pending.get(conn.peer) ?? [];
+        q.push(piece);
+        this.pending.set(conn.peer, q);
+      }
     }
   }
 
@@ -413,17 +632,120 @@ export class SyncManager {
     for (const packet of q) this.sendTo(conn, packet);
   }
 
+  private prunePartBuffers(now = Date.now()): void {
+    for (const [key, buf] of this.widgetParts) {
+      if (now - buf.updatedAt > PART_TTL_MS) this.widgetParts.delete(key);
+    }
+    for (const [key, buf] of this.inkMoveParts) {
+      if (now - buf.updatedAt > PART_TTL_MS) this.inkMoveParts.delete(key);
+    }
+    for (const [key, buf] of this.tileParts) {
+      if (now - buf.updatedAt > PART_TTL_MS) this.tileParts.delete(key);
+    }
+  }
+
+  private ingestTilePart(
+    packet: Extract<SyncPacket, { type: "SYNC_TILE_PART" }>
+  ): { tiles: Record<string, string>; done: boolean } | null {
+    this.prunePartBuffers();
+    const key = packet.key;
+    let buf = this.tileParts.get(key);
+    if (!buf || buf.total !== packet.total) {
+      buf = {
+        chunks: new Array(packet.total),
+        total: packet.total,
+        done: false,
+        updatedAt: Date.now(),
+      };
+      this.tileParts.set(key, buf);
+    }
+    buf.chunks[packet.index] = packet.chunk;
+    buf.done = buf.done || packet.done;
+    buf.updatedAt = Date.now();
+    for (let i = 0; i < buf.total; i++) {
+      if (typeof buf.chunks[i] !== "string") return null;
+    }
+    const dataUrl = buf.chunks.join("");
+    const done = buf.done;
+    this.tileParts.delete(key);
+    return { tiles: { [key]: dataUrl }, done };
+  }
+
+  private ingestWidgetPart(packet: Extract<SyncPacket, { type: "SYNC_WIDGET_PART" }>): WidgetItem | null {
+    this.prunePartBuffers();
+    const key = packet.id;
+    let buf = this.widgetParts.get(key);
+    if (!buf || buf.total !== packet.total) {
+      buf = {
+        meta: packet.meta,
+        chunks: new Array(packet.total),
+        total: packet.total,
+        updatedAt: Date.now(),
+      };
+      this.widgetParts.set(key, buf);
+    } else if (packet.meta) {
+      buf.meta = packet.meta;
+    }
+    buf.chunks[packet.index] = packet.htmlChunk;
+    buf.updatedAt = Date.now();
+
+    if (!buf.meta) return null;
+    for (let i = 0; i < buf.total; i++) {
+      if (typeof buf.chunks[i] !== "string") return null;
+    }
+    const widget = { ...buf.meta, html: buf.chunks.join("") } as WidgetItem;
+    this.widgetParts.delete(key);
+    return widget;
+  }
+
+  private ingestInkMovePart(
+    packet: Extract<SyncPacket, { type: "SYNC_INK_MOVE_PART" }>,
+    senderId: string
+  ): { from: Rect; x: number; y: number; dataUrl: string } | null {
+    this.prunePartBuffers();
+    const key = `${senderId}:${packet.x},${packet.y},${packet.w},${packet.h}:${packet.total}`;
+    let buf = this.inkMoveParts.get(key);
+    if (!buf || buf.total !== packet.total) {
+      buf = {
+        from: packet.from,
+        x: packet.x,
+        y: packet.y,
+        w: packet.w,
+        h: packet.h,
+        chunks: new Array(packet.total),
+        total: packet.total,
+        updatedAt: Date.now(),
+      };
+      this.inkMoveParts.set(key, buf);
+    }
+    buf.chunks[packet.index] = packet.chunk;
+    buf.updatedAt = Date.now();
+    for (let i = 0; i < buf.total; i++) {
+      if (typeof buf.chunks[i] !== "string") return null;
+    }
+    const dataUrl = buf.chunks.join("");
+    this.inkMoveParts.delete(key);
+    return { from: buf.from, x: buf.x, y: buf.y, dataUrl };
+  }
+
   private handlePacket(senderId: string, packet: SyncPacket): void {
     const safePacket = sanitizePacket(packet);
     if (!safePacket) return;
+
+    // Relay first so mesh peers keep moving even if local apply is heavy.
     for (const [id, conn] of this.connections.entries()) {
       if (id !== senderId) this.sendTo(conn, safePacket);
     }
 
-    this.beginRemote();
-    try {
+    this.dispatchPacket(senderId, safePacket);
+  }
+
+  private dispatchPacket(senderId: string, safePacket: SyncPacket): void {
+    // Only the stroke path re-enters local sync hooks; keep the remote guard strictly sync.
+    const apply = () => {
       switch (safePacket.type) {
         case "SYNC_INIT_STATE":
+          // Legacy single-packet snapshots (older peers / tests). Prefer SCENE+TILES.
           this.handlers.onInitState?.(safePacket.snapshot);
           break;
         case "SYNC_SCENE":
@@ -432,15 +754,32 @@ export class SyncManager {
         case "SYNC_TILES":
           this.handlers.onRemoteTiles?.(safePacket.tiles, safePacket.done);
           break;
+        case "SYNC_TILE_PART": {
+          const assembled = this.ingestTilePart(safePacket);
+          if (assembled) this.handlers.onRemoteTiles?.(assembled.tiles, assembled.done);
+          break;
+        }
         case "SYNC_STROKE_SEGMENT":
           this.handlers.onRemoteStroke?.(safePacket);
           break;
         case "SYNC_INK_ERASE":
-          this.handlers.onRemoteInkErase?.({ x: safePacket.x, y: safePacket.y, w: safePacket.w, h: safePacket.h });
+          this.handlers.onRemoteInkErase?.({
+            x: safePacket.x,
+            y: safePacket.y,
+            w: safePacket.w,
+            h: safePacket.h,
+          });
           break;
         case "SYNC_INK_MOVE":
           this.handlers.onRemoteInkMove?.(safePacket.from, safePacket.x, safePacket.y, safePacket.dataUrl);
           break;
+        case "SYNC_INK_MOVE_PART": {
+          const assembled = this.ingestInkMovePart(safePacket, senderId);
+          if (assembled) {
+            this.handlers.onRemoteInkMove?.(assembled.from, assembled.x, assembled.y, assembled.dataUrl);
+          }
+          break;
+        }
         case "SYNC_OBJECT_ADD":
           this.handlers.onRemoteObjectAdd?.(safePacket.object);
           break;
@@ -448,7 +787,13 @@ export class SyncManager {
           this.handlers.onRemoteObjectMove?.(safePacket.id, safePacket.x, safePacket.y);
           break;
         case "SYNC_OBJECT_RESIZE":
-          this.handlers.onRemoteObjectResize?.(safePacket.id, safePacket.x, safePacket.y, safePacket.w, safePacket.h);
+          this.handlers.onRemoteObjectResize?.(
+            safePacket.id,
+            safePacket.x,
+            safePacket.y,
+            safePacket.w,
+            safePacket.h
+          );
           break;
         case "SYNC_OBJECT_REMOVE":
           this.handlers.onRemoteObjectRemove?.(safePacket.id);
@@ -459,6 +804,11 @@ export class SyncManager {
         case "SYNC_WIDGET_ADD":
           this.handlers.onRemoteWidgetAdd?.(safePacket.widget);
           break;
+        case "SYNC_WIDGET_PART": {
+          const widget = this.ingestWidgetPart(safePacket);
+          if (widget) this.handlers.onRemoteWidgetAdd?.(widget);
+          break;
+        }
         case "SYNC_WIDGET_MOVE":
           this.handlers.onRemoteWidgetMove?.(
             safePacket.id,
@@ -490,19 +840,29 @@ export class SyncManager {
           });
           break;
       }
-    } finally {
-      this.endRemote();
+    };
+
+    if (safePacket.type === "SYNC_STROKE_SEGMENT") {
+      this.runRemote(apply);
+    } else {
+      apply();
     }
   }
 
   broadcast(packet: SyncPacket): void {
     if (this.isRemote || this.connections.size === 0) return;
-    const safePacket = sanitizePacket(packet);
-    if (!safePacket) {
+    if (packet.type === "SYNC_INIT_STATE") {
+      this.broadcastSnapshot(packet.snapshot);
+      return;
+    }
+    const pieces = expandPacket(packet);
+    if (!pieces.length) {
       console.warn("[SyncManager] Dropped unserializable broadcast", packet.type);
       return;
     }
-    for (const conn of this.connections.values()) this.sendTo(conn, safePacket);
+    for (const piece of pieces) {
+      for (const conn of this.connections.values()) this.sendTo(conn, piece);
+    }
   }
 
   sendCursor(x: number, y: number, mode: string): void {
@@ -532,6 +892,9 @@ export class SyncManager {
     this.connections.clear();
     this.pending.clear();
     this.remoteCursors.clear();
+    this.widgetParts.clear();
+    this.inkMoveParts.clear();
+    this.tileParts.clear();
     this.remoteDepth = 0;
     if (this.peer) {
       try {

@@ -600,7 +600,7 @@ export function CanvasApp() {
     syncHistoryButtons();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
-      syncManager.current.broadcast({ type: "SYNC_INIT_STATE", snapshot });
+      syncManager.current.broadcastSnapshot(snapshot);
     }
   }
 
@@ -613,7 +613,7 @@ export function CanvasApp() {
     syncHistoryButtons();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
-      syncManager.current.broadcast({ type: "SYNC_INIT_STATE", snapshot });
+      syncManager.current.broadcastSnapshot(snapshot);
     }
   }
 
@@ -650,6 +650,11 @@ export function CanvasApp() {
       history.current?.reset();
       await importJson(engine, widgets.current, objects.current, file);
       afterBoardChange();
+      if (syncManager.current) {
+        syncManager.current.broadcastSnapshot(
+          serializeSnapshot(engine, widgets.current, objects.current)
+        );
+      }
     } catch (err) {
       console.error("Import failed:", err);
     }
@@ -1039,6 +1044,13 @@ export function CanvasApp() {
 
     const sm = new SyncManager();
     syncManager.current = sm;
+
+    // AI/draft rect erases bypass strokeSegment — push them onto the wire explicitly.
+    draft.setInkListener((op) => {
+      if (sm.isRemote) return;
+      sm.broadcast({ type: "SYNC_INK_ERASE", x: op.rect.x, y: op.rect.y, w: op.rect.w, h: op.rect.h });
+    });
+
     sm.setHandlers({
       onStatusChange: (status, roomCode, peerCount, error) => {
         setSyncState({ status, roomCode, peerCount, error });
@@ -1053,45 +1065,35 @@ export function CanvasApp() {
         if (!engine) return null;
         return serializeSnapshot(engine, widgets.current, objects.current);
       },
-      onInitState: async (snapshot) => {
+      // Snapshot restore draws tiles/images directly — do NOT hold the remote lock across awaits
+      // or local strokes/AI/widgets broadcast during the restore window will be silently dropped.
+      onInitState: (snapshot) => {
         if (!engine) return;
-        sm.beginRemote();
-        try {
-          await restoreSnapshot(engine, widgets.current, objects.current, snapshot);
-        } finally {
-          sm.endRemote();
-        }
+        void restoreSnapshot(engine, widgets.current, objects.current, snapshot);
       },
       onRemoteScene: (nextWidgets, nextObjects) => {
         if (!engine) return;
-        sm.beginRemote();
         engine.tiles.clear();
         widgets.current?.clear();
         objects.current?.clear();
         for (const w of nextWidgets) widgets.current?.add(w);
         void (async () => {
-          try {
-            for (const obj of nextObjects) {
-              const restored = await renderObject(engine, obj);
-              if (restored) objects.current?.add(restored);
-            }
-            engine.requestRender();
-          } finally {
-            sm.endRemote();
+          for (const obj of nextObjects) {
+            const restored = await renderObject(engine, obj);
+            if (restored) objects.current?.add(restored);
           }
+          engine.requestRender();
         })();
       },
       onRemoteTiles: (tiles, done) => {
         if (!engine) return;
-        sm.beginRemote();
-        void applyTiles(engine, tiles)
-          .then(() => {
-            if (done) engine.requestRender();
-          })
-          .finally(() => sm.endRemote());
+        void applyTiles(engine, tiles).then(() => {
+          if (done) engine.requestRender();
+        });
       },
       onRemoteStroke: (seg) => {
         if (!engine) return;
+        // SyncManager.runRemote already wraps SYNC_STROKE_SEGMENT to suppress echo.
         strokeSegment(engine, seg.a, seg.b, {
           erase: seg.erase,
           size: seg.size,
@@ -1104,18 +1106,22 @@ export function CanvasApp() {
       },
       onRemoteInkMove: (from, x, y, dataUrl) => {
         if (!engine) return;
-        sm.beginRemote();
         eraseRegion(engine, from);
-        void pasteDataUrl(engine, dataUrl, x, y).finally(() => sm.endRemote());
+        void pasteDataUrl(engine, dataUrl, x, y);
       },
       onRemoteObjectAdd: (obj) => {
         if (!engine || !objects.current) return;
-        sm.beginRemote();
-        void renderObject(engine, obj)
-          .then((restored) => {
-            if (restored) objects.current?.add(restored);
-          })
-          .finally(() => sm.endRemote());
+        const existing = objects.current.get(obj.id);
+        if (existing && existing.source === obj.source && existing.kind === obj.kind) {
+          objects.current.setStatus(obj.id, obj.status);
+          existing.x = obj.x;
+          existing.y = obj.y;
+          objects.current.resize(obj.id, obj.w, obj.h);
+          return;
+        }
+        void renderObject(engine, obj).then((restored) => {
+          if (restored) objects.current?.add(restored);
+        });
       },
       onRemoteObjectMove: (id, x, y) => {
         const o = objects.current?.get(id);
@@ -1137,15 +1143,32 @@ export function CanvasApp() {
         objects.current?.remove(id);
       },
       onRemoteObjectMerge: (id) => {
-        sm.beginRemote();
-        void mergeObjectToInk(id, { silent: true }).finally(() => sm.endRemote());
+        void mergeObjectToInk(id, { silent: true });
       },
       onRemoteWidgetAdd: (w) => {
+        const existing = widgets.current?.get(w.id);
+        if (existing && existing.html === w.html && existing.title === w.title) {
+          // Accept/status refresh for an identical widget — avoid a full iframe remount.
+          widgets.current?.setStatus(w.id, w.status);
+          existing.x = w.x;
+          existing.y = w.y;
+          widgets.current?.resize(
+            w.id,
+            w.w,
+            w.h,
+            w.contentW,
+            w.contentH,
+            w.userResized,
+            w.resizeMode
+          );
+          return;
+        }
         widgets.current?.add(w);
       },
       onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
         const currentItem = widgets.current?.get(id);
         if (!currentItem || !widgets.current) return;
+        // Apply absolute geometry from the peer — do not interpret as a local resize gesture.
         currentItem.x = x;
         currentItem.y = y;
         widgets.current.resize(
@@ -1235,6 +1258,7 @@ export function CanvasApp() {
       unsubRemoteCursors();
       engine.setStrokeSegmentHook(null);
       tm.selection.setInkListener(null);
+      draft.setInkListener(null);
       sm.disconnect();
       syncManager.current = null;
       engine.setTileWriteHook(null);
@@ -1252,6 +1276,10 @@ export function CanvasApp() {
     if (!engine) return;
     let cancelled = false;
     (async () => {
+      // Joiners receive the host SCENE+TILES snapshot — applying local autosave after that
+      // (or racing it) leaves peers on divergent boards.
+      const session = getStoredP2PSession();
+      if (session?.role === "joiner") return;
       const saved = await loadAutosave();
       if (saved && !cancelled) {
         await restoreSnapshot(engine, widgets.current, objects.current, saved);
@@ -1306,7 +1334,7 @@ export function CanvasApp() {
     const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
     const demoHtml = `<!doctype html><html><head><style>body{font-family:system-ui;padding:24px;background:#f3f4f6;margin:0}button{font-size:28px;padding:12px 20px;border-radius:8px;border:0;background:#2679b8;color:#fff;cursor:pointer}</style></head><body><h2>Mini Counter</h2><button id="b">0</button><script>let n=0;document.getElementById('b').onclick=()=>{document.getElementById('b').textContent=++n};<\/script></body></html>`;
     const estimated = extractHtmlDimensions(demoHtml) || { width: 320, height: 220 };
-    wm.add({
+    const item: WidgetItem = {
       id: `demo-${Date.now()}`,
       kind: "html",
       pluginId: "general",
@@ -1319,7 +1347,9 @@ export function CanvasApp() {
       title: "Counter",
       html: demoHtml,
       status: "draft",
-    });
+    };
+    wm.add(item);
+    syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: item });
     setMode("select");
   };
 
@@ -1664,7 +1694,17 @@ export function CanvasApp() {
     if (engine && f) {
       const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
       try {
-        await placeImageAt(engine, f, c);
+        const placed = await placeImageAt(engine, f, c);
+        // Paste-only ink op: empty erase rect, peers apply the bitmap at (x, y).
+        syncManager.current?.broadcast({
+          type: "SYNC_INK_MOVE",
+          from: { x: placed.x, y: placed.y, w: 0, h: 0 },
+          x: placed.x,
+          y: placed.y,
+          w: placed.w,
+          h: placed.h,
+          dataUrl: placed.dataUrl,
+        });
         afterBoardChange();
       } catch (err) {
         console.error(err);

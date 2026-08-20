@@ -59,7 +59,7 @@ import {
   PencilIcon,
   RedoIcon,
   Settings01Icon,
-  SparklesIcon,
+  AiEditingIcon,
   SquareIcon,
   TextIcon,
   TerminalIcon,
@@ -697,7 +697,7 @@ export function CanvasHeader({
                   onClick={onAskAi}
                   className="gap-1 px-2.5 text-xs"
                 >
-                  <HugeiconsIcon icon={SparklesIcon} className="size-3.5" />
+                  <HugeiconsIcon icon={AiEditingIcon} className="size-3.5" />
                   <span>Ask AI</span>
                 </Button>
               )}

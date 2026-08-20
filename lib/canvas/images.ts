@@ -7,11 +7,19 @@ const MAX_SOURCE_BYTES = 32 * 1024 * 1024;
 const MAX_DIMENSION = 2048;
 const MAX_PLACE_WIDTH = 1200;
 
+export interface PlacedImage {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  dataUrl: string;
+}
+
 export async function placeImageAt(
   engine: CanvasEngine,
   file: Blob,
   world: Point
-): Promise<void> {
+): Promise<PlacedImage> {
   if (file.size <= 0 || file.size > MAX_SOURCE_BYTES) throw new Error("Image too large");
   const bitmap = await createImageBitmap(file);
   if (!bitmap) throw new Error("Unreadable image");
@@ -57,4 +65,12 @@ export async function placeImageAt(
   const sctx = snapshot.getContext("2d")!;
   sctx.drawImage(off, 0, 0, snapshot.width, snapshot.height);
   pasteRegion(engine, snapshot, r.x, r.y);
+
+  let dataUrl: string;
+  try {
+    dataUrl = snapshot.toDataURL("image/webp", 0.82);
+  } catch {
+    dataUrl = snapshot.toDataURL("image/png");
+  }
+  return { x: r.x, y: r.y, w: snapshot.width, h: snapshot.height, dataUrl };
 }
