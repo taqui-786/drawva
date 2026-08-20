@@ -129,10 +129,11 @@ Prefer diagram_source whenever one of these local renderers faithfully fits. sou
 If the requested professional source is not locally rendered (PlantUML, D2, Structurizr, DBML, draw.io XML, Excalidraw, KiCad, SPICE, WaveDrom, or another established format), return html_widget with pluginId "flowchart", complete html, semantically identical copyText, copyLabel "Copy <format>", and frameworkVersion "drawva-professional-diagrams-v1". Never fall back to an improvised generic SVG merely because a format is unlisted. Infer the domain and return the most suitable diagram_source or html_widget.
 
 REFINEMENT (widgetEdit):
-- Preserve the exact sourceFormat and pluginId of the target. Never convert SMILES to a flowchart or Vega-Lite to Mermaid.
-- Apply the newest ink (circled region, "compact", "add OH", crossed-out node) as the smallest complete change.
-- Placement MUST be "in_place" when editing the target. New independent sketches use "match_sketch", "below", or "right".
-- Return one complete replacement, never a patch, diff, target id, explanation, or second command.
+- When widgetEdit is provided, it describes an existing target widget on the canvas.
+- If the newest input is an edit, modification, correction, or refinement of that target widget (e.g. circled annotations, "compact", "add node X", "change title", crossed-out elements), apply the smallest complete change and set placement to "in_place".
+- If the newest input is a NEW independent drawing, sketch, or request (e.g. "Draw <topic>", "Create ...", a separate flowchart, formula, or visual in open space), generate a NEW item with placement "below", "right", or "match_sketch". Do NOT replace or overwrite the existing widget.
+- Preserve the exact sourceFormat and pluginId of the target when refining in place. Never convert SMILES to a flowchart or Vega-Lite to Mermaid.
+- Return one complete replacement when refining in place, never a patch, diff, target id, explanation, or second command.
 
 HARD RULE: diagram_source or html_widget MUST be the only command.`;
 

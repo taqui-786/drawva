@@ -187,9 +187,6 @@ export class ObjectManager {
       const item = this.items.get(this.selectedId);
       if (item) return item;
     }
-    for (const item of this.items.values()) {
-      if (item.status === "draft") return item;
-    }
     return null;
   }
 

@@ -330,31 +330,43 @@ export function CanvasApp() {
         };
       }
     } else if (wm && box.w > 0 && box.h > 0 && box.w < 6000 && box.h < 6000) {
-      let closestWidget: WidgetItem | null = null;
-      let minDistance = Infinity;
-      const allWidgets = wm.all();
-      for (const w of allWidgets) {
-        const dist = distanceBetweenRects(box, { x: w.x, y: w.y, w: w.w, h: w.h });
-        if (dist <= 350 && dist < minDistance) {
-          minDistance = dist;
-          closestWidget = w;
+      // Check for an explicitly selected widget OR direct significant overlap (ink drawn on top of widget)
+      const selectedId = wm.getSelectedId();
+      let targetWidget: WidgetItem | null = null;
+      if (selectedId) {
+        targetWidget = wm.get(selectedId) ?? null;
+      } else {
+        for (const w of wm.all()) {
+          const ix0 = Math.max(box.x, w.x);
+          const iy0 = Math.max(box.y, w.y);
+          const ix1 = Math.min(box.x + box.w, w.x + w.w);
+          const iy1 = Math.min(box.y + box.h, w.y + w.h);
+          if (ix1 > ix0 && iy1 > iy0) {
+            const overlapArea = (ix1 - ix0) * (iy1 - iy0);
+            const inkArea = Math.max(1, box.w * box.h);
+            // Ink is drawn directly on/inside the widget (>= 40% of ink area)
+            if (overlapArea / inkArea >= 0.4) {
+              targetWidget = w;
+              break;
+            }
+          }
         }
       }
-      if (closestWidget) {
-        const detectedFormat = closestWidget.kind === "diagram"
-          ? (closestWidget.sourceFormat
-              ? (normalizeFormat(closestWidget.sourceFormat) || closestWidget.sourceFormat)
-              : detectDiagramFormat(closestWidget.pluginId, closestWidget.copyText, closestWidget.title))
+      if (targetWidget) {
+        const detectedFormat = targetWidget.kind === "diagram"
+          ? (targetWidget.sourceFormat
+              ? (normalizeFormat(targetWidget.sourceFormat) || targetWidget.sourceFormat)
+              : detectDiagramFormat(targetWidget.pluginId, targetWidget.copyText, targetWidget.title))
           : undefined;
         widgetEditTarget = {
-          id: closestWidget.id,
-          pluginId: detectedFormat || closestWidget.pluginId || (closestWidget.kind === "diagram" ? "diagram" : "general"),
-          widgetType: closestWidget.kind === "diagram" ? "diagram_source" : "html_widget",
-          title: closestWidget.title,
+          id: targetWidget.id,
+          pluginId: detectedFormat || targetWidget.pluginId || (targetWidget.kind === "diagram" ? "diagram" : "general"),
+          widgetType: targetWidget.kind === "diagram" ? "diagram_source" : "html_widget",
+          title: targetWidget.title,
           sourceFormat: detectedFormat,
-          source: closestWidget.copyText,
-          html: closestWidget.html,
-          box: { x: closestWidget.x, y: closestWidget.y, w: closestWidget.w, h: closestWidget.h },
+          source: targetWidget.copyText,
+          html: targetWidget.html,
+          box: { x: targetWidget.x, y: targetWidget.y, w: targetWidget.w, h: targetWidget.h },
         };
       }
     }
@@ -521,8 +533,11 @@ export function CanvasApp() {
   }
 
   function askAi() {
+    const marquee = tools.current?.selection.hasSelection ? tools.current.selection.rect : null;
     const selected = objects.current?.getSelectedGeometry() || widgets.current?.getSelectedGeometry();
-    let box = selected
+    let box = marquee
+      ? { x: marquee.x, y: marquee.y, w: marquee.w, h: marquee.h }
+      : selected
       ? { x: selected.x, y: selected.y, w: selected.w, h: selected.h }
       : inkBoxRef.current;
     if ((!box || box.w <= 0 || box.h <= 0) && engine) {
@@ -863,36 +878,22 @@ export function CanvasApp() {
     draft.setRenderer("html_widget", (_eng, cmd) => {
       if (cmd.tool !== "html_widget") return;
       const targetId = activeEditTargetRef.current;
-      let oldWidget = targetId ? wm.get(targetId) : null;
-      if (!oldWidget) {
-        for (const w of wm.all()) {
-          const isExactMatch = Math.abs(w.x - cmd.x) < 5 && Math.abs(w.y - cmd.y) < 5;
-          const isTitleMatch = cmd.title && w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 300;
-          const isInPlace = (cmd as { placement?: string }).placement === "in_place" && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 350;
-          if (isExactMatch || isTitleMatch || isInPlace) {
-            oldWidget = w;
-            break;
-          }
-        }
+      activeEditTargetRef.current = null;
+      const isInPlace = (cmd as { placement?: string }).placement === "in_place";
+      let oldWidget: WidgetItem | null = null;
+      if (isInPlace && targetId) {
+        oldWidget = wm.get(targetId) ?? null;
       }
       if (oldWidget) {
         wm.remove(oldWidget.id);
         syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });
-      } else {
-        for (const w of wm.all()) {
-          if (w.status === "draft" && w.kind === "html") {
-            wm.remove(w.id);
-            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: w.id });
-          }
-        }
       }
-      activeEditTargetRef.current = null;
       const estimated = extractHtmlDimensions(cmd.html);
       const initialW = oldWidget ? oldWidget.w : Math.round(cmd.w || estimated?.width || 540);
       const initialH = oldWidget ? oldWidget.h : Math.round(cmd.h || estimated?.height || 360);
 
       const item: WidgetItem = {
-        id: oldWidget?.id || targetId || `widget-${Date.now()}`,
+        id: oldWidget?.id || `widget-${Date.now()}`,
         kind: "html",
         pluginId: cmd.pluginId,
         sourceFormat: cmd.sourceFormat,
@@ -982,30 +983,23 @@ export function CanvasApp() {
     draft.setRenderer("diagram_source", async (_eng, cmd) => {
       if (cmd.tool !== "diagram_source") return;
       const targetId = activeEditTargetRef.current;
-      let oldWidget = targetId ? wm.get(targetId) : null;
-      if (!oldWidget) {
-        for (const w of wm.all()) {
-          const isExactMatch = Math.abs(w.x - cmd.x) < 5 && Math.abs(w.y - cmd.y) < 5;
-          const isTitleMatch = cmd.title && w.title === cmd.title && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 300;
-          const isInPlace = (cmd as { placement?: string }).placement === "in_place" && w.kind === "diagram" && distanceBetweenRects({ x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h }, w) < 350;
-          if (isExactMatch || isTitleMatch || isInPlace) {
-            oldWidget = w;
-            break;
-          }
-        }
+      activeEditTargetRef.current = null;
+      const isInPlace = (cmd as { placement?: string }).placement === "in_place";
+      let oldWidget: WidgetItem | null = null;
+      if (isInPlace && targetId) {
+        oldWidget = wm.get(targetId) ?? null;
       }
       if (oldWidget) {
         wm.remove(oldWidget.id);
         syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });
       }
-      activeEditTargetRef.current = null;
       const res = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
       const html = typeof res === "string" ? res : res.html;
       const initialW = oldWidget ? oldWidget.w : Math.round(cmd.w || 540);
       const initialH = oldWidget ? oldWidget.h : Math.round(cmd.h || 360);
 
       const item: WidgetItem = {
-        id: oldWidget?.id || targetId || `diagram-${Date.now()}`,
+        id: oldWidget?.id || `diagram-${Date.now()}`,
         kind: "diagram",
         pluginId: cmd.pluginId || cmd.sourceFormat || "diagram",
         sourceFormat: cmd.sourceFormat,

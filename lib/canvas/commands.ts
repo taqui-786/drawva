@@ -405,36 +405,14 @@ export function fitWidgetGeometry(
 ): Box | null {
   const placement = String(cmd.placement || "").toLowerCase();
 
-  // Refinement mode: snap to the original widget's box — ignore whatever the AI returned.
-  if (!reposition || placement === "in_place") {
-    let targetBox = widgetEditBox;
-    if ((!targetBox || targetBox.w <= 0 || targetBox.h <= 0) && Array.isArray(sceneItems) && sceneItems.length > 0) {
-      const widgetItems = sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html");
-      if (widgetItems.length > 0) {
-        if (changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
-          let closest = widgetItems[0];
-          let minD = Infinity;
-          for (const wItem of widgetItems) {
-            const d = Math.hypot(wItem.x + wItem.w / 2 - (changedBox.x + changedBox.w / 2), wItem.y + wItem.h / 2 - (changedBox.y + changedBox.h / 2));
-            if (d < minD) {
-              minD = d;
-              closest = wItem;
-            }
-          }
-          targetBox = closest;
-        } else {
-          targetBox = widgetItems[0];
-        }
-      }
-    }
-    if (targetBox && targetBox.w > 0 && targetBox.h > 0) {
-      return {
-        x: Math.round(targetBox.x),
-        y: Math.round(targetBox.y),
-        w: Math.round(targetBox.w),
-        h: Math.round(targetBox.h),
-      };
-    }
+  // Refinement mode: snap to the original widget's box if explicitly provided.
+  if ((!reposition || placement === "in_place") && widgetEditBox && widgetEditBox.w > 0 && widgetEditBox.h > 0) {
+    return {
+      x: Math.round(widgetEditBox.x),
+      y: Math.round(widgetEditBox.y),
+      w: Math.round(widgetEditBox.w),
+      h: Math.round(widgetEditBox.h),
+    };
   }
 
   const viewportW = Math.max(visibleRect?.w ?? 2000, 1);

@@ -157,7 +157,7 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     userPrompt: req.userPrompt || null,
     scene: safeJson(req.scene || sceneText),
     note: widgetEdit
-      ? "widgetEdit is authoritative. For nearby ink, read it as the modification instruction. The attached image is the only visual; focusInset, when present, is a magnified corner overlay for transcription only."
+      ? "widgetEdit provides the existing target widget state for refinement reference. If the user's latest input modifies or refines this widget, return placement in_place. If the user asks to draw or create a new independent visual, return a new command with placement below, right, or match_sketch. The attached image is the only visual; focusInset, when present, is a magnified corner overlay for transcription only."
       : "The attached image is the only visual. latestInput.imageRect is the authoritative attention region. focusInset, when present, is a magnified duplicate composited into a corner of that same image for handwriting transcription only. Use placement tokens; the client computes exact x/y and avoids collisions.",
   };
 
@@ -174,8 +174,12 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     };
     modelInput.widgetEditPolicy =
       widgetEdit.widgetType === "diagram_source"
-        ? `This is a one-shot replacement of exactly the supplied diagram_source target. Other viewport widgets are background only. The supplied complete source and sourceFormat are authoritative. latestInput.imageRect is the newest edit instruction. Return one complete diagram_source with pluginId "${pluginId}" and sourceFormat "${format}", never HTML, a patch, diff, target id, explanation, or second command. Placement MUST be "in_place". Preserve all baseline content, terminology, direction, grouping and layout except for the smallest complete changes required by that newest instruction. The client preserves outer id and geometry. If the ink is a NEW independent sketch that does not modify this widget, do not edit it — generate a NEW item with placement "match_sketch", "below", or "right".`
-        : `This is a one-shot replacement of exactly the supplied html_widget target. Other viewport widgets are background only. The supplied source/copyText and complete HTML are the existing semantic and visual baselines. latestInput.imageRect is the newest edit instruction. Return one complete html_widget for the same plugin, never a patch, diff, target id, explanation, or second command. Placement MUST be "in_place". Preserve baseline content, professional source format, visual style, rendering library and internal layout except for the smallest complete changes. If the ink is a NEW independent sketch that does not modify this widget, do not edit it — generate a NEW item with placement "match_sketch", "below", or "right".`;
+        ? `The user is interacting near or targeting the supplied diagram_source widget ("${widgetEdit.title || "diagram"}"). The supplied source and sourceFormat are the current state.
+- If the user's latest input is an update, refinement, or modification of this diagram (e.g. "add step X", "remove node", "compact", structural edits, or direct annotations), return ONE complete replacement diagram_source with pluginId "${pluginId}", sourceFormat "${format}", and placement "in_place".
+- If the user's latest input is a NEW independent drawing or separate request (e.g. "Draw <new topic>", "Create ...", a new sketch in open space), generate a NEW item with placement "below", "right", or "match_sketch". DO NOT replace or overwrite the existing diagram.`
+        : `The user is interacting near or targeting the supplied html_widget ("${widgetEdit.title || "widget"}"). The supplied HTML/source is the current state.
+- If the user's latest input is an update, refinement, or modification of this widget, return ONE complete replacement html_widget for the same plugin with placement "in_place".
+- If the user's latest input is a NEW independent visual or separate request, generate a NEW item with placement "below", "right", or "match_sketch". DO NOT replace or overwrite the existing widget.`;
   }
 
   return JSON.stringify(modelInput);
@@ -469,15 +473,15 @@ async function attemptReply(
   let commands = Array.isArray(response.commands) ? response.commands : [];
   if (req.widgetEdit) {
     const targetType = req.widgetEdit.widgetType;
-    const matched = commands.filter(
+    const inPlaceMatched = commands.filter(
       (c) =>
         typeof c === "object" &&
         c !== null &&
         (c as { tool?: string }).tool === targetType &&
         (c as { placement?: string }).placement === "in_place"
     );
-    if (matched.length > 0) {
-      commands = [matched[0]];
+    if (inPlaceMatched.length > 0) {
+      commands = [inPlaceMatched[0]];
     }
   }
 

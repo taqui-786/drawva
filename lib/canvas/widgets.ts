@@ -272,9 +272,6 @@ export class WidgetManager {
       const w = this.widgets.get(this.selectedId);
       if (w) return w;
     }
-    for (const w of this.widgets.values()) {
-      if (w.status === "draft") return w;
-    }
     return null;
   }
 
