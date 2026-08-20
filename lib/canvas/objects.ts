@@ -217,13 +217,14 @@ export class ObjectManager {
     const isHovered = !hand && shell?.dataset.hovered === "true";
     const isDraft = item?.status === "draft";
     const active = isSelected || isHovered;
-    this.hostRoot.style.zIndex = active || isDraft || hand || select ? "40" : "20";
+    this.hostRoot.style.zIndex = active || isDraft || select ? "40" : "20";
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
-      shell.style.pointerEvents = active || isDraft || hand || select ? "auto" : "none";
-      shell.style.cursor = hand || select ? "grab" : "default";
-      shell.style.borderColor = active || isDraft ? "var(--primary)" : "transparent";
-      shell.style.borderStyle = active || isDraft ? "dotted" : "none";
+      // Hand is pan-only: clicks pass through objects to the canvas.
+      shell.style.pointerEvents = hand ? "none" : active || isDraft || select ? "auto" : "none";
+      shell.style.cursor = hand ? "grab" : select ? "grab" : "default";
+      shell.style.borderColor = !hand && (active || isDraft) ? "var(--primary)" : "transparent";
+      shell.style.borderStyle = !hand && (active || isDraft) ? "dotted" : "none";
       shell.style.borderWidth = "2px";
       shell.style.boxShadow = "none";
     }
@@ -397,6 +398,7 @@ export class ObjectManager {
       this.applyMode(item.id);
     });
     shell.addEventListener("pointerdown", (e) => {
+      if (this.mode === "hand") return;
       const target = e.target as HTMLElement | null;
       if (!target?.closest(".drawva-object-btn") && !target?.closest(".drawva-object-resize")) {
         e.stopPropagation();
@@ -407,13 +409,13 @@ export class ObjectManager {
     const cb = this.opts.callbacks ?? {};
     const beginDrag = (e: PointerEvent) => {
       e.stopPropagation();
-      this.setSelected(item.id);
+      if (this.mode !== "hand") this.setSelected(item.id);
       dragBar.setPointerCapture?.(e.pointerId);
       cb.onDragStart?.(item.id, e);
     };
     const beginResize = (e: PointerEvent) => {
       e.stopPropagation();
-      this.setSelected(item.id);
+      if (this.mode !== "hand") this.setSelected(item.id);
       resizeHandle.setPointerCapture?.(e.pointerId);
       cb.onResizeStart?.(item.id, e);
     };

@@ -1387,6 +1387,10 @@ export function CanvasApp() {
     tools.current?.setMode(mode);
     widgets.current?.setMode(mode);
     objects.current?.setMode(mode);
+    if (mode === "hand") {
+      widgets.current?.setSelected(null);
+      objects.current?.setSelected(null);
+    }
   }, [mode, engine]);
 
   useEffect(() => {

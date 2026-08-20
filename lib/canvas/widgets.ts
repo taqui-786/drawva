@@ -191,6 +191,7 @@ export class WidgetManager {
   private onMessage = (e: MessageEvent) => {
     if (e.origin !== location.origin) return;
     if (e.data?.type === "drawva-widget-pointerdown") {
+      if (this.mode === "hand") return;
       for (const [id, shell] of this.shells) {
         const iframe = shell.querySelector("iframe");
         if (iframe && iframe.contentWindow === e.source) {
@@ -309,17 +310,17 @@ export class WidgetManager {
 
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
-      shell.style.pointerEvents = active || hand || select ? "auto" : "none";
-      shell.style.cursor = hand || select ? "grab" : "default";
-      shell.style.borderColor = active ? "var(--primary)" : "transparent";
-      shell.style.borderStyle = active ? "dotted" : "none";
+      // Hand pans through the shell; the iframe keeps pointer-events so graphs/HTML stay clickable.
+      shell.style.pointerEvents = hand ? "none" : active || select ? "auto" : "none";
+      shell.style.cursor = hand ? "grab" : select ? "grab" : "default";
+      shell.style.borderColor = active && !hand ? "var(--primary)" : "transparent";
+      shell.style.borderStyle = active && !hand ? "dotted" : "none";
       shell.style.borderWidth = "2px";
       shell.style.boxShadow = "none";
     }
 
     if (frame) {
-      const passThrough = !active && !hand && !select;
-      frame.style.pointerEvents = passThrough ? "none" : "auto";
+      frame.style.pointerEvents = hand || active || select ? "auto" : "none";
     }
 
     if (chrome) {
@@ -575,6 +576,7 @@ export class WidgetManager {
     shell.append(body, chrome, resizeHandle, resizeWidth, resizeHeight);
 
     shell.addEventListener("pointerdown", (e) => {
+      if (this.mode === "hand") return;
       const target = e.target as HTMLElement | null;
       if (!target?.closest(".drawva-widget-btn") && !target?.closest(".drawva-widget-resize")) {
         e.stopPropagation();
@@ -585,13 +587,13 @@ export class WidgetManager {
     const cb = this.opts.callbacks ?? {};
     const beginDrag = (e: PointerEvent) => {
       e.stopPropagation();
-      this.setSelected(widget.id);
+      if (this.mode !== "hand") this.setSelected(widget.id);
       dragBar.setPointerCapture?.(e.pointerId);
       cb.onDragStart?.(widget.id, e);
     };
     const beginResize = (mode: WidgetResizeMode) => (e: PointerEvent) => {
       e.stopPropagation();
-      this.setSelected(widget.id);
+      if (this.mode !== "hand") this.setSelected(widget.id);
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
       cb.onResizeStart?.(widget.id, mode, e);
     };
