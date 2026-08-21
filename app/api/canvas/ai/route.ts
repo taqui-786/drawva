@@ -1,13 +1,14 @@
 import { NextResponse } from "next/server";
 import { runAgent } from "@/lib/ai/agent";
 import { createChatModel } from "@/lib/ai/model";
-import { MAX_BODY_BYTES, MAX_COMMANDS, MAX_DIAGRAM_BYTES, MAX_HTML_BYTES } from "@/lib/ai/prompts";
+import { AI_TIMEOUT_MS, MAX_BODY_BYTES, MAX_COMMANDS, MAX_DIAGRAM_BYTES, MAX_HTML_BYTES } from "@/lib/ai/prompts";
 import { validateCommands } from "@/lib/canvas/commands";
 import { SIZE } from "@/lib/canvas/constants";
 import type { AiRequest, AgentEvent } from "@/lib/ai/types";
 import type { ProviderType } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
+export const maxDuration = 120;
 
 function readBody(text: string): { ok: true; data: unknown } | { ok: false; error: string } {
   if (text.length > MAX_BODY_BYTES) return { ok: false, error: "Request too large" };
@@ -147,7 +148,7 @@ export async function POST(req: Request) {
     model: modelId,
   };
 
-  const model = createChatModel({ providerType, baseUrl, apiKey, model: modelId });
+  const model = createChatModel({ providerType, baseUrl, apiKey, model: modelId, timeoutMs: AI_TIMEOUT_MS });
   const sceneText = aiRequest.scene || "";
 
   // keepPosition is ONLY the explicit Refine button. A nearby/selected widgetEdit

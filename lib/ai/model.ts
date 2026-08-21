@@ -4,6 +4,7 @@ import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatGroq } from "@langchain/groq";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import type { ProviderType } from "./provider";
+import { AI_TIMEOUT_MS } from "./prompts";
 
 export const MAX_RETRIES = 3;
 
@@ -21,7 +22,7 @@ export function createChatModel({
   baseUrl,
   apiKey,
   model,
-  timeoutMs = 60_000,
+  timeoutMs = AI_TIMEOUT_MS,
   temperature = 0.2,
 }: CreateChatModelOptions): BaseChatModel {
   if (!apiKey || !model) {

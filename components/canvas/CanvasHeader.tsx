@@ -68,6 +68,7 @@ import {
   PeerToPeer01Icon,
   Wifi01Icon,
 } from "@hugeicons/core-free-icons";
+import { cn } from "@/lib/utils";
 import type { CanvasMode } from "@/lib/canvas/types";
 
 export interface AiRunState {
@@ -76,6 +77,8 @@ export interface AiRunState {
   activeProvider: string | null;
   /** Label of the model that produced the final result. */
   doneProvider: string | null;
+  /** Latency warning level: "normal" | "slow" | "critical" */
+  durationStage?: "normal" | "slow" | "critical";
 }
 
 const PALETTE = [
@@ -176,7 +179,7 @@ export function CanvasHeader({
   onInsertFormula,
   onInsertPlot,
   aiStatus,
-  aiRun: _aiRun,
+  aiRun,
   autoOn,
   onAutoChange,
   onAskAi,
@@ -588,36 +591,57 @@ export function CanvasHeader({
       {/* ── Right: AI Assistant & Settings ────────────────────────── */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
         <AnimatePresence mode="wait">
-          {aiStatus === "thinking" ? (
-            <motion.div
-              key="bars-loader"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ duration: 0.2, ease: "easeOut" }}
-              className="flex items-center"
-            >
-              <style>{`
-                @keyframes bars-fill {
-                  0% { opacity: 0.2; }
-                  50% { opacity: 1; }
-                  100% { opacity: 0.2; }
-                }
-              `}</style>
-              <div className="flex gap-1 rounded-sm border border-primary/40 p-1 bg-background/90 shadow-xs">
-                {Array.from({ length: 12 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className="h-4 w-2 rounded-[1px] bg-primary"
-                    style={{
-                      animation: "bars-fill 1s ease-in-out infinite",
-                      animationDelay: `${index * 0.08}s`,
-                    }}
-                  />
-                ))}
-              </div>
-            </motion.div>
-          ) : (
+          {aiStatus === "thinking" ? (() => {
+            const stage = aiRun?.durationStage || "normal";
+            const barColorClass =
+              stage === "critical"
+                ? "bg-rose-500 transition-colors duration-500"
+                : stage === "slow"
+                ? "bg-amber-500 transition-colors duration-500"
+                : "bg-primary transition-colors duration-500";
+            const containerBorderClass =
+              stage === "critical"
+                ? "border-rose-500/50 shadow-rose-500/10"
+                : stage === "slow"
+                ? "border-amber-500/50 shadow-amber-500/10"
+                : "border-primary/40";
+
+            return (
+              <motion.div
+                key="bars-loader"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                transition={{ duration: 0.2, ease: "easeOut" }}
+                className="flex items-center"
+              >
+                <style>{`
+                  @keyframes bars-fill {
+                    0% { opacity: 0.2; }
+                    50% { opacity: 1; }
+                    100% { opacity: 0.2; }
+                  }
+                `}</style>
+                <div
+                  className={cn(
+                    "flex gap-1 rounded-sm border p-1 bg-background/90 shadow-xs transition-colors duration-500",
+                    containerBorderClass
+                  )}
+                >
+                  {Array.from({ length: 12 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className={cn("h-4 w-2 rounded-[1px]", barColorClass)}
+                      style={{
+                        animation: "bars-fill 1s ease-in-out infinite",
+                        animationDelay: `${index * 0.08}s`,
+                      }}
+                    />
+                  ))}
+                </div>
+              </motion.div>
+            );
+          })() : (
             <motion.div
               key="standard-controls"
               initial={{ opacity: 0 }}

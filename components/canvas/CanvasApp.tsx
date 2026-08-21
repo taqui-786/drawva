@@ -293,6 +293,8 @@ export function CanvasApp() {
 
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aiAbort = useRef<AbortController | null>(null);
+  const aiSlowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const aiCriticalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const aiSeq = useRef(0);
   const aiRevision = useRef(0);
   const inkBoxRef = useRef<Rect | null>(null);
@@ -301,6 +303,23 @@ export function CanvasApp() {
   const refineFocusRef = useRef<{ rect: Rect; widgetId: string } | null>(null);
   const activeEditTargetRef = useRef<string | null>(null);
   const lockEditTargetRef = useRef(false);
+
+  const clearAiMilestoneTimers = useCallback(() => {
+    if (aiSlowTimer.current) {
+      clearTimeout(aiSlowTimer.current);
+      aiSlowTimer.current = null;
+    }
+    if (aiCriticalTimer.current) {
+      clearTimeout(aiCriticalTimer.current);
+      aiCriticalTimer.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearAiMilestoneTimers();
+    };
+  }, [clearAiMilestoneTimers]);
 
   const activePointersRef = useRef<Map<number, Point>>(new Map());
   const pinchRef = useRef<{
@@ -403,6 +422,7 @@ export function CanvasApp() {
       return;
     }
 
+    clearAiMilestoneTimers();
     setAiStatus("thinking");
     aiAbort.current?.abort();
     const controller = new AbortController();
@@ -554,16 +574,28 @@ export function CanvasApp() {
         inkBoxRef.current = null;
         afterBoardChange();
       }
+      clearAiMilestoneTimers();
       setAiStatus("done");
       setAiRun((prev) => ({
         phase: "done",
         activeProvider: null,
         doneProvider: prev.doneProvider,
+        durationStage: "normal",
       }));
     };
 
     setAiStatus("thinking");
-    setAiRun({ phase: "running", activeProvider: null, doneProvider: null });
+    setAiRun({ phase: "running", activeProvider: null, doneProvider: null, durationStage: "normal" });
+
+    aiSlowTimer.current = setTimeout(() => {
+      toast.warning("Be patient, your provider is too slow, it may take time");
+      setAiRun((prev) => (prev.phase === "running" ? { ...prev, durationStage: "slow" } : prev));
+    }, 50_000);
+
+    aiCriticalTimer.current = setTimeout(() => {
+      toast.warning("Due to high traffic on your provider, it is taking a lot of time, wait for a couple of seconds");
+      setAiRun((prev) => (prev.phase === "running" ? { ...prev, durationStage: "critical" } : prev));
+    }, 105_000);
 
     try {
       const res = await fetch("/api/canvas/ai", {
@@ -590,9 +622,10 @@ export function CanvasApp() {
         await applyReply(data);
       }
     } catch (err) {
+      clearAiMilestoneTimers();
       if (controller.signal.aborted) return;
       setAiStatus("error");
-      setAiRun((prev) => ({ ...prev, phase: "error" }));
+      setAiRun((prev) => ({ ...prev, phase: "error", durationStage: "normal" }));
       const desc = err instanceof Error ? parseCleanErrorMessage(err.message) : "AI request failed";
 
       const logEntry: AiLogEntry = {
@@ -617,10 +650,11 @@ export function CanvasApp() {
       });
       console.error("AI request failed:", err);
     } finally {
+      clearAiMilestoneTimers();
       if (aiAbort.current === controller) aiAbort.current = null;
       refineFocusRef.current = null;
     }
-  }, [engine, models]);
+  }, [engine, models, clearAiMilestoneTimers]);
 
   function scheduleAi(box: Rect, userPrompt?: string) {
     if (aiTimer.current) clearTimeout(aiTimer.current);
@@ -753,6 +787,10 @@ export function CanvasApp() {
     objects.current?.clear();
     inkBoxRef.current = null;
     aiRevision.current++;
+    clearAiMilestoneTimers();
+    aiAbort.current?.abort();
+    setAiStatus("idle");
+    setAiRun({ phase: "idle", activeProvider: null, doneProvider: null, durationStage: "normal" });
     syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
     afterBoardChange();
   }
@@ -1731,6 +1769,7 @@ export function CanvasApp() {
         clearTimeout(aiTimer.current);
         aiTimer.current = null;
       }
+      clearAiMilestoneTimers();
       aiAbort.current?.abort();
       aiRevision.current++;
     }
