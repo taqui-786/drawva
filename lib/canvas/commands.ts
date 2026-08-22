@@ -421,10 +421,17 @@ function placeContent(
     placement === "top";
 
   if (Number.isFinite(rawX) && Number.isFinite(rawY) && (isTargetPlacement || !isRelativeSide)) {
-    return {
-      x: clampNum(rawX, 0, SIZE - w),
-      y: clampNum(rawY, 0, SIZE - h),
-    };
+    return rescueCollision(
+      {
+        x: clampNum(rawX, 0, SIZE - w),
+        y: clampNum(rawY, 0, SIZE - h),
+        w,
+        h,
+      },
+      placement,
+      ctx,
+      !ctx.keepPosition
+    );
   }
 
   const blockers = occupancy(ctx.changedBox, ctx.sceneItems, ctx.visibleRect);
@@ -466,6 +473,41 @@ function placeInVisible(view: Box, w: number, h: number, blockers: Box[]): { x: 
     h: 36,
   };
   return placeAroundAnchor(hint, w, h, view, blockers, "below");
+}
+
+/**
+ * Model-supplied coordinates sometimes land on top of the fresh ink or an item
+ * placed earlier in the same reply. Slide the box to the nearest clear side
+ * instead of rendering over the writing. Only genuine intersections trigger —
+ * tight-anchor replies like writing "5" right after "3+2=" must stay put.
+ */
+function rescueCollision(
+  box: Box,
+  placement: string,
+  source: Pick<CommandValidationContext, "changedBox" | "visibleRect" | "sceneItems">,
+  allowMove: boolean
+): Box {
+  const anchor = placementAnchor(source.changedBox, source.visibleRect);
+  if (!allowMove || !anchor) return box;
+  if (
+    placement === "in_place" ||
+    placement === "inside_target" ||
+    placement === "target_box" ||
+    placement === "at_target" ||
+    placement === "match_sketch"
+  ) {
+    return box;
+  }
+  if (!overlaps(box, anchor, 4)) return box;
+  const blockers = occupancy(source.changedBox, source.sceneItems, source.visibleRect);
+  const preferred = pickPreferredSide(placement, anchor, box.w, box.h, source.visibleRect, blockers, "below");
+  const near = placeAroundAnchor(anchor, box.w, box.h, source.visibleRect, blockers, preferred);
+  return {
+    x: clampNum(near.x, 0, SIZE - box.w),
+    y: clampNum(near.y, 0, SIZE - box.h),
+    w: box.w,
+    h: box.h,
+  };
 }
 
 function uniqueSceneWidgetByTitle(
@@ -570,7 +612,7 @@ export function fitWidgetGeometry(
   if (hasExplicitCoords) {
     if (!Number.isFinite(rawW) || rawW <= 0) rawW = DEFAULT_WIDGET_WIDTH;
     if (!Number.isFinite(rawH) || rawH <= 0) rawH = DEFAULT_WIDGET_HEIGHT;
-    return sanitizeWidgetGeometry(
+    const box = sanitizeWidgetGeometry(
       {
         x: Number(rawCmdX),
         y: Number(rawCmdY),
@@ -579,6 +621,8 @@ export function fitWidgetGeometry(
       },
       widgetGeometry
     );
+    if (!box) return null;
+    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !snapInPlace);
   }
 
   const anchor = placementAnchor(changedBox, visibleRect);
@@ -681,8 +725,14 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
   let x: number;
   let y: number;
   if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
-    x = clampNum(rawX, 0, SIZE - w);
-    y = clampNum(rawY, 0, SIZE - h);
+    const rescued = rescueCollision(
+      { x: clampNum(rawX, 0, SIZE - w), y: clampNum(rawY, 0, SIZE - h), w, h },
+      String(c.placement || "").toLowerCase(),
+      ctx,
+      true
+    );
+    x = rescued.x;
+    y = rescued.y;
   } else {
     const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
     if (anchor) {
@@ -1407,6 +1457,27 @@ export function canonicalToolName(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
+/** Bounding box of a placed command, so later siblings can avoid it. */
+function commandBounds(cmd: CanvasCommand): Box | null {
+  switch (cmd.tool) {
+    case "write_text":
+      return { x: cmd.x, y: cmd.y, w: cmd.maxWidth, h: Math.round(cmd.fontSize * cmd.lineHeight * 2) };
+    case "draw_formula":
+      return {
+        x: cmd.x,
+        y: cmd.y,
+        w: Math.min(5000, Math.max(cmd.fontSize * 2, cmd.latex.length * cmd.fontSize * 0.72)),
+        h: Math.round(cmd.fontSize * 1.8),
+      };
+    case "plot_function":
+    case "html_widget":
+    case "diagram_source":
+      return { x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h };
+    default:
+      return null;
+  }
+}
+
 export function validateCommands(
   rawCmds: unknown[],
   ctx: CommandValidationContext,
@@ -1425,6 +1496,12 @@ export function validateCommands(
 
   let widgetSlots = ctx.widgetSlots;
   const plotBudget = { used: 0 };
+  // Placed siblings are fed back as occupancy so commands in one reply don't pile up.
+  const siblingBoxes: Array<{ kind: string; x: number; y: number; w: number; h: number }> = Array.isArray(
+    ctx.sceneItems
+  )
+    ? [...ctx.sceneItems]
+    : [];
   for (const raw of rawCmds.slice(0, MAX_COMMANDS)) {
     const c = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
     if (!c) {
@@ -1457,12 +1534,18 @@ export function validateCommands(
       reportReject(`not-allowed:${tool}`);
       continue;
     }
-    const cmd = validateCommand({ ...c, tool }, { ...ctx, widgetSlots, plotBudget }, reportReject);
+    const cmd = validateCommand(
+      { ...c, tool },
+      { ...ctx, widgetSlots, plotBudget, sceneItems: siblingBoxes },
+      reportReject
+    );
     if (!cmd) {
       continue;
     }
     if (cmd.tool === "html_widget" || cmd.tool === "diagram_source") widgetSlots--;
     validated.push(cmd);
+    const placed = commandBounds(cmd);
+    if (placed) siblingBoxes.push({ kind: "ai", ...placed });
   }
 
   let hasWidget = false;
