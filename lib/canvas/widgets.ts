@@ -62,14 +62,12 @@ const RESIZE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" 
 
 export function extractHtmlDimensions(html: string): { width: number; height: number } | null {
   if (!html) return null;
-  const trimmed = html.trim().toLowerCase();
-  if (!trimmed.startsWith("<svg") && !trimmed.startsWith("<?xml")) return null;
   const vb = html.match(/<svg[^>]*viewBox=["']\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s*["']/i);
   if (vb) {
     const w = parseFloat(vb[3]);
     const h = parseFloat(vb[4]);
-    if (w > 20 && h > 20) {
-      return { width: Math.round(w + 16), height: Math.round(h + 16) };
+    if (w > 20 && h > 20 && Number.isFinite(w) && Number.isFinite(h)) {
+      return { width: Math.round(w), height: Math.round(h) };
     }
   }
   const svgTag = html.match(/<svg\b[^>]*>/i);
@@ -79,8 +77,8 @@ export function extractHtmlDimensions(html: string): { width: number; height: nu
     if (wMatch && hMatch) {
       const w = parseFloat(wMatch[1]);
       const h = parseFloat(hMatch[1]);
-      if (w > 20 && h > 20) {
-        return { width: Math.round(w + 16), height: Math.round(h + 16) };
+      if (w > 20 && h > 20 && Number.isFinite(w) && Number.isFinite(h)) {
+        return { width: Math.round(w), height: Math.round(h) };
       }
     }
   }
@@ -227,7 +225,26 @@ export class WidgetManager {
     if (this.shells.has(widget.id)) {
       this.unmount(widget.id);
     }
-    const normalized = normalizeWidgetGeometry(widget);
+    const htmlDims = extractHtmlDimensions(widget.html);
+    let initialW = widget.w;
+    let initialH = widget.h;
+    let contentW = widget.contentW;
+    let contentH = widget.contentH;
+    if (htmlDims && !widget.userResized) {
+      contentW = htmlDims.width;
+      contentH = htmlDims.height;
+      if (initialW >= 1200 && contentW < 1200) {
+        initialW = contentW;
+        initialH = contentH;
+      }
+    }
+    const normalized = normalizeWidgetGeometry({
+      ...widget,
+      w: initialW,
+      h: initialH,
+      contentW: contentW || initialW,
+      contentH: contentH || initialH,
+    });
     this.widgets.set(widget.id, normalized);
     this.mount(normalized);
     this.position(normalized);

@@ -17,7 +17,7 @@ Use for fiat exchange rates, currency conversion, or recent daily trends. Explai
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"exchange-rates"`. Place it at the requested destination or nearby blank space. Prefer `w:2400`, `h:1400`, `refreshSeconds:86400`. Generate the responsive HTML yourself. Make the requested converted amount or current rate dominant, show units clearly, and use a large simple trend if requested. Keep the outer layout transparent with no card background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"exchange-rates"`. Place it at the requested destination or nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:86400`. Generate the responsive HTML yourself. Make the requested converted amount or current rate dominant, show units clearly, and use a large simple trend if requested. Keep the outer layout transparent with no card background, border, or shadow.
 
 ## Data contract
 

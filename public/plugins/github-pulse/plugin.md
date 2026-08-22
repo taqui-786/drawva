@@ -17,7 +17,7 @@ Use when the user names a public GitHub `owner/repo` and asks for project status
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"github-pulse"`. Place it at the indicated destination or nearby blank area. Prefer `w:2400`, `h:1400`, `refreshSeconds:600`. Generate the complete responsive HTML yourself. Make repository name, stars, and freshness prominent; use large text and concise secondary metrics. Keep the outer layout transparent with no card background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"github-pulse"`. Place it at the indicated destination or nearby blank area. Prefer `w:720`, `h:480`, `refreshSeconds:600`. Generate the complete responsive HTML yourself. Make repository name, stars, and freshness prominent; use large text and concise secondary metrics. Keep the outer layout transparent with no card background, border, or shadow.
 
 ## Data contract
 

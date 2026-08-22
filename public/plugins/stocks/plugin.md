@@ -17,7 +17,7 @@ Use for a named or coded stock ticker (e.g. Shanghai/Shenzhen A-shares, Hong Kon
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"stocks"`. Place it at the user's arrow/box destination or nearby blank space. Prefer `w:2600`, `h:1600`, `refreshSeconds:60`. Generate the responsive HTML yourself. Make name, code, latest price, and change dominant; draw a large daily close/candlestick trend with readable axes and concise fundamentals. Keep the outer layout transparent with no card background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"stocks"`. Place it at the user's arrow/box destination or nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:60`. Generate the responsive HTML yourself. Make name, code, latest price, and change dominant; draw a large daily close/candlestick trend with readable axes and concise fundamentals. Keep the outer layout transparent with no card background, border, or shadow.
 
 ## Data contract
 

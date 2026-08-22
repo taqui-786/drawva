@@ -17,7 +17,7 @@ Use for current technology news, Hacker News headlines, or recent stories on a n
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"tech-news"`. Place it at the user's destination, target container, or nearby blank space. Default dimensions on open canvas are `w:2600`, `h:1600`, `refreshSeconds:900`. When the user specifies an item count (e.g. 3 headlines) or draws a container box, scale `{x, y, w, h}` and render only the requested number of headlines to fit cleanly inside that container without overflowing. Generate the responsive HTML yourself with clear headlines, age, source domain, score, and comments; make the requested topic prominent. Keep the outer layout transparent with no card background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"tech-news"`. Place it at the user's destination, target container, or nearby blank space. Default dimensions on open canvas are `w:720`, `h:480`, `refreshSeconds:900`. When the user specifies an item count (e.g. 3 headlines) or draws a container box, scale `{x, y, w, h}` and render only the requested number of headlines to fit cleanly inside that container without overflowing. Generate the responsive HTML yourself with clear headlines, age, source domain, score, and comments; make the requested topic prominent. Keep the outer layout transparent with no card background, border, or shadow.
 
 ## Data contract
 

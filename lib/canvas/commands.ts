@@ -192,8 +192,8 @@ function clampNum(v: number, lo: number, hi: number): number {
 }
 
 /** Breathing room between the user's ink and a new AI item. Tight enough to stay related, wide enough not to kiss the handwriting. */
-export const PLACE_GAP = 96;
-const SLIDE_GAP = 32;
+export const PLACE_GAP = 48;
+const SLIDE_GAP = 24;
 const TELEPORT_PX = 280;
 
 type Box = { x: number; y: number; w: number; h: number };
@@ -494,17 +494,19 @@ export function fitWidgetGeometry(
   const rawCmdH = targetBox && typeof targetBox.h === "number" ? targetBox.h : cmd.h;
 
   const hasExplicitCoords = Number.isFinite(Number(rawCmdX)) && Number.isFinite(Number(rawCmdY));
+  const isTargetPlacement =
+    placement === "inside_target" ||
+    placement === "target_box" ||
+    placement === "at_target" ||
+    placement === "match_sketch";
   const isRelativeSide =
     placement === "below" ||
     placement === "right" ||
     placement === "left" ||
-    placement === "top" ||
-    placement === "match_sketch" ||
-    placement === "inside_target" ||
-    placement === "target_box";
+    placement === "top";
 
   // Refinement mode: snap to the widget the model actually edited.
-  const snapInPlace = placement === "in_place" || (!reposition && !isRelativeSide && !hasExplicitCoords);
+  const snapInPlace = placement === "in_place" || (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords);
   if (snapInPlace) {
     let target = widgetEditBox;
     const widgetItems = Array.isArray(sceneItems)
@@ -549,10 +551,10 @@ export function fitWidgetGeometry(
   let rawW = Number(rawCmdW);
   let rawH = Number(rawCmdH);
 
-  if (!Number.isFinite(rawW) || rawW <= 0) rawW = DEFAULT_WIDGET_WIDTH;
-  if (!Number.isFinite(rawH) || rawH <= 0) rawH = DEFAULT_WIDGET_HEIGHT;
-
+  // If explicit coordinates were supplied
   if (hasExplicitCoords) {
+    if (!Number.isFinite(rawW) || rawW <= 0) rawW = DEFAULT_WIDGET_WIDTH;
+    if (!Number.isFinite(rawH) || rawH <= 0) rawH = DEFAULT_WIDGET_HEIGHT;
     return sanitizeWidgetGeometry(
       {
         x: Number(rawCmdX),
@@ -564,33 +566,42 @@ export function fitWidgetGeometry(
     );
   }
 
-  const sketchW = changedBox?.w ?? 0;
-  const sketchH = changedBox?.h ?? 0;
   const anchor = placementAnchor(changedBox, visibleRect);
-  const matchSketch = placement === "match_sketch" || placement === "inside_target" || placement === "target_box";
 
-  if (!matchSketch && anchor && Math.abs(rawW - sketchW) < 48 && Math.abs(rawH - sketchH) < 48) {
-    // Model copied the handwriting box instead of sizing the applet.
-    rawW = DEFAULT_WIDGET_WIDTH;
-    rawH = DEFAULT_WIDGET_HEIGHT;
+  // If user requested targeting the drawn container/sketch
+  if (isTargetPlacement && anchor && changedBox) {
+    const pad = 12;
+    const w = Math.max(160, Math.round(changedBox.w - pad * 2));
+    const h = Math.max(120, Math.round(changedBox.h - pad * 2));
+    return sanitizeWidgetGeometry(
+      {
+        x: Math.round(changedBox.x + pad),
+        y: Math.round(changedBox.y + pad),
+        w,
+        h,
+      },
+      widgetGeometry
+    );
   }
-  if (anchor && matchSketch) {
-    rawW = Math.max(rawW, Math.round(sketchW));
-    rawH = Math.max(rawH, Math.round(sketchH));
+
+  // Calculate adaptive size if not explicitly provided or if default huge
+  if (!Number.isFinite(rawW) || rawW <= 0 || rawW > 1600) {
+    const baseW = anchor && anchor.w > 60 ? anchor.w * 1.25 : DEFAULT_WIDGET_WIDTH;
+    rawW = Math.max(360, Math.min(960, Math.round(baseW)));
+  }
+  if (!Number.isFinite(rawH) || rawH <= 0 || rawH > 1200) {
+    const baseH = anchor && anchor.h > 60 ? anchor.h * 1.25 : DEFAULT_WIDGET_HEIGHT;
+    rawH = Math.max(240, Math.min(640, Math.round(baseH)));
   }
 
   const w = rawW;
   const h = rawH;
-
   const blockers = occupancy(changedBox, sceneItems, visibleRect);
 
   let x: number;
   let y: number;
 
-  if (matchSketch && anchor && changedBox) {
-    x = Math.round(changedBox.x);
-    y = Math.round(changedBox.y);
-  } else if (anchor && changedBox) {
+  if (anchor && changedBox) {
     const preferred = pickPreferredSide(placement, changedBox, w, h, visibleRect, blockers, "below");
     const near = placeAroundAnchor(changedBox, w, h, visibleRect, blockers, preferred);
     x = near.x;

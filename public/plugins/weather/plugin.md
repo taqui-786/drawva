@@ -18,7 +18,7 @@ Use when the user asks for current weather, temperature, humidity, wind, precipi
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"weather"`. Place it in the blank canvas area indicated by the user's writing, arrow, or box; otherwise place it near the request without covering existing content. Prefer `w:2400`, `h:1400`, and `refreshSeconds:900`.
+Return exactly one `html_widget` command and no prose, with `pluginId:"weather"`. Place it in the blank canvas area indicated by the user's writing, arrow, or box; otherwise place it near the request without covering existing content. Prefer `w:720`, `h:480`, and `refreshSeconds:900`.
 
 Generate a complete responsive HTML document in `html`; the plugin provides data knowledge, not a template. Use inline CSS and JavaScript only. Show the requested place, current conditions, units, a five-day forecast, linked Open-Meteo attribution, loading/error states, and the last successful update time. Follow `widgetRenderingPolicy`: emphasize the current condition, keep text large, and use a transparent outer layout with no card background or shadow.
 

@@ -17,7 +17,7 @@ Use for recent earthquakes, strongest events, or seismic activity near a region.
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"earthquakes"`. Place it at the user's indicated destination or nearby blank space. Prefer `w:2400`, `h:1400`, `refreshSeconds:60`. Generate the complete responsive HTML yourself. Prioritize the strongest or requested event, use large readable text, and show a compact list or coordinate plot without an outer card, background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"earthquakes"`. Place it at the user's indicated destination or nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:60`. Generate the complete responsive HTML yourself. Prioritize the strongest or requested event, use large readable text, and show a compact list or coordinate plot without an outer card, background, border, or shadow.
 
 ## Data contract
 

@@ -17,7 +17,7 @@ Use for current natural events worldwide or in a named region. Do not present re
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"natural-events"`. Use the destination indicated by writing, arrow, or box; otherwise choose nearby blank space. Prefer `w:2400`, `h:1400`, `refreshSeconds:900`. Generate the responsive HTML yourself. Emphasize event names, category, recency, and location with large text and a restrained list or coordinate view. Keep the outer layout transparent with no card background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"natural-events"`. Use the destination indicated by writing, arrow, or box; otherwise choose nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:900`. Generate the responsive HTML yourself. Emphasize event names, category, recency, and location with large text and a restrained list or coordinate view. Keep the outer layout transparent with no card background, border, or shadow.
 
 ## Data contract
 
