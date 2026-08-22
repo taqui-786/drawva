@@ -4,8 +4,6 @@ import type { CanvasMode, Point } from "./types";
 import {
   normalizeWidgetGeometry,
   resizeWidgetGeometry,
-  settleWidgetContent,
-  widgetScale,
   type WidgetResizeMode,
 } from "./widgetGeometry";
 
@@ -449,39 +447,9 @@ export class WidgetManager {
       if (event.source !== frame.contentWindow || event.origin !== location.origin) return;
       if (event.data?.type === "drawva-widget-host-ready") {
         sendInit(frame.contentWindow, event.origin);
-      } else if (event.data?.type === "drawva-widget-settled-size") {
-        const { width, height } = event.data;
-        if (typeof height === "number" && height > 0) {
-          const w = this.widgets.get(widget.id);
-          if (w) {
-            let measuredH = Math.min(6000, Math.max(60, Math.round(height)));
-            let measuredW =
-              typeof width === "number" && width > 0
-                ? Math.min(3200, Math.max(80, Math.round(width)))
-                : w.contentW;
-            // Multi-item HTML applets can report a fragment of one card. Keep their
-            // declared box. Single-graphic diagrams (SMILES, mermaid, one chart)
-            // must be allowed to shrink onto the drawing or they keep empty margins.
-            const fragment =
-              w.kind === "html" &&
-              (measuredW < w.contentW * 0.6 || measuredH < w.contentH * 0.6);
-            if (!w.userResized && fragment) {
-              measuredW = Math.max(measuredW, w.contentW);
-              measuredH = Math.max(measuredH, w.contentH);
-            }
-            if (
-              Math.abs(measuredW - w.contentW) <= 2 &&
-              Math.abs(measuredH - w.contentH) <= 2 &&
-              (w.userResized || (Math.abs(measuredW - w.w) <= 2 && Math.abs(measuredH - w.h) <= 2))
-            ) {
-              return;
-            }
-            Object.assign(w, settleWidgetContent(w, measuredW, measuredH));
-            this.position(w);
-            if (fallbackReveal) window.clearTimeout(fallbackReveal);
-            requestAnimationFrame(() => requestAnimationFrame(reveal));
-          }
-        }
+      } else if (event.data?.type === "drawva-widget-updated") {
+        if (fallbackReveal) window.clearTimeout(fallbackReveal);
+        requestAnimationFrame(() => requestAnimationFrame(reveal));
       }
     };
     window.addEventListener("message", onMessage);
@@ -680,23 +648,24 @@ export class WidgetManager {
     const rect = this.opts.engineContainer.getBoundingClientRect();
     const viewportW = rect.width;
     const viewportH = rect.height;
-    const relativeX = cam.panX + widget.x * cam.scale;
-    const relativeY = cam.panY + widget.y * cam.scale;
+    const screenX = cam.panX + widget.x * cam.scale;
+    const screenY = cam.panY + widget.y * cam.scale;
     const contentW = Math.max(80, widget.contentW && widget.contentW > 10 ? widget.contentW : (widget.w || 400));
     const contentH = Math.max(60, widget.contentH && widget.contentH > 10 ? widget.contentH : (widget.h || 300));
-    const s = cam.scale * widgetScale(widget);
+    const scaleX = (cam.scale * widget.w) / contentW;
+    const scaleY = (cam.scale * widget.h) / contentH;
 
     shell.style.width = `${contentW}px`;
     shell.style.height = `${contentH}px`;
-    shell.style.transform = `translate3d(${relativeX}px,${relativeY}px,0) scale(${s},${s})`;
+    shell.style.transform = `translate3d(${screenX}px,${screenY}px,0) scale(${scaleX},${scaleY})`;
     const frame = shell.querySelector("iframe");
     frame?.contentWindow?.postMessage({ type: "drawva-widget-layout-size", width: contentW, height: contentH }, location.origin);
 
     const offscreen =
-      relativeX > viewportW ||
-      relativeY > viewportH ||
-      relativeX + widget.w * cam.scale < 0 ||
-      relativeY + widget.h * cam.scale < 0;
+      screenX > viewportW ||
+      screenY > viewportH ||
+      screenX + widget.w * cam.scale < 0 ||
+      screenY + widget.h * cam.scale < 0;
     shell.style.visibility = offscreen ? "hidden" : "visible";
     this.applyMode(widget.id);
   }

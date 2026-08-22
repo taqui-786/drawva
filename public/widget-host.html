@@ -38,153 +38,6 @@
   function writeInner(html) {
     const autoResizeScript = `<script>
       (function() {
-        let lastH = 0;
-        let lastW = 0;
-
-        function svgSize(svg) {
-          if (!svg) return null;
-          const vb = svg.viewBox && svg.viewBox.baseVal;
-          if (vb && vb.width > 2 && vb.height > 2) return { w: vb.width, h: vb.height };
-          const p = (svg.getAttribute('viewBox') || '').split(/[\\s,]+/).map(Number);
-          if (p.length === 4 && p[2] > 2 && p[3] > 2) return { w: p[2], h: p[3] };
-          const wAttr = parseFloat(svg.getAttribute('width') || '');
-          const hAttr = parseFloat(svg.getAttribute('height') || '');
-          if (wAttr > 2 && hAttr > 2 && !String(svg.getAttribute('width') || '').includes('%')) {
-            return { w: wAttr, h: hAttr };
-          }
-          try {
-            const r = svg.getBoundingClientRect();
-            if (r.width > 2 && r.height > 2) return { w: r.width, h: r.height };
-          } catch(e) {}
-          return null;
-        }
-
-        function cropSvgToDrawing(svg) {
-          if (!svg || svg.getAttribute('data-drawva-cropped') === '1') return svgSize(svg);
-          try {
-            const b = svg.getBBox();
-            if (!(b.width > 2 && b.height > 2)) return svgSize(svg);
-            const pad = 12;
-            const x = b.x - pad;
-            const y = b.y - pad;
-            const w = b.width + pad * 2;
-            const h = b.height + pad * 2;
-            const declared = svgSize(svg);
-            if (declared && w >= declared.w * 0.82 && h >= declared.h * 0.82) {
-              svg.setAttribute('data-drawva-cropped', '1');
-              return declared;
-            }
-            svg.setAttribute('viewBox', x + ' ' + y + ' ' + w + ' ' + h);
-            svg.setAttribute('width', String(Math.ceil(w)));
-            svg.setAttribute('height', String(Math.ceil(h)));
-            svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-            svg.style.width = Math.ceil(w) + 'px';
-            svg.style.height = Math.ceil(h) + 'px';
-            svg.style.maxWidth = '100%';
-            svg.style.maxHeight = '100%';
-            svg.setAttribute('data-drawva-cropped', '1');
-            return { w: Math.ceil(w), h: Math.ceil(h) };
-          } catch (e) {
-            return svgSize(svg);
-          }
-        }
-
-        let measureTimer = 0;
-        function emitSize(width, height) {
-          const w = Math.min(3200, Math.max(80, Math.ceil(width)));
-          const h = Math.min(6000, Math.max(60, Math.ceil(height)));
-          if (Math.abs(h - lastH) > 2 || Math.abs(w - lastW) > 2) {
-            lastW = w;
-            lastH = h;
-            window.parent.postMessage({ type: 'drawva-widget-resize-content', width: w, height: h }, '*');
-          }
-        }
-
-        function scheduleSize() {
-          clearTimeout(measureTimer);
-          measureTimer = setTimeout(postSize, 48);
-        }
-
-        function contentBox() {
-          const body = document.body;
-          const root = document.documentElement;
-          const skip = { SCRIPT:1, STYLE:1, LINK:1, META:1, TITLE:1, NOSCRIPT:1 };
-          let right = 0;
-          let bottom = 0;
-          const nodes = body.querySelectorAll('*');
-          for (let i = 0; i < nodes.length; i++) {
-            const el = nodes[i];
-            if (el === body || el === root || skip[el.tagName]) continue;
-            let r;
-            try { r = el.getBoundingClientRect(); } catch (e) { continue; }
-            if (r.width <= 1 || r.height <= 1) continue;
-            right = Math.max(right, r.right);
-            bottom = Math.max(bottom, r.bottom);
-            if (el.tagName === 'SVG') {
-              const nat = svgSize(el);
-              if (nat) {
-                right = Math.max(right, r.left + nat.w);
-                bottom = Math.max(bottom, r.top + nat.h);
-              }
-            }
-            if (el.tagName === 'CANVAS') {
-              const cw = Number(el.width) || r.width;
-              const ch = Number(el.height) || r.height;
-              right = Math.max(right, r.left + cw);
-              bottom = Math.max(bottom, r.top + ch);
-            }
-          }
-          return { w: right, h: bottom };
-        }
-
-        function postSize() {
-          try {
-            const body = document.body;
-            const root = document.documentElement;
-            if (!body) return;
-            const stage = document.getElementById('stage');
-            if (stage && (stage.querySelector('[data-drawva-wait]') || (/^rendering\b/i.test((stage.textContent || '').trim()) && !stage.querySelector('svg, canvas, .vega-embed, .leaflet-container')))) return;
-
-            // Single graphic in #stage (SMILES, mermaid, one chart): crop empty
-            // SVG canvas and size the iframe to the drawing. Multiple SVGs are
-            // a dashboard — never collapse those to the first face.
-            if (stage) {
-              const stageSvgs = stage.querySelectorAll('svg');
-              const extraVisual = stage.querySelector('canvas, img, video');
-              if (stageSvgs.length === 1 && !extraVisual) {
-                const nat = cropSvgToDrawing(stageSvgs[0]);
-                if (nat) {
-                  emitSize(nat.w + 16, nat.h + 16);
-                  return;
-                }
-              }
-            }
-
-            // Probe at a generous layout width so width:100% / flex rows lay out
-            // fully instead of reporting the current (often too-small) iframe.
-            const hs = root.style, bs = body.style;
-            const prev = {
-              hw: hs.width, hh: hs.height, hmin: hs.minWidth, ho: hs.overflow,
-              bw: bs.width, bh: bs.height, bmin: bs.minWidth, bo: bs.overflow
-            };
-            hs.width = '1600px';
-            hs.height = 'max-content';
-            hs.minWidth = 'max-content';
-            hs.overflow = 'visible';
-            bs.width = 'max-content';
-            bs.height = 'max-content';
-            bs.minWidth = 'max-content';
-            bs.overflow = 'visible';
-            const box = contentBox();
-            hs.width = prev.hw; hs.height = prev.hh; hs.minWidth = prev.hmin; hs.overflow = prev.ho;
-            bs.width = prev.bw; bs.height = prev.bh; bs.minWidth = prev.bmin; bs.overflow = prev.bo;
-
-            const pad = 16;
-            if (box.w < 8 || box.h < 8) return;
-            emitSize(box.w + pad, box.h + pad);
-          } catch(e) {}
-        }
-
         function postSnapshotResult(reqId, dataUrl, w, h) {
           window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: dataUrl, w: w, h: h }, '*');
         }
@@ -349,7 +202,7 @@
             while ((node = walker.nextNode())) {
               const parent = node.parentElement;
               if (!parent || parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') continue;
-              if (isInsideSvg(parent) || parent.closest && parent.closest('svg')) continue;
+              if (isInsideSvg(parent) || (parent.closest && parent.closest('svg'))) continue;
               const text = (node.textContent || '').replace(/\\s+/g, ' ').trim();
               if (!text) continue;
               const style = window.getComputedStyle(parent);
@@ -411,29 +264,9 @@
               document.documentElement.style.setProperty('--drawva-layout-width', w + 'px');
               document.documentElement.style.setProperty('--drawva-layout-height', h + 'px');
               window.dispatchEvent(new CustomEvent('drawva-widget-layout', { detail: { width: w, height: h } }));
-              scheduleSize();
             }
           }
         });
-
-        window.addEventListener('DOMContentLoaded', postSize);
-        window.addEventListener('load', postSize);
-        if (document.fonts && document.fonts.ready) {
-          document.fonts.ready.then(postSize).catch(function() {});
-        }
-        if (typeof ResizeObserver !== 'undefined') {
-          try {
-            const ro = new ResizeObserver(scheduleSize);
-            if (document.body) ro.observe(document.body);
-            if (document.documentElement) ro.observe(document.documentElement);
-          } catch(e) {}
-        }
-        if (typeof MutationObserver !== 'undefined' && document.body) {
-          try {
-            const mo = new MutationObserver(scheduleSize);
-            mo.observe(document.body, { childList: true, subtree: true });
-          } catch(e) {}
-        }
 
         window.addEventListener('wheel', function(e) {
           e.preventDefault();
@@ -455,21 +288,13 @@
           }, '*');
         }, true);
 
-        setTimeout(scheduleSize, 30);
-        setTimeout(scheduleSize, 120);
-        setTimeout(scheduleSize, 300);
-        setTimeout(scheduleSize, 600);
-        setTimeout(scheduleSize, 1200);
-        setTimeout(scheduleSize, 2500);
-        setTimeout(scheduleSize, 5000);
-        setTimeout(scheduleSize, 9000);
         // Auto-snapshot after chart likely rendered
         setTimeout(function() { postSnapshot('auto'); }, 900);
         setTimeout(function() { postSnapshot('auto'); }, 2200);
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0;box-sizing:border-box;width:100%;height:100%;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:8px!important}body:not(:has(#stage)),body:not(:has(#stage)) *{box-shadow:none!important}#stage{width:max-content;max-width:100%;height:max-content;max-height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%;height:100%;min-width:0;min-height:0;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:0!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;
@@ -497,9 +322,6 @@
     } else if (data.type === "drawva-widget-layout-size") {
       if (!fromParent || !Number.isFinite(data.width) || !Number.isFinite(data.height) || data.width < 80 || data.width > 3200 || data.height < 60 || data.height > 6000) return;
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-layout-size", width: Math.round(data.width), height: Math.round(data.height) }, "*");
-    } else if (data.type === "drawva-widget-resize-content") {
-      if (!fromInner || !Number.isFinite(data.width) || !Number.isFinite(data.height) || data.width < 80 || data.width > 3200 || data.height < 60 || data.height > 6000) return;
-      forward({ type: "drawva-widget-settled-size", width: Math.round(data.width), height: Math.round(data.height) });
     } else if (data.type === "drawva-widget-inner-wheel") {
       if (!fromInner) return;
       postAnywhere({
@@ -517,6 +339,7 @@
       postAnywhere({ type: "drawva-widget-pointerdown" });
     } else if (data.type === "drawva-widget-updated") {
       if (!fromInner) return;
+      forward({ type: "drawva-widget-updated" });
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: "updated" }, "*");
     } else if (data.type === "drawva-widget-snapshot-request") {
       if (!fromParent) return;

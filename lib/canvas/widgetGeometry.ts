@@ -46,18 +46,29 @@ export function widgetScale(item: Pick<WidgetGeometry, "w" | "h" | "contentW" | 
 
 /** Edge resizes change the inner viewport; corner resizes retain the widget's aspect ratio. */
 export function resizeWidgetGeometry(item: WidgetGeometry, mode: WidgetResizeMode, requestedW: number, requestedH: number): WidgetGeometry {
-  const base = normalizeWidgetGeometry(item);
-  const scale = widgetScale(base);
+  const start = normalizeWidgetGeometry(item);
+  const contentW = start.contentW || start.w;
+  const contentH = start.contentH || start.h;
+
   if (mode === "horizontal") {
-    const contentW = clamp(requestedW / scale, 80, MAX_CONTENT_W);
-    return normalizeWidgetGeometry({ ...base, w: contentW * scale, h: base.contentH * scale, contentW, resizeMode: mode, userResized: true });
+    const displayScale = start.h / contentH;
+    const w = clamp(requestedW, MIN_WIDGET_W, SIZE - start.x);
+    const nextContentW = clamp(w / displayScale, 80, MAX_CONTENT_W);
+    return normalizeWidgetGeometry({ ...start, w, contentW: nextContentW, resizeMode: mode, userResized: true });
   }
+
   if (mode === "vertical") {
-    const contentH = clamp(requestedH / scale, 60, MAX_CONTENT_H);
-    return normalizeWidgetGeometry({ ...base, w: base.contentW * scale, h: contentH * scale, contentH, resizeMode: mode, userResized: true });
+    const displayScale = start.w / contentW;
+    const h = clamp(requestedH, MIN_WIDGET_H, SIZE - start.y);
+    const nextContentH = clamp(h / displayScale, 60, MAX_CONTENT_H);
+    return normalizeWidgetGeometry({ ...start, h, contentH: nextContentH, resizeMode: mode, userResized: true });
   }
-  const factor = Math.max(requestedW / base.w, requestedH / base.h);
-  return normalizeWidgetGeometry({ ...base, w: base.w * factor, h: base.h * factor, resizeMode: "corner", userResized: true });
+
+  const minScale = Math.max(MIN_WIDGET_W / start.w, MIN_WIDGET_H / start.h);
+  const maxScale = Math.min((SIZE - start.x) / start.w, (SIZE - start.y) / start.h);
+  const requestedScale = Math.max(requestedW / start.w, requestedH / start.h);
+  const scale = Math.max(minScale, Math.min(maxScale, requestedScale));
+  return normalizeWidgetGeometry({ ...start, w: start.w * scale, h: start.h * scale, resizeMode: "corner", userResized: true });
 }
 
 /** A settled reflow updates content dimensions while preserving the selected uniform canvas scale. */

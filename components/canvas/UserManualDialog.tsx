@@ -23,6 +23,7 @@ import {
   CheckmarkBadge01Icon,
   EyeIcon,
   UserIcon,
+  AppWindowIcon,
 } from "@hugeicons/core-free-icons";
 
 interface UserManualDialogProps {
@@ -32,7 +33,7 @@ interface UserManualDialogProps {
 
 export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) {
   const [currentSlide, setCurrentSlide] = useState(0);
-  const totalSlides = 4;
+  const totalSlides = 6;
 
   const markManualAsCompleted = () => {
     try {
@@ -274,15 +275,103 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
                   <ol className="list-decimal list-inside space-y-1 text-muted-foreground text-[11px]">
                     <li>Click the <strong>AI Settings (⚙️)</strong> gear icon in the top header bar.</li>
                     <li>Enter your OpenAI-compatible Provider <strong>Base URL</strong> and <strong>API Key</strong>.</li>
-                    <li>Click <strong>Verify & Save</strong> to automatically list and select your vision model.</li>
+                    <li>Click <strong>Connect</strong> to automatically list and select your vision model.</li>
                   </ol>
                 </div>
               </div>
             </div>
           )}
 
-          {/* ── Slide 4: About Creator & Credits ───────────────────────── */}
+          {/* ── Slide 4: Plugins ────────────────────────────────────────── */}
           {currentSlide === 3 && (
+            <div className="space-y-4 animate-in fade-in-50 duration-200">
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <HugeiconsIcon icon={AppWindowIcon} className="size-5 text-primary" />
+                  Capability Plugins
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  Plugins are markdown capability cards that teach the AI new tricks — live data widgets, specialized diagrams, and more.
+                </p>
+              </div>
+
+              <div className="p-3 rounded-xl border border-border/70 bg-card/60 space-y-2">
+                <p className="text-xs font-semibold text-foreground">Where to manage them:</p>
+                <ol className="list-decimal list-inside space-y-1 text-muted-foreground text-[11px]">
+                  <li>Open <strong>AI Settings (⚙️)</strong> → <strong>Plugins</strong> tab.</li>
+                  <li>Toggle any plugin card <strong>ON</strong> or <strong>OFF</strong> — changes apply instantly to your next generation.</li>
+                </ol>
+              </div>
+
+              <div className="p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 space-y-1.5">
+                <div className="flex items-center gap-2 text-xs font-bold">
+                  <HugeiconsIcon icon={EyeIcon} className="size-4 shrink-0 text-amber-500" />
+                  <span>What disabling actually does:</span>
+                </div>
+                <ul className="text-[11px] leading-relaxed opacity-95 list-disc list-inside">
+                  <li>Disabled plugins are <strong>removed from the AI&apos;s prompt</strong> — the model never sees them, so it can&apos;t use them.</li>
+                  <li>Even if the model tries, the <strong>safety validator drops</strong> any command using a disabled plugin.</li>
+                  <li>Widgets already on your canvas are <strong>not affected</strong> — only future generations.</li>
+                  <li>Disabling <strong>everything</strong> = smaller prompt, faster &amp; cheaper replies, but no rich widgets.</li>
+                </ul>
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                💡 The AI can only <strong>request</strong> visuals — strict validators decide what actually draws on your canvas. Nothing sneaks past.
+              </p>
+            </div>
+          )}
+
+          {/* ── Slide 5: AI Widgets on Canvas ──────────────────────────── */}
+          {currentSlide === 4 && (
+            <div className="space-y-4 animate-in fade-in-50 duration-200">
+              <div className="space-y-1">
+                <h3 className="text-lg font-bold flex items-center gap-2">
+                  <HugeiconsIcon icon={SparklesIcon} className="size-5 text-primary" />
+                  Working with AI Widgets
+                </h3>
+                <p className="text-xs text-muted-foreground">
+                  When the AI generates a rich visual (diagram, chart, live feed), it lands on your canvas as an interactive widget.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {[
+                  {
+                    title: "✓ Accept / ✕ Discard",
+                    desc: "New widgets start as drafts. Accept them to keep, or discard to remove.",
+                  },
+                  {
+                    title: "⤢ Fullscreen & Resize",
+                    desc: "Expand a widget to fullscreen or drag its corner to resize — content reflows automatically.",
+                  },
+                  {
+                    title: "Copy Source",
+                    desc: "Grab the clean source (Mermaid code, Vega-Lite JSON, HTML...) with one click.",
+                  },
+                  {
+                    title: "Refine by Drawing",
+                    desc: "Draw or write near a widget and hit Ask AI — the AI reads it and updates that widget in place.",
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.title}
+                    className="p-3 rounded-xl border border-border/70 bg-card/60 space-y-1"
+                  >
+                    <p className="text-xs font-bold text-foreground">{item.title}</p>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">{item.desc}</p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                Supported formats: Mermaid, Graphviz DOT, Vega-Lite charts, SMILES molecules, BPMN workflows, Cytoscape networks, GeoJSON maps, LaTeX formulas &amp; plain HTML applets.
+              </p>
+            </div>
+          )}
+
+          {/* ── Slide 6: About Creator & Credits ───────────────────────── */}
+          {currentSlide === 5 && (
             <div className="space-y-4 animate-in fade-in-50 duration-200">
               <div className="space-y-1">
                 <h3 className="text-lg font-bold flex items-center gap-2">
