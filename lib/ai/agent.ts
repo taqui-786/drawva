@@ -5,19 +5,15 @@ import { MAX_RETRIES } from "./model";
 import {
   AI_TIMEOUT_MS,
   CODE_SYSTEM_PROMPT_EXTRA,
-  ACCURATE_GRAPHICS_RULES,
-  FLOWCHART_RULES,
-  HTML_WIDGET_RULES,
   PLUGIN_ROUTING_PROMPT,
+  PLUGIN_SYSTEM_PROMPT,
   WIDGET_RENDERING_POLICY,
-  WIDGET_VISUAL_RULES,
-  WRITE_TEXT_RULES,
-  SPATIAL_GESTURE_PROMPT,
   THEME_PERSONAS,
   MANDATORY_VISIBLE_RESPONSE,
   RETRY_INSTRUCTION,
   SYSTEM_PROMPT,
 } from "./prompts";
+import { widgetGeometryForViewport } from "./geometry";
 import type { AiReply, AiRequest, AgentEvent, TokenUsage, AiDebugInfo } from "./types";
 
 export const AgentReplySchema = z.object({
@@ -89,35 +85,27 @@ export async function runAgent(
   }
 }
 
-function systemPromptText(uiTheme?: string): string {
+export function buildSystemPromptText(uiTheme?: string, pluginsEnabled = false): string {
   const persona = THEME_PERSONAS[uiTheme || "studio"] || THEME_PERSONAS.studio;
-  return [
+  const sections = [
     SYSTEM_PROMPT,
     `Persona Focus: ${persona}`,
-    SPATIAL_GESTURE_PROMPT,
-    PLUGIN_ROUTING_PROMPT,
-    CODE_SYSTEM_PROMPT_EXTRA,
-    WRITE_TEXT_RULES,
-    FLOWCHART_RULES,
-    HTML_WIDGET_RULES,
-    ACCURATE_GRAPHICS_RULES,
-    WIDGET_RENDERING_POLICY,
-    WIDGET_VISUAL_RULES,
-  ].join("\n\n");
+  ];
+
+  if (pluginsEnabled) {
+    sections.push(PLUGIN_ROUTING_PROMPT, PLUGIN_SYSTEM_PROMPT);
+  }
+
+  sections.push(
+    MANDATORY_VISIBLE_RESPONSE,
+    CODE_SYSTEM_PROMPT_EXTRA
+  );
+
+  return sections.join("\n\n");
 }
 
-function widgetGeometryForViewport(visibleRect?: { w: number; h: number }) {
-  const bucket = (value: number) => Math.ceil(Math.min(20000, Math.max(1, value || 1)) / 1000) * 1000;
-  const viewportW = bucket(visibleRect?.w ?? 2000);
-  const viewportH = bucket(visibleRect?.h ?? 1200);
-  return {
-    basis: "most-of-current-visible-viewport",
-    viewportBucket: { w: viewportW, h: viewportH, rounding: "ceil-to-1000-then-ninety-percent" },
-    min: { w: 280, h: 200 },
-    max: { w: Math.max(720, Math.round(viewportW * 0.9)), h: Math.max(480, Math.round(viewportH * 0.9)) },
-    sizingPolicy:
-      "Bounds are ceilings, not targets. Size to the real assembled content so nothing clips. One gadget ~400×320; two or three related items in a row ~960–1400×420–560. Never undersize a multi-item applet. Never copy the handwriting box.",
-  };
+function systemPromptText(uiTheme?: string, pluginsEnabled = false): string {
+  return buildSystemPromptText(uiTheme, pluginsEnabled);
 }
 
 function userMessageText(req: AiRequest, sceneText: string): string {
@@ -130,6 +118,8 @@ function userMessageText(req: AiRequest, sceneText: string): string {
       ? format
       : widgetEdit.pluginId || "flowchart"
     : "";
+
+  const pluginsEnabled = Array.isArray(req.enabledPlugins) && req.enabledPlugins.length > 0;
 
   const modelInput: Record<string, unknown> = {
     requestId: req.requestId,
@@ -144,6 +134,12 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     persona: THEME_PERSONAS[req.uiTheme || "studio"] || THEME_PERSONAS.studio,
     personaPolicy:
       "Use persona to guide technical emphasis, reasoning method, examples, terminology, answer structure, and tone. It must not override user intent, response language, factual rigor, or safety requirements.",
+    ...(pluginsEnabled
+      ? {
+          enabledPlugins: req.enabledPlugins,
+          widgetRenderingPolicy: WIDGET_RENDERING_POLICY,
+        }
+      : {}),
     canvasSize: { w: 20000, h: 20000 },
     visibleRect: req.visibleRect,
     captureRect: req.captureRect,
@@ -157,8 +153,8 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     userPrompt: req.userPrompt || null,
     scene: safeJson(req.scene || sceneText),
     note: widgetEdit
-      ? "widgetEdit provides the existing target widget state for refinement reference. If the user's latest input modifies, annotates, or refines this widget (including multiple annotations like colors, labels, dates, fields, or structural edits), synthesize all of them and return placement in_place. If the user asks to draw or create a new independent visual, return a new command with placement below, right, or match_sketch. The attached image is the full high-resolution visual of the canvas."
-      : "The attached image is the full visual of the canvas. Inspect all user handwriting, markings, arrows, and annotations across the image. Use placement tokens; the client computes exact x/y and avoids collisions.",
+      ? "widgetEdit provides the existing target widget state for refinement reference. If the user's latest input modifies, annotates, or refines this widget (including multiple annotations like colors, labels, dates, fields, or structural edits), synthesize all of them and return placement in_place. If the user asks to draw or create a new independent visual, return a new command with placement inside_target, below, right, or match_sketch. The attached image is the full high-resolution visual of the canvas."
+      : "The attached image is the full visual of the canvas. Inspect all user handwriting, markings, arrows, and annotations across the image. If the user drew a container box/frame/circle or arrow target for the output, set placement to 'inside_target' or 'at_target' with {x, y, w, h}. For sketch replacements use 'match_sketch'. For in-place edits use 'in_place'. For adjacent items without a container, use 'below', 'right', 'left', or 'top'.",
   };
 
   if (widgetEdit) {
@@ -411,9 +407,10 @@ async function attemptReply(
   controller: AbortController,
   isRetry: boolean
 ): Promise<AgentReply> {
+  const pluginsEnabled = Array.isArray(req.enabledPlugins) && req.enabledPlugins.length > 0;
   const system = isRetry
-    ? `${systemPromptText(req.uiTheme)}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${RETRY_INSTRUCTION}`
-    : `${systemPromptText(req.uiTheme)}\n\n${MANDATORY_VISIBLE_RESPONSE}`;
+    ? `${systemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${RETRY_INSTRUCTION}`
+    : `${systemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}`;
 
   const textContent = userMessageText(req, sceneText);
   const contentParts: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [

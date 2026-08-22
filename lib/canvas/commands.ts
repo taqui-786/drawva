@@ -1,7 +1,12 @@
 import { SIZE } from "./constants";
+import {
+  fitWidgetGeometry as sanitizeWidgetGeometry,
+  DEFAULT_WIDGET_WIDTH,
+  DEFAULT_WIDGET_HEIGHT,
+} from "@/lib/ai/geometry";
 
 export const MAX_COMMANDS = 16;
-export const AI_TEXT_MAX_LENGTH = 1000;
+export const AI_TEXT_MAX_LENGTH = 800;
 export const MAX_WIDGET_HTML_LENGTH = 200_000;
 export const MAX_WIDGET_COPY_TEXT_LENGTH = 16_000;
 export const MAX_DIAGRAM_SOURCE_BYTES = 100 * 1024;
@@ -33,6 +38,8 @@ export interface WriteTextCommand {
   maxWidth: number;
   lineHeight: number;
   color: string;
+  placement?: string;
+  targetBox?: { x: number; y: number; w: number; h: number };
 }
 
 export interface DrawFormulaCommand {
@@ -42,6 +49,8 @@ export interface DrawFormulaCommand {
   latex: string;
   fontSize: number;
   color: string;
+  placement?: string;
+  targetBox?: { x: number; y: number; w: number; h: number };
 }
 
 export interface PlotFunctionCommand {
@@ -52,6 +61,8 @@ export interface PlotFunctionCommand {
   h: number;
   expression: string;
   color: string;
+  placement?: string;
+  targetBox?: { x: number; y: number; w: number; h: number };
 }
 
 export interface DrawPoint {
@@ -136,6 +147,7 @@ export interface CommandValidationContext {
   /** Original widget box — used in refinement mode to snap placement back to the existing widget. */
   widgetEditBox?: { x: number; y: number; w: number; h: number };
   sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>;
+  widgetGeometry?: { max?: { w?: number; h?: number } } | null;
 }
 
 const isFiniteNum = n as (v: unknown, min?: number, max?: number) => boolean;
@@ -313,8 +325,12 @@ export function placeAroundAnchor(
     const cleared = slideClear(raw, dir, blockers);
     if (!cleared || !staysOnSide(cleared, intended, dir)) continue;
     const visible = viewOverlapRatio(cleared, view);
+    // If the preferred primary side is valid and clears obstacles on the canvas,
+    // honor it directly without jumping to another side (infinite canvas allows panning).
+    if (dir === order[0]) {
+      return { x: cleared.x, y: cleared.y };
+    }
     const score = visible + (dir === order[0] ? 0.2 : 0) - (dir === "top" ? 0.05 : 0);
-    if (dir === order[0] && visible >= 0.15) return { x: cleared.x, y: cleared.y };
     if (score > bestScore) {
       bestScore = score;
       best = cleared;
@@ -347,7 +363,16 @@ function occupancy(
 }
 
 function inferTextPlacement(placement: string, text: string): string {
-  if (placement === "right" || placement === "left" || placement === "top" || placement === "below") {
+  if (
+    placement === "right" ||
+    placement === "left" ||
+    placement === "top" ||
+    placement === "below" ||
+    placement === "inside_target" ||
+    placement === "target_box" ||
+    placement === "at_target" ||
+    placement === "match_sketch"
+  ) {
     return placement;
   }
   const chars = Array.from(String(text).replace(/\s/g, "")).length;
@@ -360,8 +385,33 @@ function placeContent(
   sample: string,
   w: number,
   h: number,
-  ctx: CommandValidationContext
+  ctx: CommandValidationContext,
+  explicitCoord?: { x?: unknown; y?: unknown; targetBox?: unknown }
 ): { x: number; y: number } {
+  const targetBox = (explicitCoord?.targetBox && typeof explicitCoord.targetBox === "object"
+    ? explicitCoord.targetBox
+    : null) as Record<string, unknown> | null;
+  const rawX = Number(targetBox && typeof targetBox.x === "number" ? targetBox.x : explicitCoord?.x);
+  const rawY = Number(targetBox && typeof targetBox.y === "number" ? targetBox.y : explicitCoord?.y);
+  const isTargetPlacement =
+    placement === "inside_target" ||
+    placement === "target_box" ||
+    placement === "at_target" ||
+    placement === "match_sketch" ||
+    placement === "custom";
+  const isRelativeSide =
+    placement === "below" ||
+    placement === "right" ||
+    placement === "left" ||
+    placement === "top";
+
+  if (Number.isFinite(rawX) && Number.isFinite(rawY) && (isTargetPlacement || !isRelativeSide)) {
+    return {
+      x: clampNum(rawX, 0, SIZE - w),
+      y: clampNum(rawY, 0, SIZE - h),
+    };
+  }
+
   const blockers = occupancy(ctx.changedBox, ctx.sceneItems, ctx.visibleRect);
   const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
   if (anchor) {
@@ -379,13 +429,6 @@ function placeContent(
   if (ctx.visibleRect) return placeInVisible(ctx.visibleRect, w, h, blockers);
   return { x: 1000, y: 1000 };
 }
-
-const MIN_WIDGET_WIDTH = 240;
-const MIN_WIDGET_HEIGHT = 160;
-const DEFAULT_WIDGET_WIDTH = 720;
-const DEFAULT_WIDGET_HEIGHT = 480;
-const MAX_WIDGET_WIDTH = 2800;
-const MAX_WIDGET_HEIGHT = 4500;
 
 function placementAnchor(
   changedBox: Box | undefined,
@@ -424,41 +467,54 @@ function uniqueSceneWidgetByTitle(
 }
 
 export function fitWidgetGeometry(
-  cmd: { x?: unknown; y?: unknown; w?: unknown; h?: unknown; placement?: unknown; title?: unknown },
+  cmd: {
+    x?: unknown;
+    y?: unknown;
+    w?: unknown;
+    h?: unknown;
+    placement?: unknown;
+    title?: unknown;
+    targetBox?: unknown;
+  },
   visibleRect?: Box,
   changedBox?: Box,
   reposition = true,
   widgetEditBox?: Box,
-  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }>
+  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }>,
+  widgetGeometry?: { max?: { w?: number; h?: number } } | null
 ): Box | null {
   const placement = String(cmd.placement || "").toLowerCase();
-  const newItemSide =
+  const targetBox = (cmd.targetBox && typeof cmd.targetBox === "object"
+    ? cmd.targetBox
+    : null) as Record<string, unknown> | null;
+
+  const rawCmdX = targetBox && typeof targetBox.x === "number" ? targetBox.x : cmd.x;
+  const rawCmdY = targetBox && typeof targetBox.y === "number" ? targetBox.y : cmd.y;
+  const rawCmdW = targetBox && typeof targetBox.w === "number" ? targetBox.w : cmd.w;
+  const rawCmdH = targetBox && typeof targetBox.h === "number" ? targetBox.h : cmd.h;
+
+  const hasExplicitCoords = Number.isFinite(Number(rawCmdX)) && Number.isFinite(Number(rawCmdY));
+  const isRelativeSide =
     placement === "below" ||
     placement === "right" ||
     placement === "left" ||
     placement === "top" ||
-    placement === "match_sketch";
-  // Freeze to the existing widget ONLY for a real in-place refine.
-  // widgetEdit on the request is context — a nearby/selected widget must not
-  // steal a new independent generation (placement "below"/"right"/…).
-  // keepPosition (explicit Refine button) still snaps when the model omits a side.
-  const snapInPlace = placement === "in_place" || (!reposition && !newItemSide);
+    placement === "match_sketch" ||
+    placement === "inside_target" ||
+    placement === "target_box";
 
   // Refinement mode: snap to the widget the model actually edited.
-  // widgetEditBox is a hint — a stale/off-screen neighbor must not steal
-  // in_place when the command title uniquely names a different scene widget.
+  const snapInPlace = placement === "in_place" || (!reposition && !isRelativeSide && !hasExplicitCoords);
   if (snapInPlace) {
-    let targetBox = widgetEditBox;
+    let target = widgetEditBox;
     const widgetItems = Array.isArray(sceneItems)
       ? sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html")
       : [];
     const titled = uniqueSceneWidgetByTitle(cmd.title, widgetItems);
-    // reposition=true is auto/annotation. Explicit Refine (reposition=false)
-    // keeps the user-chosen widget even if the title disagrees.
-    if (titled && (reposition || !targetBox || targetBox.w <= 0 || targetBox.h <= 0)) {
-      targetBox = titled;
+    if (titled && (reposition || !target || target.w <= 0 || target.h <= 0)) {
+      target = titled;
     }
-    if ((!targetBox || targetBox.w <= 0 || targetBox.h <= 0) && widgetItems.length > 0) {
+    if ((!target || target.w <= 0 || target.h <= 0) && widgetItems.length > 0) {
       if (changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
         let closest = widgetItems[0];
         let minD = Infinity;
@@ -472,42 +528,47 @@ export function fitWidgetGeometry(
             closest = wItem;
           }
         }
-        targetBox = closest;
+        target = closest;
       } else {
-        targetBox = widgetItems[0];
+        target = widgetItems[0];
       }
     }
-    if (targetBox && targetBox.w > 0 && targetBox.h > 0) {
-      return {
-        x: Math.round(targetBox.x),
-        y: Math.round(targetBox.y),
-        w: Math.round(targetBox.w),
-        h: Math.round(targetBox.h),
-      };
+    if (target && target.w > 0 && target.h > 0) {
+      return sanitizeWidgetGeometry(
+        {
+          x: Math.round(target.x),
+          y: Math.round(target.y),
+          w: Math.round(target.w),
+          h: Math.round(target.h),
+        },
+        widgetGeometry
+      );
     }
   }
 
-  const viewportW = Math.max(visibleRect?.w ?? 2000, 1);
-  const viewportH = Math.max(visibleRect?.h ?? 1200, 1);
-  const maxW = Math.min(MAX_WIDGET_WIDTH, Math.max(1800, Math.round(viewportW * 0.95)));
-  const maxH = Math.min(MAX_WIDGET_HEIGHT, Math.max(1400, Math.round(viewportH * 0.95)));
-
-  let rawW = Number(cmd.w);
-  let rawH = Number(cmd.h);
+  let rawW = Number(rawCmdW);
+  let rawH = Number(rawCmdH);
 
   if (!Number.isFinite(rawW) || rawW <= 0) rawW = DEFAULT_WIDGET_WIDTH;
   if (!Number.isFinite(rawH) || rawH <= 0) rawH = DEFAULT_WIDGET_HEIGHT;
 
-  if (rawW < MIN_WIDGET_WIDTH || rawH < MIN_WIDGET_HEIGHT) {
-    const scale = Math.max(MIN_WIDGET_WIDTH / Math.max(1, rawW), MIN_WIDGET_HEIGHT / Math.max(1, rawH));
-    rawW = Math.ceil(rawW * scale);
-    rawH = Math.ceil(rawH * scale);
+  if (hasExplicitCoords) {
+    return sanitizeWidgetGeometry(
+      {
+        x: Number(rawCmdX),
+        y: Number(rawCmdY),
+        w: rawW,
+        h: rawH,
+      },
+      widgetGeometry
+    );
   }
 
   const sketchW = changedBox?.w ?? 0;
   const sketchH = changedBox?.h ?? 0;
   const anchor = placementAnchor(changedBox, visibleRect);
-  const matchSketch = placement === "match_sketch" || placement === "in_place";
+  const matchSketch = placement === "match_sketch" || placement === "inside_target" || placement === "target_box";
+
   if (!matchSketch && anchor && Math.abs(rawW - sketchW) < 48 && Math.abs(rawH - sketchH) < 48) {
     // Model copied the handwriting box instead of sizing the applet.
     rawW = DEFAULT_WIDGET_WIDTH;
@@ -518,15 +579,15 @@ export function fitWidgetGeometry(
     rawH = Math.max(rawH, Math.round(sketchH));
   }
 
-  const w = clampNum(rawW, MIN_WIDGET_WIDTH, maxW);
-  const h = clampNum(rawH, MIN_WIDGET_HEIGHT, maxH);
+  const w = rawW;
+  const h = rawH;
 
   const blockers = occupancy(changedBox, sceneItems, visibleRect);
 
   let x: number;
   let y: number;
 
-  if (placement === "match_sketch" && anchor && changedBox) {
+  if (matchSketch && anchor && changedBox) {
     x = Math.round(changedBox.x);
     y = Math.round(changedBox.y);
   } else if (anchor && changedBox) {
@@ -539,14 +600,11 @@ export function fitWidgetGeometry(
     x = near.x;
     y = near.y;
   } else {
-    x = clampNum(Number(cmd.x), 0, SIZE - w);
-    y = clampNum(Number(cmd.y), 0, SIZE - h);
+    x = 1000;
+    y = 1000;
   }
 
-  x = Math.max(0, Math.min(SIZE - w, Math.round(x)));
-  y = Math.max(0, Math.min(SIZE - h, Math.round(y)));
-
-  return { x, y, w, h };
+  return sanitizeWidgetGeometry({ x, y, w, h }, widgetGeometry);
 }
 
 export function validateCommand(
@@ -589,7 +647,7 @@ export function validateCommand(
 
       const lines = Math.min(8, Math.max(2, text.split("\n").length + 1));
       const blockH = Math.round(fontSize * lineHeight * lines);
-      const near = placeContent(placement, text, maxWidth, blockH, ctx);
+      const near = placeContent(placement, text, maxWidth, blockH, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
       let x = near.x;
       let y = near.y;
 
@@ -614,7 +672,7 @@ export function validateCommand(
       const estimatedWidth = Math.min(5000, Math.max(fontSize * 2, latex.length * fontSize * 0.72));
 
       const formulaH = Math.round(fontSize * 1.8);
-      const near = placeContent(placement, latex, estimatedWidth, formulaH, ctx);
+      const near = placeContent(placement, latex, estimatedWidth, formulaH, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
       let x = near.x;
       let y = near.y;
 
@@ -634,7 +692,7 @@ export function validateCommand(
       if (typeof c.expression !== "string" || !(c.expression as string).trim() || (c.expression as string).length > 180) {
         return fail("plot_function.bad-expr");
       }
-      const geom = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
+      const geom = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       if (!geom) return fail("plot_function.bad-geom");
 
       return {
@@ -649,15 +707,14 @@ export function validateCommand(
     }
     case "html_widget": {
       const pluginId = typeof c.pluginId === "string" && c.pluginId.trim() ? c.pluginId.trim() : "general";
+      if (ctx.plugins && !ctx.plugins.has(pluginId)) {
+        return fail("html_widget.plugin-disabled");
+      }
       const allowCopy = pluginId !== "image-search";
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim() : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim() : "";
-      // Standalone HTML applets sit beside/below ink — never on top of the handwriting.
-      if (placement === "match_sketch") {
-        c.placement = "below";
-      }
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       if (
         ctx.widgetSlots <= 0 ||
         typeof c.title !== "string" ||
@@ -698,7 +755,10 @@ export function validateCommand(
       return out;
     }
     case "diagram_source": {
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems);
+      if (ctx.plugins && !ctx.plugins.has("flowchart")) {
+        return fail("diagram_source.plugin-disabled");
+      }
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       const rawFormat = typeof c.sourceFormat === "string" ? c.sourceFormat : "";
       const rawSource = typeof c.source === "string" ? c.source : "";
       const rawTitle = typeof c.title === "string" ? c.title : "";

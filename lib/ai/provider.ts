@@ -93,6 +93,30 @@ const PROVIDER_KEY = "drawva.aiProvider";
 const MODELS_KEY = "drawva.aiModels";
 const MODEL_KEY = "drawva.aiModel";
 const TOKEN_USAGE_KEY = "drawva.tokenUsage";
+const PLUGINS_KEY = "drawva.enabledPlugins";
+
+export const DEFAULT_ENABLED_PLUGINS = [
+  "general",
+  "flowchart",
+  "weather",
+  "stocks",
+  "earthquakes",
+  "exchange-rates",
+  "github-pulse",
+  "image-search",
+  "natural-events",
+  "space-weather",
+  "tech-news",
+];
+
+export function getEnabledPlugins(): string[] {
+  return read<string[]>(PLUGINS_KEY, DEFAULT_ENABLED_PLUGINS);
+}
+
+export function setEnabledPlugins(pluginIds: string[]): void {
+  write(PLUGINS_KEY, Array.isArray(pluginIds) ? pluginIds : DEFAULT_ENABLED_PLUGINS);
+  notify();
+}
 
 function read<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;

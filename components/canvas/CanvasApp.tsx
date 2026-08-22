@@ -37,7 +37,7 @@ import { BoardHistory } from "@/lib/canvas/history";
 import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
-import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel, addTokenUsageRecord } from "@/lib/ai/provider";
+import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel, addTokenUsageRecord, getEnabledPlugins } from "@/lib/ai/provider";
 import { Textarea } from "@/components/ui/textarea";
 import {
   SyncManager,
@@ -527,6 +527,7 @@ export function CanvasApp() {
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model,
+      enabledPluginIds: getEnabledPlugins(),
     };
 
     const applyReply = async (data: AiReply & { rejected?: string[] }) => {
@@ -1958,7 +1959,6 @@ export function CanvasApp() {
         syncPeerCount={syncState.peerCount}
         onOpenConnect={() => setConnectOpen(true)}
         onOpenLogs={() => setLogsOpen(true)}
-        hasLogs={!!latestLog}
         onOpenManual={() => setManualOpen(true)}
       />
 

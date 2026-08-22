@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Card,
   CardContent,
@@ -38,6 +39,7 @@ import {
   EyeOffIcon,
   FlashIcon,
   CloudServerIcon,
+  AppWindowIcon,
   Analytics01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
@@ -45,6 +47,8 @@ import {
   getProviderConfig,
   getCachedModels,
   getActiveModel,
+  getEnabledPlugins,
+  setEnabledPlugins,
   setProviderConfig,
   setCachedModels,
   setActiveModel,
@@ -56,6 +60,7 @@ import {
   type CustomModel,
   type TokenUsageRecord,
 } from "@/lib/ai/provider";
+import type { PluginMetadata } from "@/lib/plugins/registry";
 
 interface SettingsDialogProps {
   open: boolean;
@@ -164,7 +169,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         <Tabs defaultValue="provider" className="flex flex-col gap-4">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="provider" className="gap-2">
               <HugeiconsIcon icon={FlashIcon} />
               <span>Provider</span>
@@ -172,6 +177,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <TabsTrigger value="models" className="gap-2">
               <HugeiconsIcon icon={CloudServerIcon} />
               <span>Models</span>
+            </TabsTrigger>
+            <TabsTrigger value="plugins" className="gap-2">
+              <HugeiconsIcon icon={AppWindowIcon} />
+              <span>Plugins</span>
             </TabsTrigger>
             <TabsTrigger value="usage" className="gap-2">
               <HugeiconsIcon icon={Analytics01Icon} />
@@ -192,6 +201,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <ModelsTabContent
               onModelChanged={(model) => setActiveModelName(model)}
             />
+          </TabsContent>
+
+          <TabsContent value="plugins" className="flex flex-col gap-4">
+            <PluginsTabContent />
           </TabsContent>
 
           <TabsContent value="usage" className="flex flex-col gap-4">
@@ -752,6 +765,114 @@ function UsageTabContent() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function PluginsTabContent() {
+  const [plugins, setPlugins] = useState<PluginMetadata[]>([]);
+  const [enabledIds, setEnabledIds] = useState<string[]>(() => getEnabledPlugins());
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    fetch("/api/plugins")
+      .then((res) => res.json())
+      .then((data) => {
+        if (mounted && Array.isArray(data?.plugins)) {
+          setPlugins(data.plugins);
+        }
+      })
+      .catch((err) => {
+        console.error("Failed to load plugins list:", err);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleToggle = (id: string, checked: boolean) => {
+    const next = checked
+      ? Array.from(new Set([...enabledIds, id]))
+      : enabledIds.filter((item) => item !== id);
+    setEnabledIds(next);
+    setEnabledPlugins(next);
+    toast.success(`Plugin ${checked ? "enabled" : "disabled"}.`);
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Capability Plugins</CardTitle>
+              <CardDescription>
+                Enable or disable dynamic data widgets, live feeds, and specialized diagram formats.
+              </CardDescription>
+            </div>
+            <Badge variant="secondary" className="text-xs font-mono">
+              {enabledIds.length} / {plugins.length} active
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <div className="flex items-center justify-center py-8 text-sm text-muted-foreground gap-2">
+              <HugeiconsIcon icon={Loading02Icon} className="animate-spin size-4" />
+              <span>Loading capability cards...</span>
+            </div>
+          ) : plugins.length === 0 ? (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              No plugins found in catalog.
+            </div>
+          ) : (
+            <div className="flex flex-col gap-3 max-h-[380px] overflow-y-auto pr-1">
+              {plugins.map((plugin) => {
+                const isEnabled = enabledIds.includes(plugin.id);
+                return (
+                  <div
+                    key={plugin.id}
+                    className="flex items-start justify-between p-3 rounded-lg border bg-card/60 hover:bg-card/90 transition-colors gap-3"
+                  >
+                    <div className="flex flex-col gap-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-sm">{plugin.name}</span>
+                        <Badge variant="outline" className="text-[10px] uppercase font-mono px-1.5 py-0">
+                          {plugin.category}
+                        </Badge>
+                        <span className="text-[10px] font-mono text-muted-foreground">
+                          v{plugin.version}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {plugin.description}
+                      </p>
+                      <div className="flex items-center gap-3 text-[11px] text-muted-foreground font-mono mt-1">
+                        <span>Source: {plugin.source}</span>
+                        {plugin.connect.length > 0 && (
+                          <span className="truncate max-w-[200px]" title={plugin.connect.join(", ")}>
+                            Endpoints: {plugin.connect.length}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="pt-0.5 shrink-0">
+                      <Switch
+                        checked={isEnabled}
+                        onCheckedChange={(checked) => handleToggle(plugin.id, Boolean(checked))}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>

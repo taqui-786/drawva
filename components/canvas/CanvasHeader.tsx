@@ -192,7 +192,6 @@ export function CanvasHeader({
   syncPeerCount,
   onOpenConnect,
   onOpenLogs,
-  hasLogs,
   onOpenManual,
 }: {
   mode: CanvasMode;
@@ -228,7 +227,6 @@ export function CanvasHeader({
   syncPeerCount: number;
   onOpenConnect: () => void;
   onOpenLogs?: () => void;
-  hasLogs?: boolean;
   onOpenManual?: () => void;
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -725,34 +723,6 @@ export function CanvasHeader({
                   <span>Ask AI</span>
                 </Button>
               )}
-
-              {/* {onOpenLogs && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="sm"
-                        variant={hasLogs ? "outline" : "ghost"}
-                        onClick={onOpenLogs}
-                        className="gap-1 px-2 text-xs h-8"
-                        aria-label="AI generation logs"
-                      >
-                        <HugeiconsIcon
-                          icon={TerminalIcon}
-                          className="size-3.5 text-primary"
-                        />
-                        <span className="hidden sm:inline">Logs</span>
-                        {hasLogs && (
-                          <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                        )}
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>
-                    AI Generation Logs & Prompt Inspector
-                  </TooltipContent>
-                </Tooltip>
-              )} */}
 
               <Tooltip>
                 <TooltipTrigger

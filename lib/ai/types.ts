@@ -20,6 +20,9 @@ export type AiIntent =
 
 export type PlacementMode =
   | "in_place"
+  | "inside_target"
+  | "target_box"
+  | "at_target"
   | "match_sketch"
   | "below"
   | "right"
@@ -57,6 +60,27 @@ export interface WidgetEditContext {
   box: AiBox;
 }
 
+export interface PluginMetadata {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  category: string;
+  source: string;
+  connect: string[];
+  recommendedRefreshSeconds: number;
+  enabledByDefault?: boolean;
+}
+
+export interface PluginDescriptor {
+  id: string;
+  name: string;
+  version: string;
+  connect: string[];
+  recommendedRefreshSeconds: number;
+  document: string;
+}
+
 export interface AiRequest {
   requestId: string;
   atlasImage: string;
@@ -79,6 +103,8 @@ export interface AiRequest {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  enabledPluginIds?: string[];
+  enabledPlugins?: PluginDescriptor[];
 }
 
 export interface TokenUsage {

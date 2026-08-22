@@ -2,9 +2,11 @@ import { NextResponse } from "next/server";
 import { runAgent } from "@/lib/ai/agent";
 import { createChatModel } from "@/lib/ai/model";
 import { AI_TIMEOUT_MS, MAX_BODY_BYTES, MAX_COMMANDS, MAX_DIAGRAM_BYTES, MAX_HTML_BYTES } from "@/lib/ai/prompts";
+import { widgetGeometryForViewport } from "@/lib/ai/geometry";
 import { validateCommands } from "@/lib/canvas/commands";
 import { SIZE } from "@/lib/canvas/constants";
-import type { AiRequest, AgentEvent } from "@/lib/ai/types";
+import { getEnabledPluginDescriptors } from "@/lib/plugins/registry";
+import type { AiRequest, AgentEvent, PluginDescriptor } from "@/lib/ai/types";
 import type { ProviderType } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
@@ -49,18 +51,27 @@ function validateReply(
   changedBox: { x: number; y: number; w: number; h: number },
   keepPosition = false,
   widgetEditBox?: { x: number; y: number; w: number; h: number },
-  sceneText?: string
+  sceneText?: string,
+  enabledPlugins: PluginDescriptor[] = []
 ) {
+  const pluginIds = new Set(enabledPlugins.map((p) => p.id));
+  // Always ensure general is available if no plugins specified
+  if (pluginIds.size === 0) {
+    pluginIds.add("general");
+    pluginIds.add("flowchart");
+  }
+  const widgetGeometry = widgetGeometryForViewport(visibleRect);
   const ctx = {
     aiColor: "#2679b8",
     scale: 1.5,
     widgetSlots: 8,
-    plugins: new Set(["general", "flowchart"]),
+    plugins: pluginIds,
     visibleRect,
     changedBox,
     keepPosition,
     widgetEditBox,
     sceneItems: parseSceneItems(sceneText),
+    widgetGeometry,
   };
   const { commands, rejected } = validateCommands(reply.commands, ctx);
   return {
@@ -123,6 +134,9 @@ export async function POST(req: Request) {
       ? (p.latestInput as import("@/lib/ai/types").LatestInputMeta)
       : undefined;
 
+  const enabledPluginIds = Array.isArray(p.enabledPluginIds) ? p.enabledPluginIds : undefined;
+  const enabledPlugins = getEnabledPluginDescriptors(enabledPluginIds);
+
   const aiRequest: AiRequest = {
     requestId,
     atlasImage,
@@ -146,6 +160,8 @@ export async function POST(req: Request) {
     baseUrl,
     apiKey,
     model: modelId,
+    enabledPluginIds,
+    enabledPlugins,
   };
 
   const model = createChatModel({ providerType, baseUrl, apiKey, model: modelId, timeoutMs: AI_TIMEOUT_MS });
@@ -157,11 +173,11 @@ export async function POST(req: Request) {
   const keepPosition = p.keepPosition === true;
 
   if (p.stream === true) {
-    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, keepPosition, widgetEdit?.box);
+    return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, keepPosition, widgetEdit?.box, enabledPlugins);
   }
 
   const reply = await runAgent(aiRequest, sceneText, model);
-  return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText));
+  return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText, enabledPlugins));
 }
 
 function streamReply(
@@ -171,7 +187,8 @@ function streamReply(
   visibleRect: { x: number; y: number; w: number; h: number },
   changedBox: { x: number; y: number; w: number; h: number },
   keepPosition = false,
-  widgetEditBox?: { x: number; y: number; w: number; h: number }
+  widgetEditBox?: { x: number; y: number; w: number; h: number },
+  enabledPlugins: PluginDescriptor[] = []
 ): NextResponse {
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -192,7 +209,7 @@ function streamReply(
       };
       try {
         const reply = await runAgent(aiRequest, sceneText, model, { onEvent });
-        const payload = validateReply(reply, visibleRect, changedBox, keepPosition, widgetEditBox, sceneText);
+        const payload = validateReply(reply, visibleRect, changedBox, keepPosition, widgetEditBox, sceneText, enabledPlugins);
         send("result", payload);
       } catch (err) {
         const aborted = err instanceof Error && err.name === "AbortError";
