@@ -19,12 +19,24 @@ export interface EnginePalette {
   border: string;
 }
 
-const DEFAULT_PALETTE: EnginePalette = {
-  outside: "#1c1c1e",
-  paper: "#ffffff",
-  paperGrid: "#e8e8ea",
-  border: "#3a3a3c",
-};
+export function getThemePalette(isDark = false): EnginePalette {
+  if (isDark) {
+    return {
+      outside: "#090a0f",
+      paper: "#12141a",
+      paperGrid: "rgba(255, 255, 255, 0.06)",
+      border: "#232733",
+    };
+  }
+  return {
+    outside: "#eef0f3",
+    paper: "#ffffff",
+    paperGrid: "rgba(28, 31, 39, 0.07)",
+    border: "#d9dde5",
+  };
+}
+
+const DEFAULT_PALETTE: EnginePalette = getThemePalette(false);
 
 type FrameListener = (engine: CanvasEngine) => void;
 
@@ -53,6 +65,16 @@ export class CanvasEngine {
 
   onTileWrite: ((tx: number, ty: number) => void) | null = null;
   onStrokeSegment: ((a: Point, b: Point, opts: { erase: boolean; size: number; color: string }) => void) | null = null;
+
+  setPalette(palette: Partial<EnginePalette>): void {
+    this.palette = { ...this.palette, ...palette };
+    this.requestRender();
+  }
+
+  syncTheme(isDark: boolean): void {
+    this.palette = getThemePalette(isDark);
+    this.requestRender();
+  }
 
   constructor(root: HTMLDivElement) {
     this.root = root;

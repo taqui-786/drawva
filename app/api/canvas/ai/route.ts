@@ -52,7 +52,8 @@ function validateReply(
   keepPosition = false,
   widgetEditBox?: { x: number; y: number; w: number; h: number },
   sceneText?: string,
-  enabledPlugins: PluginDescriptor[] = []
+  enabledPlugins: PluginDescriptor[] = [],
+  imageScale?: number
 ) {
   const pluginIds = new Set(enabledPlugins.map((p) => p.id));
   // General HTML is mandatory and always enabled
@@ -61,9 +62,10 @@ function validateReply(
     pluginIds.add("flowchart");
   }
   const widgetGeometry = widgetGeometryForViewport(visibleRect);
+  const scale = typeof imageScale === "number" && imageScale > 0 ? imageScale : 0.25;
   const ctx = {
     aiColor: "#2679b8",
-    scale: 1.5,
+    scale,
     widgetSlots: 8,
     plugins: pluginIds,
     visibleRect,
@@ -177,7 +179,7 @@ export async function POST(req: Request) {
   }
 
   const reply = await runAgent(aiRequest, sceneText, model);
-  return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText, enabledPlugins));
+  return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText, enabledPlugins, aiRequest.imageScale));
 }
 
 function streamReply(
@@ -209,7 +211,7 @@ function streamReply(
       };
       try {
         const reply = await runAgent(aiRequest, sceneText, model, { onEvent });
-        const payload = validateReply(reply, visibleRect, changedBox, keepPosition, widgetEditBox, sceneText, enabledPlugins);
+        const payload = validateReply(reply, visibleRect, changedBox, keepPosition, widgetEditBox, sceneText, enabledPlugins, aiRequest.imageScale);
         send("result", payload);
       } catch (err) {
         const aborted = err instanceof Error && err.name === "AbortError";

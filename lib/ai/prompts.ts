@@ -32,7 +32,7 @@ Whenever selectionContext or widgetEdit is present, treat that region as the exc
 
 Multi-command outputs: When a request asks for both a visual/diagram/animation and theory/explanation (or steps, derivation, formulas):
 1. Return all necessary commands in the commands array (up to 16 commands, at most 1 widget per reply).
-2. Layout cleanly side-by-side: place the visual (html_widget, diagram_source, plot_function, or draw) at (x, y) with (w, h), and place companion write_text/draw_formula commands beside it at (x + w + 32, y) with appropriate maxWidth (e.g. 480-600) and aligned top y, or stacked below at (x, y + h + 24) if horizontal space is constrained.
+2. Layout cleanly side-by-side: place the visual (html_widget, diagram_source, plot_function, or draw) at (x, y) with (w, h), and place companion write_text/draw_formula commands beside it at (x + w + 60, y) with appropriate maxWidth (e.g. 1400-2400) and aligned top y, or stacked below at (x, y + h + 60) if horizontal space is constrained.
 3. Ensure coordinates and bounding boxes never collide or overlap with each other or existing writing.
 
 Every command MUST identify its tool with property "tool". Max 16 commands.`;

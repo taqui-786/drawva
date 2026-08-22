@@ -1,13 +1,13 @@
 export const CANVAS_SIZE = 20000;
-export const MIN_WIDGET_WIDTH = 160;
-export const DEFAULT_WIDGET_WIDTH = 720;
-export const MODEL_MAX_WIDGET_WIDTH = 2400;
-export const MAX_WIDGET_WIDTH = 4000;
-export const MIN_WIDGET_HEIGHT = 120;
-export const DEFAULT_WIDGET_HEIGHT = 480;
-export const MODEL_MAX_WIDGET_HEIGHT = 1600;
-export const MAX_WIDGET_HEIGHT = 4000;
-export const MAX_WIDGET_AREA = 16_000_000;
+export const MIN_WIDGET_WIDTH = 300;
+export const DEFAULT_WIDGET_WIDTH = 2400;
+export const MODEL_MAX_WIDGET_WIDTH = 5000;
+export const MAX_WIDGET_WIDTH = 10000;
+export const MIN_WIDGET_HEIGHT = 200;
+export const DEFAULT_WIDGET_HEIGHT = 1400;
+export const MODEL_MAX_WIDGET_HEIGHT = 5000;
+export const MAX_WIDGET_HEIGHT = 10000;
+export const MAX_WIDGET_AREA = 40_000_000;
 
 export interface WidgetGeometrySpec {
   basis: string;
@@ -18,19 +18,21 @@ export interface WidgetGeometrySpec {
 }
 
 export function widgetGeometryForViewport(visibleRect?: { w?: number; h?: number } | null): WidgetGeometrySpec {
-  const vw = Math.max(MIN_WIDGET_WIDTH, Math.min(CANVAS_SIZE, Math.round(visibleRect?.w || 1920)));
-  const vh = Math.max(MIN_WIDGET_HEIGHT, Math.min(CANVAS_SIZE, Math.round(visibleRect?.h || 1080)));
-
-  const maxW = Math.max(MIN_WIDGET_WIDTH, Math.min(MODEL_MAX_WIDGET_WIDTH, Math.round(vw * 0.75)));
-  const maxH = Math.max(MIN_WIDGET_HEIGHT, Math.min(MODEL_MAX_WIDGET_HEIGHT, Math.round(vh * 0.75)));
+  const bucket = (value: number | undefined) =>
+    Math.ceil(Math.min(CANVAS_SIZE, Math.max(1, Number(value) || 1)) / 1000) * 1000;
+  const viewportW = bucket(visibleRect?.w);
+  const viewportH = bucket(visibleRect?.h);
 
   return {
-    basis: "ink-and-viewport-scale",
-    viewportBucket: { w: vw, h: vh, rounding: "exact" },
+    basis: "half-of-current-visible-viewport",
+    viewportBucket: { w: viewportW, h: viewportH, rounding: "ceil-to-1000-before-halving" },
     min: { w: MIN_WIDGET_WIDTH, h: MIN_WIDGET_HEIGHT },
-    max: { w: maxW, h: maxH },
+    max: {
+      w: Math.max(MIN_WIDGET_WIDTH, Math.round(viewportW / 2)),
+      h: Math.max(MIN_WIDGET_HEIGHT, Math.round(viewportH / 2)),
+    },
     sizingPolicy:
-      "Size the widget to tightly frame its content or fit cleanly inside any drawn container box/circle. Avoid creating empty padding or excessive dimensions.",
+      "The bounds are not targets. Choose dimensions appropriate to content volume, aspect ratio, layout, and readable typography; neither maximize nor minimize by default.",
   };
 }
 

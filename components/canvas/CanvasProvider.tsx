@@ -35,6 +35,8 @@ export function CanvasProvider({ children }: { children: React.ReactNode }) {
     engineRef.current = null;
     if (el) {
       const instance = new CanvasEngine(el);
+      const isDark = document.documentElement.classList.contains("dark");
+      instance.syncTheme(isDark);
       engineRef.current = instance;
       setEngine(instance);
     } else {
@@ -43,7 +45,14 @@ export function CanvasProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const observer = new MutationObserver(() => {
+      const isDark = document.documentElement.classList.contains("dark");
+      engineRef.current?.syncTheme(isDark);
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+
     return () => {
+      observer.disconnect();
       engineRef.current?.destroy();
       engineRef.current = null;
     };

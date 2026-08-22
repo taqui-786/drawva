@@ -157,16 +157,17 @@ function matchedFontSize(
   scale: number,
   changedBoxHeight?: number
 ): number {
-  const screenReadable = Math.round(28 / Math.max(0.05, Math.min(3, scale)));
+  const effectiveScale = Number.isFinite(scale) && scale > 0 ? scale : 0.25;
+  const screenReadable = Math.round(42 / Math.max(0.03, Math.min(3, effectiveScale)));
   let size = Number(value);
   if (!Number.isFinite(size) || size <= 0) {
     if (changedBoxHeight && changedBoxHeight > 40) {
-      size = Math.max(24, Math.min(180, Math.round(changedBoxHeight * 0.6)));
+      size = Math.max(24, Math.min(650, Math.round(changedBoxHeight * 0.75)));
     } else {
       size = screenReadable;
     }
   }
-  return Math.max(16, Math.min(240, Math.max(size, screenReadable)));
+  return Math.max(24, Math.min(650, Math.max(size, screenReadable)));
 }
 
 function matchedTextFontSize(
@@ -175,16 +176,9 @@ function matchedTextFontSize(
   scale: number,
   changedBoxHeight?: number
 ): number {
+  const size = matchedFontSize(value, scale, changedBoxHeight);
   const characters = Array.from(String(text).replace(/\s/g, "")).length;
-  if (characters < 10) {
-    return matchedFontSize(value, scale, changedBoxHeight);
-  }
-  const screenReadable = Math.round(20 / Math.max(0.05, Math.min(2.5, scale)));
-  let size = Number(value);
-  if (!Number.isFinite(size) || size <= 0) {
-    size = screenReadable;
-  }
-  return Math.max(14, Math.min(100, Math.max(size, screenReadable)));
+  return characters < 10 ? size : Math.max(24, Math.round(size * 0.5));
 }
 
 function clampNum(v: number, lo: number, hi: number): number {
@@ -630,13 +624,31 @@ export function validateCommand(
     return null;
   }
   const c = raw as Record<string, unknown>;
-  const tool = String(c.tool || c.type || c.name || "");
+  const rawTool = String(c.tool || c.type || c.name || c.kind || "").trim().toLowerCase().replace(/[-_]/g, "");
+  let tool = String(c.tool || c.type || c.name || c.kind || "").trim().toLowerCase();
+  if (rawTool === "htmlwidget" || rawTool === "html" || rawTool === "widget" || rawTool === "svg" || rawTool === "applet") {
+    tool = "html_widget";
+  } else if (rawTool === "writetext" || rawTool === "text") {
+    tool = "write_text";
+  } else if (rawTool === "drawformula" || rawTool === "formula" || rawTool === "latex" || rawTool === "math") {
+    tool = "draw_formula";
+  } else if (rawTool === "plotfunction" || rawTool === "plot" || rawTool === "functionplot") {
+    tool = "plot_function";
+  } else if (rawTool === "diagramsource" || rawTool === "diagram" || rawTool === "mermaid") {
+    tool = "diagram_source";
+  } else if (rawTool === "draw" || rawTool === "sketch" || rawTool === "drawpoints") {
+    tool = "draw";
+  } else if (rawTool === "erase" || rawTool === "eraser") {
+    tool = "erase";
+  }
+
   const placement = String(c.placement || "").toLowerCase();
 
   switch (tool) {
     case "write_text": {
-      if (typeof c.text !== "string" || !c.text.trim()) return fail("write_text.empty");
-      const text = (c.text as string).slice(0, AI_TEXT_MAX_LENGTH);
+      const rawText = typeof c.text === "string" ? c.text : typeof c.content === "string" ? c.content : typeof c.message === "string" ? c.message : typeof c.value === "string" ? c.value : "";
+      if (!rawText.trim()) return fail("write_text.empty");
+      const text = rawText.slice(0, AI_TEXT_MAX_LENGTH);
       const fontSize = matchedTextFontSize(c.fontSize, text, ctx.scale, ctx.changedBox?.h);
       const lineHeight = Math.max(1, Math.min(2.2, Number(c.lineHeight) || 1.35));
 
@@ -680,8 +692,9 @@ export function validateCommand(
       };
     }
     case "draw_formula": {
-      if (typeof c.latex !== "string" || !c.latex.trim()) return fail("draw_formula.empty");
-      const latex = (c.latex as string).slice(0, 500);
+      const rawLatex = typeof c.latex === "string" ? c.latex : typeof c.formula === "string" ? c.formula : typeof c.equation === "string" ? c.equation : typeof c.math === "string" ? c.math : typeof c.text === "string" ? c.text : typeof c.content === "string" ? c.content : "";
+      if (!rawLatex.trim()) return fail("draw_formula.empty");
+      const latex = rawLatex.slice(0, 500);
       const fontSize = matchedFontSize(c.fontSize, ctx.scale, ctx.changedBox?.h);
       const estimatedWidth = Math.min(5000, Math.max(fontSize * 2, latex.length * fontSize * 0.72));
 
@@ -703,7 +716,8 @@ export function validateCommand(
       };
     }
     case "plot_function": {
-      if (typeof c.expression !== "string" || !(c.expression as string).trim() || (c.expression as string).length > 180) {
+      const rawExpr = typeof c.expression === "string" ? c.expression : typeof c.expr === "string" ? c.expr : typeof c.fn === "string" ? c.fn : typeof c.formula === "string" ? c.formula : typeof c.equation === "string" ? c.equation : "";
+      if (!rawExpr.trim() || rawExpr.length > 180) {
         return fail("plot_function.bad-expr");
       }
       const geom = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
@@ -715,7 +729,7 @@ export function validateCommand(
         y: geom.y,
         w: geom.w,
         h: geom.h,
-        expression: (c.expression as string).trim(),
+        expression: rawExpr.trim(),
         color: ctx.aiColor,
       };
     }
@@ -726,23 +740,38 @@ export function validateCommand(
         return fail(`html_widget.plugin-disabled:${pluginId}`);
       }
       const allowCopy = pluginId !== "image-search";
-      const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
-      const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim() : "";
-      const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim() : "";
+      const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim().slice(0, 80) : "";
+      const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim().slice(0, 80) : "";
+      const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim().slice(0, 120) : "";
       const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
+      const rawTitle = typeof c.title === "string" ? (c.title as string).trim().slice(0, 120) : "";
+      const title = rawTitle || diagramKind || (sourceFormat ? `${sourceFormat} Diagram` : "Visual Widget");
+      const refreshSeconds = Number.isFinite(Number(c.refreshSeconds)) ? Math.max(0, Math.min(86400, Math.round(Number(c.refreshSeconds)))) : 0;
+
+      const rawHtml = typeof c.html === "string"
+        ? c.html
+        : typeof c.content === "string"
+        ? c.content
+        : typeof c.code === "string"
+        ? c.code
+        : typeof c.body === "string"
+        ? c.body
+        : typeof c.source === "string"
+        ? c.source
+        : typeof c.svg === "string"
+        ? c.svg
+        : typeof c.template === "string"
+        ? c.template
+        : "";
+      const html = rawHtml.trim();
+
+      const rawCopyText = typeof c.copyText === "string" ? c.copyText : "";
+
       if (
         ctx.widgetSlots <= 0 ||
-        typeof c.title !== "string" ||
-        !(c.title as string).trim() ||
-        (c.title as string).length > 120 ||
-        !validWidgetRefreshSeconds(c.refreshSeconds ?? 0) ||
-        typeof c.html !== "string" ||
-        !(c.html as string).trim() ||
-        (c.html as string).length > MAX_WIDGET_HTML_LENGTH ||
-        diagramKind.length > 80 ||
-        sourceFormat.length > 80 ||
-        frameworkVersion.length > 120 ||
-        (allowCopy && c.copyText !== undefined && (typeof c.copyText !== "string" || !(c.copyText as string).trim() || (c.copyText as string).length > MAX_WIDGET_COPY_TEXT_LENGTH)) ||
+        !html ||
+        html.length > MAX_WIDGET_HTML_LENGTH ||
+        (allowCopy && c.copyText !== undefined && (!rawCopyText.trim() || rawCopyText.length > MAX_WIDGET_COPY_TEXT_LENGTH)) ||
         (allowCopy && c.copyLabel !== undefined && (typeof c.copyLabel !== "string" || !(c.copyLabel as string).trim() || (c.copyLabel as string).length > 80)) ||
         !geometry
       ) {
@@ -755,17 +784,17 @@ export function validateCommand(
         y: Math.round(geometry.y),
         w: Math.round(geometry.w),
         h: Math.round(geometry.h),
-        title: (c.title as string).trim(),
-        refreshSeconds: Math.round(Number(c.refreshSeconds ?? 0)),
-        html: c.html as string,
+        title,
+        refreshSeconds,
+        html,
         ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
       };
       if (diagramKind) out.diagramKind = diagramKind;
       if (sourceFormat) out.sourceFormat = sourceFormat;
       if (frameworkVersion) out.frameworkVersion = frameworkVersion;
-      if (allowCopy && typeof c.copyText === "string") {
-        out.copyText = (c.copyText as string).trim();
-        out.copyLabel = String(c.copyLabel || (sourceFormat ? `Copy ${sourceFormat}` : "Copy source")).trim();
+      if (allowCopy && rawCopyText.trim()) {
+        out.copyText = rawCopyText.trim();
+        out.copyLabel = String(c.copyLabel || (sourceFormat ? `Copy ${sourceFormat}` : "Copy source")).trim().slice(0, 80);
       }
       return out;
     }
@@ -775,15 +804,26 @@ export function validateCommand(
       }
       const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       const rawFormat = typeof c.sourceFormat === "string" ? c.sourceFormat : "";
-      const rawSource = typeof c.source === "string" ? c.source : "";
-      const rawTitle = typeof c.title === "string" ? c.title : "";
+      const rawSource = typeof c.source === "string"
+        ? c.source
+        : typeof c.code === "string"
+        ? c.code
+        : typeof c.content === "string"
+        ? c.content
+        : typeof c.diagram === "string"
+        ? c.diagram
+        : typeof c.text === "string"
+        ? c.text
+        : "";
+      const source = rawSource.trim();
+      const rawTitle = typeof c.title === "string" ? (c.title as string).trim().slice(0, 120) : "";
       let sourceFormat = canonicalDiagramFormat(rawFormat);
       if (!sourceFormat || sourceFormat === "mermaid") {
         if (
           /smiles|molecule|chemical|c1ccccc1|aspirin|c@/i.test(rawTitle) ||
-          (/^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(rawSource.trim()) &&
-            !/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph|digraph|subgraph)/i.test(rawSource.trim()) &&
-            (/[cCnNoOpPsS]/.test(rawSource) && (rawSource.includes("=") || rawSource.includes("(") || rawSource.includes("1") || rawSource.includes("@"))))
+          (/^[A-Za-z0-9@+\-\[\]\(\)\\\/%=#$]+$/.test(source) &&
+            !/^(graph|flowchart|sequenceDiagram|classDiagram|stateDiagram|erDiagram|journey|gantt|pie|gitGraph|digraph|subgraph)/i.test(source) &&
+            (/[cCnNoOpPsS]/.test(source) && (source.includes("=") || source.includes("(") || source.includes("1") || source.includes("@"))))
         ) {
           sourceFormat = "smiles";
         }
@@ -791,15 +831,13 @@ export function validateCommand(
       if (!sourceFormat) {
         sourceFormat = "mermaid";
       }
-      const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
+      const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim().slice(0, 80) : "";
+      const title = rawTitle || diagramKind || `${sourceFormat.toUpperCase()} Diagram`;
       if (
         ctx.widgetSlots <= 0 ||
         !geometry ||
-        typeof c.title !== "string" ||
-        !(c.title as string).trim() ||
-        (c.title as string).length > 120 ||
-        !diagramSourceFits(c.source) ||
-        diagramKind.length > 80
+        !source ||
+        !diagramSourceFits(source)
       ) {
         return fail("diagram_source.invalid");
       }
@@ -811,10 +849,10 @@ export function validateCommand(
         y: Math.round(geometry.y),
         w: Math.round(geometry.w),
         h: Math.round(geometry.h),
-        title: (c.title as string).trim(),
+        title,
         refreshSeconds: 0,
         sourceFormat,
-        source: c.source as string,
+        source,
         ...(diagramKind ? { diagramKind } : {}),
         ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
       };
@@ -876,10 +914,6 @@ function isPoint(v: unknown): boolean {
 
 function isPointPair(v: unknown): v is [number, number] {
   return Array.isArray(v) && v.length === 2 && typeof v[0] === "number" && typeof v[1] === "number";
-}
-
-function validWidgetRefreshSeconds(value: unknown): boolean {
-  return value === 0 || (typeof value === "number" && Number.isFinite(value) && value >= 60 && value <= 86400);
 }
 
 export function canonicalPluginId(value: unknown): string {
@@ -981,6 +1015,32 @@ export function diagramSourceFits(value: unknown): boolean {
   );
 }
 
+export function canonicalToolName(value: unknown): string {
+  const raw = String(value || "").trim().toLowerCase().replace(/[-_]/g, "");
+  if (raw === "htmlwidget" || raw === "html" || raw === "widget" || raw === "svg" || raw === "applet") {
+    return "html_widget";
+  }
+  if (raw === "writetext" || raw === "text" || raw === "write") {
+    return "write_text";
+  }
+  if (raw === "drawformula" || raw === "formula" || raw === "latex" || raw === "math") {
+    return "draw_formula";
+  }
+  if (raw === "plotfunction" || raw === "plot" || raw === "functionplot") {
+    return "plot_function";
+  }
+  if (raw === "diagramsource" || raw === "diagram" || raw === "mermaid") {
+    return "diagram_source";
+  }
+  if (raw === "draw" || raw === "sketch" || raw === "drawpoints") {
+    return "draw";
+  }
+  if (raw === "erase" || raw === "eraser") {
+    return "erase";
+  }
+  return String(value || "").trim().toLowerCase();
+}
+
 export function validateCommands(
   rawCmds: unknown[],
   ctx: CommandValidationContext,
@@ -1000,7 +1060,7 @@ export function validateCommands(
   let widgetSlots = ctx.widgetSlots;
   for (const raw of rawCmds.slice(0, MAX_COMMANDS)) {
     const c = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-    const tool = String(c?.tool || c?.type || c?.name || "");
+    const tool = canonicalToolName(c?.tool || c?.type || c?.name || c?.kind);
     if (!c || !acceptedTools.has(tool)) {
       reportReject(`not-allowed:${tool}`);
       continue;
