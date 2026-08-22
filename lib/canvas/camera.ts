@@ -140,10 +140,5 @@ export class Camera {
     const b = Math.min(SIZE, (this.viewport.h - this.state.panY) / this.state.scale);
     return { x: l, y: t, w: Math.max(0, r - l), h: Math.max(0, b - t) };
   }
-
-  applyWorldTransform(ctx: CanvasRenderingContext2D, dpr: number): void {
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.translate(this.state.panX, this.state.panY);
-    ctx.scale(this.state.scale, this.state.scale);
-  }
 }
+

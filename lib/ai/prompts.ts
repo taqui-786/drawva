@@ -44,7 +44,3 @@ export const MAX_DIAGRAM_BYTES = 100 * 1024;
 export const MAX_COMMANDS = 16;
 export const MAX_BODY_BYTES = 2 * 1024 * 1024;
 
-export function buildSystemPrompt(pluginsEnabled = false): string {
-  if (!pluginsEnabled) return `${SYSTEM_PROMPT}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${CODE_SYSTEM_PROMPT_EXTRA}`;
-  return `${SYSTEM_PROMPT}\n\n${PLUGIN_ROUTING_PROMPT}\n\n${PLUGIN_SYSTEM_PROMPT}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${CODE_SYSTEM_PROMPT_EXTRA}`;
-}

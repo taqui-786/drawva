@@ -104,10 +104,6 @@ export function buildSystemPromptText(uiTheme?: string, pluginsEnabled = false):
   return sections.join("\n\n");
 }
 
-function systemPromptText(uiTheme?: string, pluginsEnabled = false): string {
-  return buildSystemPromptText(uiTheme, pluginsEnabled);
-}
-
 function userMessageText(req: AiRequest, sceneText: string): string {
   const widgetEdit = req.widgetEdit;
   const format = widgetEdit
@@ -409,8 +405,8 @@ async function attemptReply(
 ): Promise<AgentReply> {
   const pluginsEnabled = Array.isArray(req.enabledPlugins) && req.enabledPlugins.length > 0;
   const system = isRetry
-    ? `${systemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${RETRY_INSTRUCTION}`
-    : `${systemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}`;
+    ? `${buildSystemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${RETRY_INSTRUCTION}`
+    : `${buildSystemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}`;
 
   const textContent = userMessageText(req, sceneText);
   const contentParts: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [

@@ -6,20 +6,22 @@ A tile-based infinite whiteboard powered by a **multimodal AI perception agent**
 
 ## 🧠 How It Works
 
-You draw $\rightarrow$ Drawva captures $\rightarrow$ the AI reasons $\rightarrow$ it builds.
+No magic here bruh, it's just one simple pipeline:
 
-```mermaid
-flowchart LR
-    A[✏️ Draw on Canvas<br/>Pen / Shapes / Text] --> B[🖼️ Atlas Snapshot<br/>Viewport WebP + Scene JSON]
-    B --> C[🤖 Multimodal AI<br/>Spatial & Visual Reasoning]
-    C --> D{Structured Output}
-    D -->|Diagrams| E[Mermaid / Graphviz / BPMN]
-    D -->|Data & Maps| F[Vega-Lite / Cytoscape / GeoJSON]
-    D -->|Math & Science| G[MathJax / 2D Plotter / SMILES]
-    D -->|Interactive| H[Sandboxed HTML Applets]
-    E & F & G & H --> I[🖥️ Interactive Widget<br/>Anchored Below Ink]
-    I --> J[💾 IndexedDB Autosave]
-```
+**You draw → Drawva photographs the canvas → AI looks at it → AI replies with JSON commands → we verify them → canvas renders the answer.** That's literally it.
+
+Here's each step in plain English:
+
+1. **📸 Snapshot** — `atlas.ts` takes a clean WebP photo of your canvas + `scene.ts` writes a tiny JSON summary of everything on it.
+2. **🧾 Prompt build** — the AI gets 3 things glued together: a rulebook (system prompts), live canvas data (`changedBox` = where YOUR new ink is, camera position, existing objects) + the photo itself.
+3. **🔌 Plugin selection** — plugins are just markdown cards sitting in `public/plugins/<name>/plugin.md`. Nothing fancy.
+4. **💉 Plugin injection** — the server reads those cards, keeps only your *enabled* ones (under a 40KB budget), and pastes their docs straight into the prompt. So the AI doesn't pick plugins from some menu — it only knows what we hand it on paper.
+5. **🤖 AI picks a tool** — based on your question it returns JSON like `{tool:"html_widget", pluginId:"weather", html:"..."}` or native stuff like `write_text` / `draw_formula` / `plot_function`. Simple answer → native tools. Diagrams → Mermaid / Graphviz / SMILES etc. Rich interactive stuff → HTML widget.
+6. **✅ Safety check** — the AI's output is never trusted blindly. Every command gets validated: size limits, real coordinates inside the 20000×20000 canvas, plugin actually enabled, max 16 commands. Broken ones get silently dropped.
+7. **🎨 Render** — text/formulas/plots draw straight onto canvas layers; widgets spin up inside sandboxed iframes with copy-source, resize, and accept/draft buttons.
+8. **💾 Autosave** — everything persists to IndexedDB locally. Your board survives refreshes.
+
+> TL;DR: the AI never touches your canvas directly. It can only *request* things, and strict validators decide what actually gets drawn.
 
 ---
 

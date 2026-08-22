@@ -128,7 +128,7 @@ export function parsePluginMarkdown(markdown: string, styles = ""): PluginManife
   const metadata = parseFrontmatter(match[1]);
   const body = match[2].trim();
 
-  const pluginVer = metadata["drawva-plugin"] ?? metadata["penecho-plugin"];
+  const pluginVer = metadata["drawva-plugin"];
   if (pluginVer !== 1) throw new Error("Unsupported plugin version (expected 1)");
 
   const id = String(metadata.id || "").trim();

@@ -51,10 +51,6 @@ export class LayerStack {
     return c;
   }
 
-  names(): LayerName[] {
-    return [...LAYER_ORDER];
-  }
-
   resize(cssWidth: number, cssHeight: number, dpr: number): void {
     const w = Math.max(1, Math.round(cssWidth * dpr));
     const h = Math.max(1, Math.round(cssHeight * dpr));

@@ -60,26 +60,9 @@ export interface WidgetEditContext {
   box: AiBox;
 }
 
-export interface PluginMetadata {
-  id: string;
-  name: string;
-  version: string;
-  description: string;
-  category: string;
-  source: string;
-  connect: string[];
-  recommendedRefreshSeconds: number;
-  enabledByDefault?: boolean;
-}
+import type { PluginMetadata, PluginDescriptor } from "../plugins/registry";
+export type { PluginMetadata, PluginDescriptor };
 
-export interface PluginDescriptor {
-  id: string;
-  name: string;
-  version: string;
-  connect: string[];
-  recommendedRefreshSeconds: number;
-  document: string;
-}
 
 export interface AiRequest {
   requestId: string;
@@ -157,15 +140,6 @@ export interface AiLogEntry {
     rejected?: string[];
     raw?: unknown;
   };
-}
-
-export interface ModelReply {
-  intent: AiIntent;
-  message?: string;
-  observedText?: string;
-  spatialPlan?: string;
-  commands: unknown[];
-  tokenUsage?: TokenUsage;
 }
 
 export interface SceneJson {
