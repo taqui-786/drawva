@@ -33,6 +33,19 @@ Add shadcn components with `pnpm dlx shadcn add <component>` — never hand-writ
 
 Drawva is a tile-based infinite canvas whiteboard engine powered by a multimodal AI perception agent.
 
+### How the AI Pipeline Actually Works (short version)
+
+No magic bruh, it's just one loop: **draw → snapshot → prompt build → AI picks tools → validators → render.**
+
+1. **📸 Snapshot**: `atlas.ts` photographs the canvas as WebP (≤2048px) + `scene.ts` serializes scene state to compact JSON.
+2. **🧾 Prompt build** (`agent.ts`): system prompt = rulebook blocks glued together (`prompts.ts`: `SYSTEM_PROMPT` + persona + `PLUGIN_ROUTING_PROMPT` + `PLUGIN_SYSTEM_PROMPT` + `MANDATORY_VISIBLE_RESPONSE` + JSON schema). User message = JSON blob (`modelInput`) with `changedBox` (newest ink), viewport rects, widget geometry limits, scene items — plus the photo attached as an image part.
+3. **🔌 Plugin injection** (`lib/plugins/registry.ts`): plugins are markdown cards in `public/plugins/<name>/plugin.md`. Server scans them (10s cache), filters by enabled IDs (localStorage `drawva.enabledPlugins`), enforces a 40KB total injection budget, and pastes each card's full document into `modelInput.enabledPlugins[]`. The model only knows plugins because their docs were pasted into its prompt — plugin CSS never enters model context.
+4. **🤖 Tool choice is the model's job**: native commands for simple stuff (`write_text`, `draw_formula`, `plot_function`, `draw`, `erase`), `diagram_source` for professional formats (mermaid/dot/smiles/vega-lite/bpmn/cytoscape/geojson), `html_widget` for rich/interactive/live-data visuals.
+5. **✅ Validation is NOT optional** (`commands.ts`): every command goes through `validateCommand`/`validateCommands` — allowed-tools check against enabled plugins, coordinate clamping to 20000×20000, HTML ≤200KB, diagram source ≤100KB, max 16 commands, max 1 widget per reply, smart placement around `changedBox`. Failures are dropped with a reason. Never bypass these checks.
+6. **🎨 Render**: native commands hit canvas layers directly; widgets mount via `WidgetManager` into sandboxed iframes (`/widget-host.html`, libraries loaded per format).
+
+Key rule: **the AI can only request changes; strict validators decide what actually draws.** Any new command type must be added in both `prompts.ts` (schema/rulebook) and `commands.ts` (validator) or it will be silently rejected.
+
 ```
 Drawva Stack Architecture:
  ┌──────────────────────────────────────────────────────────────────────────┐
