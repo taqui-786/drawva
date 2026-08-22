@@ -609,10 +609,13 @@ export function fitWidgetGeometry(
 
 export function validateCommand(
   raw: unknown,
-  ctx: CommandValidationContext
+  ctx: CommandValidationContext,
+  onReject?: (reason: string) => void
 ): CanvasCommand | null {
   if (!raw || typeof raw !== "object") {
-    logReject("not-an-object");
+    const reason = "not-an-object";
+    logReject(reason);
+    if (onReject) onReject(reason);
     return null;
   }
   const c = raw as Record<string, unknown>;
@@ -706,9 +709,10 @@ export function validateCommand(
       };
     }
     case "html_widget": {
-      const pluginId = typeof c.pluginId === "string" && c.pluginId.trim() ? c.pluginId.trim() : "general";
-      if (ctx.plugins && !ctx.plugins.has(pluginId)) {
-        return fail("html_widget.plugin-disabled");
+      const rawPluginId = typeof c.pluginId === "string" && c.pluginId.trim() ? c.pluginId.trim() : "general";
+      const pluginId = canonicalPluginId(rawPluginId);
+      if (pluginId !== "general" && ctx.plugins && !ctx.plugins.has(pluginId)) {
+        return fail(`html_widget.plugin-disabled:${pluginId}`);
       }
       const allowCopy = pluginId !== "image-search";
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim() : "";
@@ -791,7 +795,7 @@ export function validateCommand(
       return {
         tool: "diagram_source",
         widgetType: "diagram_source",
-        pluginId: typeof c.pluginId === "string" && c.pluginId.trim() ? c.pluginId.trim() : sourceFormat,
+        pluginId: typeof c.pluginId === "string" && c.pluginId.trim() ? canonicalPluginId(c.pluginId.trim()) : sourceFormat,
         x: Math.round(geometry.x),
         y: Math.round(geometry.y),
         w: Math.round(geometry.w),
@@ -850,6 +854,7 @@ export function validateCommand(
 
   function fail(reason: string): null {
     logReject(reason);
+    if (onReject) onReject(reason);
     return null;
   }
 }
@@ -864,6 +869,64 @@ function isPointPair(v: unknown): v is [number, number] {
 
 function validWidgetRefreshSeconds(value: unknown): boolean {
   return value === 0 || (typeof value === "number" && Number.isFinite(value) && value >= 60 && value <= 86400);
+}
+
+export function canonicalPluginId(value: unknown): string {
+  const raw = String(value || "").trim().toLowerCase().replace(/_/g, "-");
+  if (!raw) return "general";
+  const aliasMap: Record<string, string> = {
+    general: "general",
+    "general-html": "general",
+    generalhtml: "general",
+    html: "general",
+    "html-widget": "general",
+    htmlwidget: "general",
+    custom: "general",
+    svg: "general",
+    default: "general",
+    flowchart: "flowchart",
+    diagram: "flowchart",
+    diagrams: "flowchart",
+    mermaid: "flowchart",
+    dot: "flowchart",
+    bpmn: "flowchart",
+    "bpmn-xml": "flowchart",
+    vega: "flowchart",
+    "vega-lite": "flowchart",
+    geojson: "flowchart",
+    cytoscape: "flowchart",
+    "cytoscape-json": "flowchart",
+    smiles: "flowchart",
+    "tech-news": "tech-news",
+    technews: "tech-news",
+    "hacker-news": "tech-news",
+    hackernews: "tech-news",
+    hn: "tech-news",
+    news: "tech-news",
+    earthquakes: "earthquakes",
+    earthquake: "earthquakes",
+    "exchange-rates": "exchange-rates",
+    "exchange-rate": "exchange-rates",
+    exchangerates: "exchange-rates",
+    currency: "exchange-rates",
+    forex: "exchange-rates",
+    "github-pulse": "github-pulse",
+    github: "github-pulse",
+    githubpulse: "github-pulse",
+    "image-search": "image-search",
+    image: "image-search",
+    images: "image-search",
+    imagesearch: "image-search",
+    "natural-events": "natural-events",
+    "natural-event": "natural-events",
+    naturalevents: "natural-events",
+    "space-weather": "space-weather",
+    spaceweather: "space-weather",
+    stocks: "stocks",
+    stock: "stocks",
+    weather: "weather",
+  };
+  return aliasMap[raw] || raw;
 }
 
 export function canonicalDiagramFormat(value: unknown): DiagramFormat | "" {
@@ -909,24 +972,29 @@ export function diagramSourceFits(value: unknown): boolean {
 
 export function validateCommands(
   rawCmds: unknown[],
-  ctx: CommandValidationContext
+  ctx: CommandValidationContext,
+  onReject?: (reason: string) => void
 ): { commands: CanvasCommand[]; rejected: string[] } {
   const rejected: string[] = [];
+  const reportReject = (reason: string) => {
+    rejected.push(reason);
+    if (onReject) onReject(reason);
+  };
   const validated: CanvasCommand[] = [];
   if (!Array.isArray(rawCmds)) return { commands: [], rejected: ["not-array"] };
   const acceptedTools = new Set(["write_text", "draw_formula", "plot_function", "draw", "erase"]);
-  if (ctx.plugins.size) acceptedTools.add("html_widget");
-  if (ctx.plugins.has("flowchart")) acceptedTools.add("diagram_source");
+  acceptedTools.add("html_widget"); // General HTML is mandatory and always enabled
+  if (ctx.plugins.has("flowchart") || ctx.plugins.size === 0) acceptedTools.add("diagram_source");
 
   let widgetSlots = ctx.widgetSlots;
   for (const raw of rawCmds.slice(0, MAX_COMMANDS)) {
     const c = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
     const tool = String(c?.tool || c?.type || c?.name || "");
     if (!c || !acceptedTools.has(tool)) {
-      rejected.push(`not-allowed:${tool}`);
+      reportReject(`not-allowed:${tool}`);
       continue;
     }
-    const cmd = validateCommand(c, { ...ctx, widgetSlots });
+    const cmd = validateCommand(c, { ...ctx, widgetSlots }, reportReject);
     if (!cmd) {
       continue;
     }

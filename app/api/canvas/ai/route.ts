@@ -55,9 +55,9 @@ function validateReply(
   enabledPlugins: PluginDescriptor[] = []
 ) {
   const pluginIds = new Set(enabledPlugins.map((p) => p.id));
-  // Always ensure general is available if no plugins specified
-  if (pluginIds.size === 0) {
-    pluginIds.add("general");
+  // General HTML is mandatory and always enabled
+  pluginIds.add("general");
+  if (pluginIds.size <= 1) {
     pluginIds.add("flowchart");
   }
   const widgetGeometry = widgetGeometryForViewport(visibleRect);
