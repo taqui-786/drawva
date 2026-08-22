@@ -1013,9 +1013,21 @@ export function validateCommands(
     validated.push(cmd);
   }
 
-  const widgets = validated.filter((x) => x.tool === "html_widget" || x.tool === "diagram_source");
-  if (widgets.length) return { commands: [widgets[0]], rejected };
-  return { commands: validated, rejected };
+  let hasWidget = false;
+  const filtered: CanvasCommand[] = [];
+  for (const cmd of validated) {
+    if (cmd.tool === "html_widget" || cmd.tool === "diagram_source") {
+      if (!hasWidget) {
+        filtered.push(cmd);
+        hasWidget = true;
+      } else {
+        reportReject("max-1-widget-per-reply");
+      }
+    } else {
+      filtered.push(cmd);
+    }
+  }
+  return { commands: filtered, rejected };
 }
 
 export function logReject(reason: string): void {
