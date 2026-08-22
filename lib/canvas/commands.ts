@@ -612,6 +612,243 @@ export function fitWidgetGeometry(
   return sanitizeWidgetGeometry({ x, y, w, h }, widgetGeometry);
 }
 
+/**
+ * Recursively extracts an HTML or SVG string from arbitrary model JSON structures.
+ */
+export function extractHtmlOrSvg(input: unknown, depth = 0): string {
+  if (depth > 6 || input === null || input === undefined) return "";
+  if (typeof input === "string") {
+    const s = input.trim();
+    if (!s) return "";
+    if (s.startsWith("```")) {
+      const unwrapped = s.replace(/^```[a-zA-Z0-9_-]*\s*\n?/, "").replace(/\n?```$/, "").trim();
+      return unwrapped;
+    }
+    if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
+      try {
+        const parsed = JSON.parse(s);
+        const extracted = extractHtmlOrSvg(parsed, depth + 1);
+        if (extracted) return extracted;
+      } catch {}
+    }
+    return s;
+  }
+  if (typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    const priorityKeys = [
+      "svg",
+      "html",
+      "code",
+      "content",
+      "body",
+      "source",
+      "template",
+      "markup",
+      "data",
+      "value",
+      "spec",
+      "params",
+      "props",
+      "args",
+      "input",
+    ];
+    for (const key of priorityKeys) {
+      if (key in rec && rec[key] !== undefined && rec[key] !== null) {
+        const res = extractHtmlOrSvg(rec[key], depth + 1);
+        if (res) return res;
+      }
+    }
+    for (const val of Object.values(rec)) {
+      if (typeof val === "string") {
+        const trimmed = val.trim();
+        if (
+          trimmed.includes("<svg") ||
+          trimmed.includes("<html") ||
+          trimmed.includes("<!DOCTYPE") ||
+          trimmed.includes("<div") ||
+          trimmed.includes("<canvas") ||
+          trimmed.includes("<style") ||
+          trimmed.includes("<script")
+        ) {
+          return trimmed;
+        }
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * Recursively extracts plain text / markdown from strings, arrays, or objects.
+ */
+export function extractText(input: unknown, depth = 0): string {
+  if (depth > 6 || input === null || input === undefined) return "";
+  if (typeof input === "string") {
+    return input.trim();
+  }
+  if (Array.isArray(input)) {
+    return input
+      .map((item) => extractText(item, depth + 1))
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    const priorityKeys = [
+      "text",
+      "content",
+      "message",
+      "markdown",
+      "value",
+      "theory",
+      "explanation",
+      "description",
+      "summary",
+      "body",
+      "answer",
+      "response",
+      "data",
+      "params",
+      "args",
+    ];
+    for (const key of priorityKeys) {
+      if (key in rec && rec[key] !== undefined && rec[key] !== null) {
+        const res = extractText(rec[key], depth + 1);
+        if (res) return res;
+      }
+    }
+    for (const val of Object.values(rec)) {
+      if (typeof val === "string" && val.trim().length > 0) {
+        return val.trim();
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * Recursively extracts LaTeX formula strings.
+ * Strips wrapping $$ or $ delimiters automatically.
+ */
+export function extractLatex(input: unknown, depth = 0): string {
+  if (depth > 6 || input === null || input === undefined) return "";
+  if (typeof input === "string") {
+    let s = input.trim();
+    if (s.startsWith("$$") && s.endsWith("$$") && s.length >= 4) {
+      s = s.slice(2, -2).trim();
+    } else if (s.startsWith("$") && s.endsWith("$") && s.length >= 2) {
+      s = s.slice(1, -1).trim();
+    } else if (s.startsWith("\\[") && s.endsWith("\\]") && s.length >= 4) {
+      s = s.slice(2, -2).trim();
+    } else if (s.startsWith("\\(") && s.endsWith("\\)") && s.length >= 4) {
+      s = s.slice(2, -2).trim();
+    }
+    return s;
+  }
+  if (Array.isArray(input)) {
+    return input
+      .map((item) => extractLatex(item, depth + 1))
+      .filter(Boolean)
+      .join(" ");
+  }
+  if (typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    const priorityKeys = [
+      "latex",
+      "formula",
+      "equation",
+      "math",
+      "text",
+      "content",
+      "value",
+      "expression",
+      "code",
+      "params",
+      "args",
+    ];
+    for (const key of priorityKeys) {
+      if (key in rec && rec[key] !== undefined && rec[key] !== null) {
+        const res = extractLatex(rec[key], depth + 1);
+        if (res) return res;
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * Recursively extracts a math function expression.
+ * Strips leading "y =" or "f(x) =" if present.
+ */
+export function extractExpression(input: unknown, depth = 0): string {
+  if (depth > 6 || input === null || input === undefined) return "";
+  if (typeof input === "string") {
+    let s = input.trim();
+    s = s.replace(/^(?:y|f\s*\(\s*x\s*\))\s*=\s*/i, "").trim();
+    return s;
+  }
+  if (typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    const priorityKeys = [
+      "expression",
+      "expr",
+      "fn",
+      "formula",
+      "equation",
+      "func",
+      "code",
+      "value",
+      "content",
+      "params",
+      "args",
+    ];
+    for (const key of priorityKeys) {
+      if (key in rec && rec[key] !== undefined && rec[key] !== null) {
+        const res = extractExpression(rec[key], depth + 1);
+        if (res) return res;
+      }
+    }
+  }
+  return "";
+}
+
+/**
+ * Recursively extracts diagram source text.
+ * Strips code fences (e.g. ```mermaid) automatically.
+ */
+export function extractDiagramSource(input: unknown, depth = 0): string {
+  if (depth > 6 || input === null || input === undefined) return "";
+  if (typeof input === "string") {
+    let s = input.trim();
+    if (s.startsWith("```")) {
+      s = s.replace(/^```[a-zA-Z0-9_-]*\s*\n?/, "").replace(/\n?```$/, "").trim();
+    }
+    return s;
+  }
+  if (typeof input === "object") {
+    const rec = input as Record<string, unknown>;
+    const priorityKeys = [
+      "source",
+      "code",
+      "diagram",
+      "content",
+      "text",
+      "body",
+      "spec",
+      "data",
+      "params",
+      "args",
+    ];
+    for (const key of priorityKeys) {
+      if (key in rec && rec[key] !== undefined && rec[key] !== null) {
+        const res = extractDiagramSource(rec[key], depth + 1);
+        if (res) return res;
+      }
+    }
+  }
+  return "";
+}
+
 export function validateCommand(
   raw: unknown,
   ctx: CommandValidationContext,
@@ -624,29 +861,36 @@ export function validateCommand(
     return null;
   }
   const c = raw as Record<string, unknown>;
-  const rawTool = String(c.tool || c.type || c.name || c.kind || "").trim().toLowerCase().replace(/[-_]/g, "");
-  let tool = String(c.tool || c.type || c.name || c.kind || "").trim().toLowerCase();
-  if (rawTool === "htmlwidget" || rawTool === "html" || rawTool === "widget" || rawTool === "svg" || rawTool === "applet") {
-    tool = "html_widget";
-  } else if (rawTool === "writetext" || rawTool === "text") {
-    tool = "write_text";
-  } else if (rawTool === "drawformula" || rawTool === "formula" || rawTool === "latex" || rawTool === "math") {
-    tool = "draw_formula";
-  } else if (rawTool === "plotfunction" || rawTool === "plot" || rawTool === "functionplot") {
-    tool = "plot_function";
-  } else if (rawTool === "diagramsource" || rawTool === "diagram" || rawTool === "mermaid") {
-    tool = "diagram_source";
-  } else if (rawTool === "draw" || rawTool === "sketch" || rawTool === "drawpoints") {
-    tool = "draw";
-  } else if (rawTool === "erase" || rawTool === "eraser") {
-    tool = "erase";
+  let tool = canonicalToolName(c.tool || c.type || c.name || c.kind || c.action);
+
+  // If tool is unrecognized, infer from content structure
+  if (!["html_widget", "write_text", "draw_formula", "plot_function", "diagram_source", "draw", "erase"].includes(tool)) {
+    const potentialHtml = extractHtmlOrSvg(c);
+    if (potentialHtml.includes("<svg") || potentialHtml.includes("<html") || potentialHtml.includes("<!DOCTYPE") || potentialHtml.includes("<div") || potentialHtml.includes("<canvas")) {
+      tool = "html_widget";
+    } else {
+      const potentialLatex = extractLatex(c);
+      if (potentialLatex && (potentialLatex.includes("\\") || potentialLatex.includes("^") || potentialLatex.includes("_"))) {
+        tool = "draw_formula";
+      } else {
+        const potentialExpr = extractExpression(c);
+        if (potentialExpr && /[a-z0-9]/.test(potentialExpr) && (potentialExpr.includes("x") || potentialExpr.includes("sin") || potentialExpr.includes("cos"))) {
+          tool = "plot_function";
+        } else {
+          const potentialText = extractText(c);
+          if (potentialText) {
+            tool = "write_text";
+          }
+        }
+      }
+    }
   }
 
   const placement = String(c.placement || "").toLowerCase();
 
   switch (tool) {
     case "write_text": {
-      const rawText = typeof c.text === "string" ? c.text : typeof c.content === "string" ? c.content : typeof c.message === "string" ? c.message : typeof c.value === "string" ? c.value : "";
+      const rawText = extractText(c.text ?? c.content ?? c.message ?? c.value ?? c.markdown ?? c.theory ?? c.explanation ?? c.description ?? c.summary ?? c.body ?? c.answer ?? c.response ?? c);
       if (!rawText.trim()) return fail("write_text.empty");
       const text = rawText.slice(0, AI_TEXT_MAX_LENGTH);
       const fontSize = matchedTextFontSize(c.fontSize, text, ctx.scale, ctx.changedBox?.h);
@@ -692,7 +936,7 @@ export function validateCommand(
       };
     }
     case "draw_formula": {
-      const rawLatex = typeof c.latex === "string" ? c.latex : typeof c.formula === "string" ? c.formula : typeof c.equation === "string" ? c.equation : typeof c.math === "string" ? c.math : typeof c.text === "string" ? c.text : typeof c.content === "string" ? c.content : "";
+      const rawLatex = extractLatex(c.latex ?? c.formula ?? c.equation ?? c.math ?? c.text ?? c.content ?? c.value ?? c.expression ?? c.code ?? c);
       if (!rawLatex.trim()) return fail("draw_formula.empty");
       const latex = rawLatex.slice(0, 500);
       const fontSize = matchedFontSize(c.fontSize, ctx.scale, ctx.changedBox?.h);
@@ -716,7 +960,7 @@ export function validateCommand(
       };
     }
     case "plot_function": {
-      const rawExpr = typeof c.expression === "string" ? c.expression : typeof c.expr === "string" ? c.expr : typeof c.fn === "string" ? c.fn : typeof c.formula === "string" ? c.formula : typeof c.equation === "string" ? c.equation : "";
+      const rawExpr = extractExpression(c.expression ?? c.expr ?? c.fn ?? c.formula ?? c.equation ?? c.func ?? c.code ?? c.value ?? c.content ?? c);
       if (!rawExpr.trim() || rawExpr.length > 180) {
         return fail("plot_function.bad-expr");
       }
@@ -748,21 +992,7 @@ export function validateCommand(
       const title = rawTitle || diagramKind || (sourceFormat ? `${sourceFormat} Diagram` : "Visual Widget");
       const refreshSeconds = Number.isFinite(Number(c.refreshSeconds)) ? Math.max(0, Math.min(86400, Math.round(Number(c.refreshSeconds)))) : 0;
 
-      const rawHtml = typeof c.html === "string"
-        ? c.html
-        : typeof c.content === "string"
-        ? c.content
-        : typeof c.code === "string"
-        ? c.code
-        : typeof c.body === "string"
-        ? c.body
-        : typeof c.source === "string"
-        ? c.source
-        : typeof c.svg === "string"
-        ? c.svg
-        : typeof c.template === "string"
-        ? c.template
-        : "";
+      const rawHtml = extractHtmlOrSvg(c.html ?? c.content ?? c.code ?? c.body ?? c.source ?? c.svg ?? c.template ?? c.markup ?? c.data ?? c.value ?? c);
       const html = rawHtml.trim();
 
       const rawCopyText = typeof c.copyText === "string" ? c.copyText : "";
@@ -771,8 +1001,6 @@ export function validateCommand(
         ctx.widgetSlots <= 0 ||
         !html ||
         html.length > MAX_WIDGET_HTML_LENGTH ||
-        (allowCopy && c.copyText !== undefined && (!rawCopyText.trim() || rawCopyText.length > MAX_WIDGET_COPY_TEXT_LENGTH)) ||
-        (allowCopy && c.copyLabel !== undefined && (typeof c.copyLabel !== "string" || !(c.copyLabel as string).trim() || (c.copyLabel as string).length > 80)) ||
         !geometry
       ) {
         return fail("html_widget.invalid");
@@ -793,7 +1021,7 @@ export function validateCommand(
       if (sourceFormat) out.sourceFormat = sourceFormat;
       if (frameworkVersion) out.frameworkVersion = frameworkVersion;
       if (allowCopy && rawCopyText.trim()) {
-        out.copyText = rawCopyText.trim();
+        out.copyText = rawCopyText.trim().slice(0, MAX_WIDGET_COPY_TEXT_LENGTH);
         out.copyLabel = String(c.copyLabel || (sourceFormat ? `Copy ${sourceFormat}` : "Copy source")).trim().slice(0, 80);
       }
       return out;
@@ -804,18 +1032,14 @@ export function validateCommand(
       }
       const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       const rawFormat = typeof c.sourceFormat === "string" ? c.sourceFormat : "";
-      const rawSource = typeof c.source === "string"
-        ? c.source
-        : typeof c.code === "string"
-        ? c.code
-        : typeof c.content === "string"
-        ? c.content
-        : typeof c.diagram === "string"
-        ? c.diagram
-        : typeof c.text === "string"
-        ? c.text
-        : "";
+      const rawSource = extractDiagramSource(c.source ?? c.code ?? c.content ?? c.diagram ?? c.text ?? c.body ?? c.spec ?? c.data ?? c);
       const source = rawSource.trim();
+
+      // If the diagram source is actually raw SVG or HTML, seamlessly validate as html_widget!
+      if (source.startsWith("<svg") || source.startsWith("<html") || source.startsWith("<!DOCTYPE") || source.startsWith("<div")) {
+        return validateCommand({ ...c, tool: "html_widget", html: source }, ctx, onReject);
+      }
+
       const rawTitle = typeof c.title === "string" ? (c.title as string).trim().slice(0, 120) : "";
       let sourceFormat = canonicalDiagramFormat(rawFormat);
       if (!sourceFormat || sourceFormat === "mermaid") {
@@ -1060,12 +1284,37 @@ export function validateCommands(
   let widgetSlots = ctx.widgetSlots;
   for (const raw of rawCmds.slice(0, MAX_COMMANDS)) {
     const c = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
-    const tool = canonicalToolName(c?.tool || c?.type || c?.name || c?.kind);
-    if (!c || !acceptedTools.has(tool)) {
+    if (!c) {
+      reportReject("not-an-object");
+      continue;
+    }
+    let tool = canonicalToolName(c.tool || c.type || c.name || c.kind || c.action);
+    if (!acceptedTools.has(tool)) {
+      const htmlStr = extractHtmlOrSvg(c);
+      if (htmlStr && (htmlStr.includes("<svg") || htmlStr.includes("<html") || htmlStr.includes("<!DOCTYPE") || htmlStr.includes("<div") || htmlStr.includes("<canvas"))) {
+        tool = "html_widget";
+      } else {
+        const latexStr = extractLatex(c);
+        if (latexStr && (latexStr.includes("\\") || latexStr.includes("^") || latexStr.includes("_"))) {
+          tool = "draw_formula";
+        } else {
+          const exprStr = extractExpression(c);
+          if (exprStr && /[a-z0-9]/.test(exprStr) && (exprStr.includes("x") || exprStr.includes("sin") || exprStr.includes("cos"))) {
+            tool = "plot_function";
+          } else {
+            const textStr = extractText(c);
+            if (textStr) {
+              tool = "write_text";
+            }
+          }
+        }
+      }
+    }
+    if (!acceptedTools.has(tool)) {
       reportReject(`not-allowed:${tool}`);
       continue;
     }
-    const cmd = validateCommand(c, { ...ctx, widgetSlots }, reportReject);
+    const cmd = validateCommand({ ...c, tool }, { ...ctx, widgetSlots }, reportReject);
     if (!cmd) {
       continue;
     }
