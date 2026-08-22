@@ -1,8 +1,9 @@
 import { Camera } from "./camera";
 import { SIZE } from "./constants";
 import type { CanvasMode, Point } from "./types";
+import { type AnimationScene, renderAnimationScene } from "./animation";
 
-export type ObjectKind = "text" | "formula" | "plot";
+export type ObjectKind = "text" | "formula" | "plot" | "animation";
 export type ObjectStatus = "draft" | "accepted";
 
 export interface ObjectItem {
@@ -20,6 +21,10 @@ export interface ObjectItem {
   maxWidth?: number;
   status: ObjectStatus;
   image?: HTMLCanvasElement;
+  animationScene?: AnimationScene;
+  paused?: boolean;
+  playheadMs?: number;
+  startedAt?: number;
 }
 
 export interface ObjectCallbacks {
@@ -41,6 +46,9 @@ export interface ObjectMountOptions {
   callbacks?: ObjectCallbacks;
 }
 
+const PLAY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="currentColor"><path d="M7 4.5v15l13-7.5L7 4.5z"/></svg>`;
+const PAUSE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="currentColor"><path d="M6 4h4v16H6V4zm8 0h4v16h-4V4z"/></svg>`;
+const RESTART_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 4v6h6"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>`;
 const ACCEPT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path fill="currentColor" d="M1.25,12 C1.25,6.072 6.072,1.25 12,1.25 C17.928,1.25 22.75,6.072 22.75,12 C22.75,17.928 17.928,22.75 12,22.75 C6.072,22.75 1.25,17.928 1.25,12 Z M2.75,12 C2.75,17.1 6.9,21.25 12,21.25 C17.1,21.25 21.25,17.1 21.25,12 C21.25,6.9 17.1,2.75 12,2.75 C6.9,2.75 2.75,6.9 2.75,12 Z M9.757,15.385 C9.071,14.239 7.642,13.409 7.628,13.401 C7.269,13.195 7.145,12.737 7.35,12.378 C7.556,12.019 8.013,11.894 8.372,12.099 C8.426,12.13 9.405,12.695 10.266,13.605 C11.18,11.911 13.156,8.701 15.641,7.342 C16.004,7.143 16.46,7.277 16.659,7.64 C16.858,8.003 16.724,8.459 16.361,8.658 C13.42,10.266 11.106,15.262 11.083,15.312 C10.967,15.565 10.72,15.733 10.442,15.749 C10.435,15.749 10.428,15.749 10.421,15.75 C10.414,15.75 10.407,15.75 10.401,15.75 L10.4,15.75 C10.137,15.75 9.892,15.612 9.757,15.385 Z"></path></svg>`;
 const REMOVE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path fill="currentColor" d="M12.75,22.75 C6.813,22.75 2,17.937 2,12 C2,6.063 6.813,1.25 12.75,1.25 C18.687,1.25 23.5,6.063 23.5,12 C23.5,17.937 18.687,22.75 12.75,22.75 Z M3.5,12 C3.5,17.109 7.641,21.25 12.75,21.25 C17.859,21.25 22,17.109 22,12 C22,6.891 17.859,2.75 12.75,2.75 C7.641,2.75 3.5,6.891 3.5,12 Z M10.28,8.47 L12.75,10.94 L15.22,8.47 C15.512,8.177 15.987,8.177 16.28,8.47 C16.573,8.763 16.573,9.237 16.28,9.53 L13.811,12 L16.28,14.47 C16.573,14.763 16.573,15.238 16.28,15.53 C15.987,15.823 15.512,15.823 15.219,15.53 L12.75,13.061 L10.281,15.53 C9.988,15.823 9.513,15.823 9.22,15.53 C8.927,15.238 8.927,14.763 9.22,14.47 L11.689,12 L9.22,9.53 C8.927,9.237 8.927,8.763 9.22,8.47 C9.513,8.177 9.987,8.177 10.28,8.47 Z"></path></svg>`;
 const DRAG_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path d="M12.25 3.25C13.2174 3.25 14.0541 3.80066 14.4697 4.60449C14.8444 4.38042 15.2817 4.25 15.75 4.25C17.0349 4.25 18.0917 5.21952 18.2324 6.4668C18.5434 6.328 18.8875 6.25 19.25 6.25C20.6307 6.25 21.75 7.36929 21.75 8.75V12.7998C21.75 17.1905 18.1905 20.75 13.7998 20.75H10.0586C5.74608 20.7499 2.25012 17.2539 2.25 12.9414V12C2.25 10.4812 3.48122 9.25 5 9.25C5.45058 9.25 5.87468 9.36065 6.25 9.55273V6.75C6.25 5.36929 7.36929 4.25 8.75 4.25C9.21802 4.25 9.65476 4.38069 10.0293 4.60449C10.4449 3.80044 11.2825 3.25 12.25 3.25ZM12.25 4.75C11.6977 4.75 11.25 5.19772 11.25 5.75V8C11.25 8.41421 10.9142 8.75 10.5 8.75C10.0858 8.75 9.75 8.41421 9.75 8V6.75C9.75 6.19772 9.30228 5.75 8.75 5.75C8.19772 5.75 7.75 6.19772 7.75 6.75V12.9414C7.74988 13.3555 7.41414 13.6914 7 13.6914C6.58586 13.6914 6.25012 13.3555 6.25 12.9414V12C6.25 11.3096 5.69036 10.75 5 10.75C4.30964 10.75 3.75 11.3096 3.75 12V12.9414C3.75012 16.4255 6.57451 19.2499 10.0586 19.25H13.7998C17.362 19.25 20.25 16.362 20.25 12.7998V8.75C20.25 8.19772 19.8023 7.75 19.25 7.75C18.6977 7.75 18.25 8.19772 18.25 8.75V9.5C18.25 9.91421 17.9142 10.25 17.5 10.25C17.0858 10.25 16.75 9.91421 16.75 9.5V6.75C16.75 6.19772 16.3023 5.75 15.75 5.75C15.1977 5.75 14.75 6.19772 14.75 6.75V8.5C14.75 8.91421 14.4142 9.25 14 9.25C13.5858 9.25 13.25 8.91421 13.25 8.5V5.75C13.25 5.19772 12.8023 4.75 12.25 4.75Z" fill="currentColor"></path></svg>`;
@@ -48,8 +56,8 @@ const COPY_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" wi
 const RESIZE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path d="M16.435 18.7485C16.245 18.7485 16.055 18.6785 15.905 18.5285C15.615 18.2385 15.615 17.7585 15.905 17.4685L17.905 15.4685C18.195 15.1785 18.675 15.1785 18.965 15.4685C19.255 15.7585 19.255 16.2385 18.965 16.5285L16.965 18.5285C16.815 18.6785 16.625 18.7485 16.435 18.7485ZM11.435 18.7485C11.245 18.7485 11.055 18.6785 10.905 18.5285C10.615 18.2385 10.615 17.7585 10.905 17.4685L17.905 10.4685C18.195 10.1785 18.675 10.1785 18.965 10.4685C19.255 10.7585 19.255 11.2385 18.965 11.5285L11.965 18.5285C11.815 18.6785 11.625 18.7485 11.435 18.7485ZM6.435 18.7485C6.245 18.7485 6.055 18.6785 5.905 18.5285C5.615 18.2385 5.615 17.7585 5.905 17.4685L17.905 5.46848C18.195 5.17848 18.675 5.17848 18.965 5.46848C19.255 5.75848 19.255 6.23848 18.965 6.52848L6.965 18.5285C6.815 18.6785 6.625 18.7485 6.435 18.7485Z" fill="currentColor"></path></svg>`;
 const MERGE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18"/><path d="M12 3l-4 4M12 3l4 4"/><path d="M4 21h16"/></svg>`;
 
-const MIN_W: Record<ObjectKind, number> = { text: 40, formula: 60, plot: 240 };
-const MIN_H: Record<ObjectKind, number> = { text: 40, formula: 40, plot: 180 };
+const MIN_W: Record<ObjectKind, number> = { text: 40, formula: 60, plot: 240, animation: 120 };
+const MIN_H: Record<ObjectKind, number> = { text: 40, formula: 40, plot: 180, animation: 90 };
 
 export function minimumObjectSize(kind: ObjectKind): { w: number; h: number } {
   return { w: MIN_W[kind], h: MIN_H[kind] };
@@ -65,12 +73,16 @@ export class ObjectManager {
       dragBar: HTMLElement;
       resizeHandle: HTMLElement;
       acceptBtn: HTMLElement;
+      playPauseBtn?: HTMLElement;
+      restartBtn?: HTMLElement;
     }
   >();
   private hostRoot: HTMLDivElement;
   private style: HTMLStyleElement;
   private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
+  private animRafId: number | null = null;
+  private animCanvases = new Map<string, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }>();
 
   constructor(private opts: ObjectMountOptions) {
     this.hostRoot = document.createElement("div");
@@ -244,6 +256,11 @@ export class ObjectManager {
   }
 
   destroy(): void {
+    if (this.animRafId != null) {
+      cancelAnimationFrame(this.animRafId);
+      this.animRafId = null;
+    }
+    this.animCanvases.clear();
     this.clear();
     this.hostRoot.remove();
     this.style.remove();
@@ -295,14 +312,31 @@ export class ObjectManager {
     body.style.cssText =
       "width:100%;height:100%;flex:1;position:relative;border-radius:6px;overflow:hidden;touch-action:none;overscroll-behavior:contain;";
 
-    const img = document.createElement("img");
-    img.draggable = false;
-    img.style.cssText =
-      "width:100%;height:100%;border:0;display:block;pointer-events:none;object-fit:fill;";
-    img.alt = "";
-    if (item.image) img.src = item.image.toDataURL();
-
-    body.append(img);
+    if (item.kind === "animation") {
+      const canvas = document.createElement("canvas");
+      canvas.width = item.contentW;
+      canvas.height = item.contentH;
+      canvas.style.cssText =
+        "width:100%;height:100%;border:0;display:block;pointer-events:none;background:transparent;";
+      const ctx = canvas.getContext("2d");
+      if (ctx && item.animationScene) {
+        this.animCanvases.set(item.id, { canvas, ctx });
+        renderAnimationScene(ctx, item.animationScene, 0);
+        if (!item.paused) {
+          item.startedAt = performance.now();
+          this.startAnimationLoop();
+        }
+      }
+      body.append(canvas);
+    } else {
+      const img = document.createElement("img");
+      img.draggable = false;
+      img.style.cssText =
+        "width:100%;height:100%;border:0;display:block;pointer-events:none;object-fit:fill;";
+      img.alt = "";
+      if (item.image) img.src = item.image.toDataURL();
+      body.append(img);
+    }
 
     const chrome = document.createElement("div");
     chrome.className = "drawva-object-chrome";
@@ -311,6 +345,53 @@ export class ObjectManager {
 
     const leftGroup = document.createElement("div");
     leftGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
+
+    let playPauseBtn: HTMLButtonElement | undefined;
+    let restartBtn: HTMLButtonElement | undefined;
+    if (item.kind === "animation") {
+      playPauseBtn = document.createElement("button");
+      playPauseBtn.type = "button";
+      playPauseBtn.className = "drawva-object-btn";
+      playPauseBtn.innerHTML = item.paused ? PLAY_SVG : PAUSE_SVG;
+      playPauseBtn.title = item.paused ? "Play animation" : "Pause animation";
+      playPauseBtn.style.cssText =
+        "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
+      playPauseBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+      playPauseBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        item.paused = !item.paused;
+        if (playPauseBtn) {
+          playPauseBtn.innerHTML = item.paused ? PLAY_SVG : PAUSE_SVG;
+          playPauseBtn.title = item.paused ? "Play animation" : "Pause animation";
+        }
+        if (!item.paused) {
+          item.startedAt = performance.now();
+          this.startAnimationLoop();
+        }
+      });
+
+      restartBtn = document.createElement("button");
+      restartBtn.type = "button";
+      restartBtn.className = "drawva-object-btn";
+      restartBtn.innerHTML = RESTART_SVG;
+      restartBtn.title = "Restart animation";
+      restartBtn.style.cssText =
+        "width:32px;height:32px;background:transparent;border:none;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;pointer-events:auto;user-select:none;touch-action:none;";
+      restartBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+      restartBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        item.startedAt = performance.now();
+        item.playheadMs = 0;
+        item.paused = false;
+        if (playPauseBtn) {
+          playPauseBtn.innerHTML = PAUSE_SVG;
+          playPauseBtn.title = "Pause animation";
+        }
+        this.startAnimationLoop();
+      });
+
+      leftGroup.append(playPauseBtn, restartBtn);
+    }
 
     const acceptBtn = document.createElement("button");
     acceptBtn.type = "button";
@@ -433,14 +514,43 @@ export class ObjectManager {
 
     this.hostRoot.append(shell);
     this.shells.set(item.id, shell);
-    this.toolbars.set(item.id, { chrome, dragBar, resizeHandle, acceptBtn });
+    this.toolbars.set(item.id, { chrome, dragBar, resizeHandle, acceptBtn, playPauseBtn, restartBtn });
     this.applyMode(item.id);
+  }
+
+  private startAnimationLoop(): void {
+    if (this.animRafId != null) return;
+    const loop = () => {
+      const now = performance.now();
+      let hasActive = false;
+      for (const item of this.items.values()) {
+        if (item.kind !== "animation" || !item.animationScene) continue;
+        hasActive = true;
+        const entry = this.animCanvases.get(item.id);
+        if (!entry) continue;
+        if (!item.paused) {
+          const startedAt = item.startedAt ?? now;
+          const elapsed = now - startedAt + (item.playheadMs ?? 0);
+          const duration = item.animationScene.durationMs || 8000;
+          const playhead = item.animationScene.loop ? elapsed % duration : Math.min(elapsed, duration);
+          entry.ctx.clearRect(0, 0, entry.canvas.width, entry.canvas.height);
+          renderAnimationScene(entry.ctx, item.animationScene, playhead);
+        }
+      }
+      if (hasActive) {
+        this.animRafId = requestAnimationFrame(loop);
+      } else {
+        this.animRafId = null;
+      }
+    };
+    this.animRafId = requestAnimationFrame(loop);
   }
 
   private unmount(id: string): void {
     this.shells.get(id)?.remove();
     this.shells.delete(id);
     this.toolbars.delete(id);
+    this.animCanvases.delete(id);
   }
 
   private position(item: ObjectItem): void {

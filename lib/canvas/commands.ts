@@ -4,6 +4,10 @@ import {
   DEFAULT_WIDGET_WIDTH,
   DEFAULT_WIDGET_HEIGHT,
 } from "@/lib/ai/geometry";
+import {
+  type AnimationScene,
+  normalizeAnimationScene,
+} from "./animation";
 
 export const MAX_COMMANDS = 16;
 export const AI_TEXT_MAX_LENGTH = 800;
@@ -122,10 +126,25 @@ export interface DiagramSourceCommand {
   placement?: string;
 }
 
+export interface AnimateSceneCommand {
+  tool: "animate_scene";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  durationMs: number;
+  loop: boolean;
+  objects: unknown[];
+  motions: unknown[];
+  scene: AnimationScene;
+  placement?: string;
+}
+
 export type CanvasCommand =
   | WriteTextCommand
   | DrawFormulaCommand
   | PlotFunctionCommand
+  | AnimateSceneCommand
   | DrawCommand
   | EraseCommand
   | HtmlWidgetCommand
@@ -148,6 +167,8 @@ export interface CommandValidationContext {
   widgetEditBox?: { x: number; y: number; w: number; h: number };
   sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>;
   widgetGeometry?: { max?: { w?: number; h?: number } } | null;
+  /** Shared per-reply accumulator enforcing MAX_PLOT_PIXELS_TOTAL across plots. */
+  plotBudget?: { used: number };
 }
 
 const isFiniteNum = n as (v: unknown, min?: number, max?: number) => boolean;
@@ -612,6 +633,85 @@ export function fitWidgetGeometry(
   return sanitizeWidgetGeometry({ x, y, w, h }, widgetGeometry);
 }
 
+const PLOT_MIN_W = 240;
+const PLOT_MIN_H = 180;
+const PLOT_MAX_W = 6000;
+const PLOT_MAX_H = 6000;
+const PLOT_DEFAULT_W = 1200;
+const PLOT_DEFAULT_H = 800;
+
+/**
+ * Plot-specific geometry. The prompt promises min 240x180, aspect 1:6..6:1 and
+ * per-reply pixel budgets; the generic widget geometry would clamp to 300x200
+ * instead and never check aspect or pixels.
+ */
+function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationContext): Box | null {
+  const targetBox = (c.targetBox && typeof c.targetBox === "object"
+    ? c.targetBox
+    : null) as Record<string, unknown> | null;
+  const rawX = Number(targetBox && typeof targetBox.x === "number" ? targetBox.x : c.x);
+  const rawY = Number(targetBox && typeof targetBox.y === "number" ? targetBox.y : c.y);
+  let w = Number(targetBox && typeof targetBox.w === "number" ? targetBox.w : c.w);
+  let h = Number(targetBox && typeof targetBox.h === "number" ? targetBox.h : c.h);
+  if (!Number.isFinite(w) || w <= 0) w = PLOT_DEFAULT_W;
+  if (!Number.isFinite(h) || h <= 0) h = PLOT_DEFAULT_H;
+
+  w = clampNum(w, PLOT_MIN_W, PLOT_MAX_W);
+  h = clampNum(h, PLOT_MIN_H, PLOT_MAX_H);
+  if (w / h > 6) w = Math.min(PLOT_MAX_W, Math.floor(h * 6));
+  if (h / w > 6) h = Math.min(PLOT_MAX_H, Math.floor(w * 6));
+  if (w * h > MAX_PLOT_PIXELS_SINGLE) {
+    const scale = Math.sqrt(MAX_PLOT_PIXELS_SINGLE / (w * h));
+    w = Math.max(PLOT_MIN_W, Math.floor(w * scale));
+    h = Math.max(PLOT_MIN_H, Math.floor(h * scale));
+  }
+  if (ctx.plotBudget) {
+    const remaining = MAX_PLOT_PIXELS_TOTAL - ctx.plotBudget.used;
+    if (w * h > remaining) {
+      if (remaining < PLOT_MIN_W * PLOT_MIN_H) return null;
+      const scale = Math.sqrt(remaining / (w * h));
+      w = Math.max(PLOT_MIN_W, Math.floor(w * scale));
+      h = Math.max(PLOT_MIN_H, Math.floor(h * scale));
+      if (w * h > remaining) return null;
+    }
+    ctx.plotBudget.used += w * h;
+  }
+
+  const blockers = occupancy(ctx.changedBox, ctx.sceneItems, ctx.visibleRect);
+  let x: number;
+  let y: number;
+  if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
+    x = clampNum(rawX, 0, SIZE - w);
+    y = clampNum(rawY, 0, SIZE - h);
+  } else {
+    const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
+    if (anchor) {
+      const preferred = pickPreferredSide(
+        String(c.placement || "").toLowerCase(),
+        anchor,
+        w,
+        h,
+        ctx.visibleRect,
+        blockers,
+        "below"
+      );
+      const near = placeAroundAnchor(anchor, w, h, ctx.visibleRect, blockers, preferred);
+      x = near.x;
+      y = near.y;
+    } else if (ctx.visibleRect) {
+      const near = placeInVisible(ctx.visibleRect, w, h, blockers);
+      x = near.x;
+      y = near.y;
+    } else {
+      x = 1000;
+      y = 1000;
+    }
+    x = clampNum(x, 0, SIZE - w);
+    y = clampNum(y, 0, SIZE - h);
+  }
+  return { x, y, w, h };
+}
+
 /**
  * Recursively extracts an HTML or SVG string from arbitrary model JSON structures.
  */
@@ -864,22 +964,26 @@ export function validateCommand(
   let tool = canonicalToolName(c.tool || c.type || c.name || c.kind || c.action);
 
   // If tool is unrecognized, infer from content structure
-  if (!["html_widget", "write_text", "draw_formula", "plot_function", "diagram_source", "draw", "erase"].includes(tool)) {
-    const potentialHtml = extractHtmlOrSvg(c);
-    if (potentialHtml.includes("<svg") || potentialHtml.includes("<html") || potentialHtml.includes("<!DOCTYPE") || potentialHtml.includes("<div") || potentialHtml.includes("<canvas")) {
-      tool = "html_widget";
+  if (!["html_widget", "write_text", "draw_formula", "plot_function", "animate_scene", "diagram_source", "draw", "erase"].includes(tool)) {
+    if (Array.isArray(c.objects) && Array.isArray(c.motions)) {
+      tool = "animate_scene";
     } else {
-      const potentialLatex = extractLatex(c);
-      if (potentialLatex && (potentialLatex.includes("\\") || potentialLatex.includes("^") || potentialLatex.includes("_"))) {
-        tool = "draw_formula";
+      const potentialHtml = extractHtmlOrSvg(c);
+      if (potentialHtml.includes("<svg") || potentialHtml.includes("<html") || potentialHtml.includes("<!DOCTYPE") || potentialHtml.includes("<div") || potentialHtml.includes("<canvas")) {
+        tool = "html_widget";
       } else {
-        const potentialExpr = extractExpression(c);
-        if (potentialExpr && /[a-z0-9]/.test(potentialExpr) && (potentialExpr.includes("x") || potentialExpr.includes("sin") || potentialExpr.includes("cos"))) {
-          tool = "plot_function";
+        const potentialLatex = extractLatex(c);
+        if (potentialLatex && (potentialLatex.includes("\\") || potentialLatex.includes("^") || potentialLatex.includes("_"))) {
+          tool = "draw_formula";
         } else {
-          const potentialText = extractText(c);
-          if (potentialText) {
-            tool = "write_text";
+          const potentialExpr = extractExpression(c);
+          if (potentialExpr && /[a-z0-9]/.test(potentialExpr) && (potentialExpr.includes("x") || potentialExpr.includes("sin") || potentialExpr.includes("cos"))) {
+            tool = "plot_function";
+          } else {
+            const potentialText = extractText(c);
+            if (potentialText) {
+              tool = "write_text";
+            }
           }
         }
       }
@@ -964,7 +1068,7 @@ export function validateCommand(
       if (!rawExpr.trim() || rawExpr.length > 180) {
         return fail("plot_function.bad-expr");
       }
-      const geom = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
+      const geom = fitPlotGeometry(c, ctx);
       if (!geom) return fail("plot_function.bad-geom");
 
       return {
@@ -975,6 +1079,41 @@ export function validateCommand(
         h: geom.h,
         expression: rawExpr.trim(),
         color: ctx.aiColor,
+      };
+    }
+    case "animate_scene": {
+      const geom = fitWidgetGeometry(
+        c,
+        ctx.visibleRect,
+        ctx.changedBox,
+        !ctx.keepPosition,
+        ctx.widgetEditBox,
+        ctx.sceneItems,
+        ctx.widgetGeometry
+      );
+      const sceneCmd = {
+        ...c,
+        tool: "animate_scene",
+        x: geom ? geom.x : Number(c.x) || 0,
+        y: geom ? geom.y : Number(c.y) || 0,
+        w: geom ? geom.w : Number(c.w) || 800,
+        h: geom ? geom.h : Number(c.h) || 600,
+      };
+      const normalized = normalizeAnimationScene(sceneCmd, SIZE);
+      if (!normalized) return fail("animate_scene.invalid");
+
+      return {
+        tool: "animate_scene",
+        x: normalized.x,
+        y: normalized.y,
+        w: normalized.w,
+        h: normalized.h,
+        durationMs: normalized.durationMs,
+        loop: normalized.loop,
+        objects: normalized.objects,
+        motions: normalized.motions,
+        scene: normalized,
+        ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
       };
     }
     case "html_widget": {
@@ -1253,6 +1392,9 @@ export function canonicalToolName(value: unknown): string {
   if (raw === "plotfunction" || raw === "plot" || raw === "functionplot") {
     return "plot_function";
   }
+  if (raw === "animatescene" || raw === "animation" || raw === "anim" || raw === "sceneanimation") {
+    return "animate_scene";
+  }
   if (raw === "diagramsource" || raw === "diagram" || raw === "mermaid") {
     return "diagram_source";
   }
@@ -1277,11 +1419,12 @@ export function validateCommands(
   };
   const validated: CanvasCommand[] = [];
   if (!Array.isArray(rawCmds)) return { commands: [], rejected: ["not-array"] };
-  const acceptedTools = new Set(["write_text", "draw_formula", "plot_function", "draw", "erase"]);
+  const acceptedTools = new Set(["write_text", "draw_formula", "plot_function", "animate_scene", "draw", "erase"]);
   acceptedTools.add("html_widget"); // General HTML is mandatory and always enabled
   if (ctx.plugins.has("flowchart") || ctx.plugins.size === 0) acceptedTools.add("diagram_source");
 
   let widgetSlots = ctx.widgetSlots;
+  const plotBudget = { used: 0 };
   for (const raw of rawCmds.slice(0, MAX_COMMANDS)) {
     const c = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
     if (!c) {
@@ -1314,7 +1457,7 @@ export function validateCommands(
       reportReject(`not-allowed:${tool}`);
       continue;
     }
-    const cmd = validateCommand({ ...c, tool }, { ...ctx, widgetSlots }, reportReject);
+    const cmd = validateCommand({ ...c, tool }, { ...ctx, widgetSlots, plotBudget }, reportReject);
     if (!cmd) {
       continue;
     }

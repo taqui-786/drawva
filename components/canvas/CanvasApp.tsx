@@ -1139,6 +1139,29 @@ export function CanvasApp() {
         setMode("select");
       }
     });
+    draft.setRenderer("animate_scene", (_eng, cmd) => {
+      if (cmd.tool !== "animate_scene") return;
+      const scene = (cmd as { scene?: import("@/lib/canvas/animation").AnimationScene }).scene;
+      addObject({
+        id: `animation-${Date.now()}`,
+        kind: "animation",
+        x: cmd.x,
+        y: cmd.y,
+        w: cmd.w,
+        h: cmd.h,
+        contentW: cmd.w,
+        contentH: cmd.h,
+        source: JSON.stringify(scene || cmd),
+        color: "",
+        fontSize: 0,
+        status: "draft",
+        animationScene: scene,
+        paused: false,
+        playheadMs: 0,
+        startedAt: performance.now(),
+      });
+      setMode("select");
+    });
     draft.setRenderer("diagram_source", async (_eng, cmd) => {
       if (cmd.tool !== "diagram_source") return;
       const targetId = activeEditTargetRef.current;

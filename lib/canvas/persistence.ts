@@ -6,6 +6,7 @@ import { renderTextBlock } from "./textTool";
 import { renderFormula } from "./formulas";
 import { plotCommand } from "./plotter";
 import { renderWidgetToContext } from "./atlas";
+import { renderAnimationScene } from "./animation";
 
 export interface ProjectSnapshot {
   version: 1;
@@ -137,6 +138,23 @@ export async function renderObject(
       if (canvas.width <= 0 || canvas.height <= 0) return null;
       return { ...base, image: canvas, contentW: o.w, contentH: o.h };
     }
+    if (o.kind === "animation") {
+      let scene = o.animationScene;
+      if (!scene && o.source) {
+        try {
+          scene = JSON.parse(o.source);
+        } catch {}
+      }
+      return {
+        ...base,
+        contentW: o.w,
+        contentH: o.h,
+        animationScene: scene,
+        paused: o.paused ?? false,
+        playheadMs: o.playheadMs ?? 0,
+        startedAt: performance.now(),
+      };
+    }
     return null;
   } catch {
     return null;
@@ -252,7 +270,15 @@ export async function exportPng(
   }
 
   for (const o of objectList) {
-    if (o.image) q.drawImage(o.image, o.x, o.y, o.w, o.h);
+    if (o.image) {
+      q.drawImage(o.image, o.x, o.y, o.w, o.h);
+    } else if (o.kind === "animation" && o.animationScene) {
+      q.save();
+      q.translate(o.x, o.y);
+      q.scale(o.w / o.animationScene.w, o.h / o.animationScene.h);
+      renderAnimationScene(q, o.animationScene, o.playheadMs ?? 0);
+      q.restore();
+    }
   }
 
   out.toBlob((blob) => {
