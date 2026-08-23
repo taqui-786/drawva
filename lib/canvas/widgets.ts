@@ -106,6 +106,26 @@ export class WidgetManager {
   private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
   private snapshotWaiters = new Map<string, Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>>();
+  private lastLayoutSize = new Map<string, string>();
+
+  private onPointerMove = (e: PointerEvent) => {
+    const cb = this.opts.callbacks;
+    if (!cb) return;
+    for (const id of this.widgets.keys()) {
+      cb.onDragMove?.(id, e);
+      const mode = this.widgets.get(id)?.resizeMode ?? "corner";
+      cb.onResizeMove?.(id, mode, e);
+    }
+  };
+
+  private onPointerUp = () => {
+    const cb = this.opts.callbacks;
+    if (!cb) return;
+    for (const id of this.widgets.keys()) {
+      cb.onDragEnd?.(id);
+      cb.onResizeEnd?.(id);
+    }
+  };
 
   constructor(private opts: WidgetMountOptions) {
     this.hostRoot = document.createElement("div");
@@ -183,6 +203,8 @@ export class WidgetManager {
     `;
     opts.engineContainer.append(this.hostRoot, this.style);
     window.addEventListener("message", this.onMessage);
+    window.addEventListener("pointermove", this.onPointerMove);
+    window.addEventListener("pointerup", this.onPointerUp);
   }
 
   private onMessage = (e: MessageEvent) => {
@@ -376,6 +398,8 @@ export class WidgetManager {
 
   destroy(): void {
     window.removeEventListener("message", this.onMessage);
+    window.removeEventListener("pointermove", this.onPointerMove);
+    window.removeEventListener("pointerup", this.onPointerUp);
     this.clear();
     this.hostRoot.remove();
     this.style.remove();
@@ -591,16 +615,6 @@ export class WidgetManager {
     resizeHandle.addEventListener("pointerdown", beginResize("corner"));
     resizeWidth.addEventListener("pointerdown", beginResize("horizontal"));
     resizeHeight.addEventListener("pointerdown", beginResize("vertical"));
-    window.addEventListener("pointermove", (e) => {
-      cb.onDragMove?.(widget.id, e);
-      const mode = this.widgets.get(widget.id)?.resizeMode ?? "corner";
-      cb.onResizeMove?.(widget.id, mode, e);
-    });
-    window.addEventListener("pointerup", (e) => {
-      cb.onDragEnd?.(widget.id);
-      cb.onResizeEnd?.(widget.id);
-      void e;
-    });
 
     this.hostRoot.append(shell);
     this.shells.set(widget.id, shell);
@@ -656,6 +670,7 @@ export class WidgetManager {
     this.shells.get(id)?.remove();
     this.shells.delete(id);
     this.toolbars.delete(id);
+    this.lastLayoutSize.delete(id);
   }
 
   private position(widget: WidgetItem): void {
@@ -676,7 +691,11 @@ export class WidgetManager {
     shell.style.height = `${contentH}px`;
     shell.style.transform = `translate3d(${screenX}px,${screenY}px,0) scale(${scaleX},${scaleY})`;
     const frame = shell.querySelector("iframe");
-    frame?.contentWindow?.postMessage({ type: "drawva-widget-layout-size", width: contentW, height: contentH }, location.origin);
+    const sizeKey = `${contentW}x${contentH}`;
+    if (frame?.contentWindow && this.lastLayoutSize.get(widget.id) !== sizeKey) {
+      this.lastLayoutSize.set(widget.id, sizeKey);
+      frame.contentWindow.postMessage({ type: "drawva-widget-layout-size", width: contentW, height: contentH }, location.origin);
+    }
 
     const offscreen =
       screenX > viewportW ||
@@ -684,7 +703,6 @@ export class WidgetManager {
       screenX + widget.w * cam.scale < 0 ||
       screenY + widget.h * cam.scale < 0;
     shell.style.visibility = offscreen ? "hidden" : "visible";
-    this.applyMode(widget.id);
   }
 }
 

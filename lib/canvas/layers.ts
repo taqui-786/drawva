@@ -33,7 +33,7 @@ export class LayerStack {
       canvas.style.zIndex = String(LAYER_Z[name]);
       this.root.appendChild(canvas);
       this.layers.set(name, canvas);
-      const ctx = canvas.getContext("2d", { willReadFrequently: name === "ink" });
+      const ctx = canvas.getContext("2d");
       if (!ctx) throw new Error(`Canvas 2D context unavailable: ${name}`);
       this.contexts.set(name, ctx);
     }

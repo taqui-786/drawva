@@ -1214,8 +1214,13 @@ export function CanvasApp() {
     });
     drafts.current = draft;
 
+    let lastCamKey = "";
     const sync = () => {
-      setZoom(Math.round(engine.camera.scale * 100));
+      const cam = engine.camera;
+      const camKey = `${cam.panX}|${cam.panY}|${cam.scale}`;
+      if (camKey === lastCamKey) return;
+      lastCamKey = camKey;
+      setZoom(Math.round(cam.scale * 100));
       const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
       const cx = Math.round(c.x);
       const cy = Math.round(c.y);

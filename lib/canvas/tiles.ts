@@ -11,7 +11,6 @@ export class TileCache {
       const c = document.createElement("canvas");
       c.width = TILE;
       c.height = TILE;
-      c.getContext("2d", { willReadFrequently: true });
       this.tiles.set(k, c);
     }
     return this.tiles.get(k) ?? null;
