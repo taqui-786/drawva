@@ -437,7 +437,8 @@ function placeContent(
       },
       placement,
       ctx,
-      !ctx.keepPosition
+      !ctx.keepPosition,
+      false
     );
   }
 
@@ -487,12 +488,19 @@ function placeInVisible(view: Box, w: number, h: number, blockers: Box[]): { x: 
  * placed earlier in the same reply. Slide the box to the nearest clear side
  * instead of rendering over the writing. Only genuine intersections trigger —
  * tight-anchor replies like writing "5" right after "3+2=" must stay put.
+ *
+ * `allowInsideAnchor` marks visual widget commands (html_widget, diagrams,
+ * animations, plots): users legitimately target those INTO a drawn container,
+ * so a placement substantially inside the fresh-ink bbox is intentional and is
+ * kept. Plain text/formula never gets this exemption — text overlapping the
+ * ink bbox means it sits on handwriting or an arrow and must be evicted.
  */
 function rescueCollision(
   box: Box,
   placement: string,
   source: Pick<CommandValidationContext, "changedBox" | "visibleRect" | "sceneItems">,
-  allowMove: boolean
+  allowMove: boolean,
+  allowInsideAnchor: boolean
 ): Box {
   const anchor = placementAnchor(source.changedBox, source.visibleRect);
   if (!allowMove || !anchor) return box;
@@ -506,11 +514,7 @@ function rescueCollision(
     return box;
   }
   if (!overlaps(box, anchor, 4)) return box;
-  // The model intentionally placed the item inside the user's fresh ink region
-  // (e.g. inside a drawn container or right on the answered equation). The
-  // "blocker" here is the user's own ink — evicting the item to a free side
-  // defeats the container-targeting instructions, so keep the model's coords.
-  if (containmentRatio(box, anchor) >= 0.6) return box;
+  if (allowInsideAnchor && containmentRatio(box, anchor) >= 0.6) return box;
   const blockers = occupancy(source.changedBox, source.sceneItems, source.visibleRect);
   const preferred = pickPreferredSide(placement, anchor, box.w, box.h, source.visibleRect, blockers, "below");
   const near = placeAroundAnchor(anchor, box.w, box.h, source.visibleRect, blockers, preferred);
@@ -634,7 +638,7 @@ export function fitWidgetGeometry(
       widgetGeometry
     );
     if (!box) return null;
-    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !snapInPlace);
+    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !snapInPlace, true);
   }
 
   const anchor = placementAnchor(changedBox, visibleRect);
@@ -741,6 +745,7 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
       { x: clampNum(rawX, 0, SIZE - w), y: clampNum(rawY, 0, SIZE - h), w, h },
       String(c.placement || "").toLowerCase(),
       ctx,
+      true,
       true
     );
     x = rescued.x;
