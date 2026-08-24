@@ -4,6 +4,9 @@ import type { CanvasMode, Point } from "./types";
 import {
   normalizeWidgetGeometry,
   resizeWidgetGeometry,
+  settleWidgetContent,
+  MIN_WIDGET_W,
+  MIN_WIDGET_H,
   type WidgetResizeMode,
 } from "./widgetGeometry";
 
@@ -107,6 +110,7 @@ export class WidgetManager {
   private selectedId: string | null = null;
   private snapshotWaiters = new Map<string, Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>>();
   private lastLayoutSize = new Map<string, string>();
+  private lastContentFit = new Map<string, { w: number; h: number }>();
 
   private onPointerMove = (e: PointerEvent) => {
     const cb = this.opts.callbacks;
@@ -435,6 +439,27 @@ export class WidgetManager {
     this.position(w);
   }
 
+  /**
+   * Trim dead iframe space: the host measures the painted content bbox and we
+   * shrink the widget to hug it. Shrink-only (never grows, never fights a
+   * manual resize), epsilon-guarded so the measure -> relayout -> measure
+   * feedback loop cannot oscillate.
+   */
+  private autoFitContent(id: string, measuredW: number, measuredH: number): void {
+    const widget = this.widgets.get(id);
+    if (!widget || widget.userResized) return;
+    const applied = this.lastContentFit.get(id);
+    const curW = applied?.w ?? widget.w;
+    const curH = applied?.h ?? widget.h;
+    const nextW = measuredW < curW - 8 ? Math.max(MIN_WIDGET_W, Math.round(measuredW)) : curW;
+    const nextH = measuredH < curH - 8 ? Math.max(MIN_WIDGET_H, Math.round(measuredH)) : curH;
+    if (nextW === curW && nextH === curH) return;
+    const next = settleWidgetContent(widget, nextW, nextH);
+    Object.assign(widget, next);
+    this.lastContentFit.set(id, { w: next.w, h: next.h });
+    this.position(widget);
+  }
+
   private mount(widget: WidgetItem): void {
     const shell = document.createElement("div");
     shell.dataset.hovered = "false";
@@ -491,6 +516,10 @@ export class WidgetManager {
       } else if (event.data?.type === "drawva-widget-updated") {
         if (fallbackReveal) window.clearTimeout(fallbackReveal);
         requestAnimationFrame(() => requestAnimationFrame(reveal));
+      } else if (event.data?.type === "drawva-widget-content-size") {
+        const cw = Number(event.data.width);
+        const ch = Number(event.data.height);
+        if (Number.isFinite(cw) && Number.isFinite(ch)) this.autoFitContent(widget.id, cw, ch);
       }
     };
     window.addEventListener("message", onMessage);
@@ -671,6 +700,7 @@ export class WidgetManager {
     this.shells.delete(id);
     this.toolbars.delete(id);
     this.lastLayoutSize.delete(id);
+    this.lastContentFit.delete(id);
   }
 
   private position(widget: WidgetItem): void {

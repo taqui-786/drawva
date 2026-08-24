@@ -574,6 +574,24 @@ export function CanvasApp() {
         await draft.accept(engineAtCall);
         inkBoxRef.current = null;
         afterBoardChange();
+      } else if (data.message && data.message.trim()) {
+        // Every command was rejected client-side — still honor the mandatory
+        // visible response by writing the model's message beside the input ink
+        // instead of silently showing nothing.
+        const fallback: CanvasCommand = {
+          tool: "write_text",
+          x: Math.max(0, Math.round(box.x)),
+          y: Math.max(0, Math.round(box.y + box.h + 24)),
+          text: data.message.trim().slice(0, 800),
+          fontSize: 42,
+          maxWidth: 1200,
+          lineHeight: 1.35,
+          color: "#2679b8",
+        };
+        history.current?.recordObjects();
+        draft.setPending([fallback]);
+        await draft.accept(engineAtCall);
+        afterBoardChange();
       }
       clearAiMilestoneTimers();
       setAiStatus("done");

@@ -107,6 +107,78 @@
           return { w: w, h: h };
         }
 
+        // Union bounding box of everything that actually paints. Full-viewport
+        // layout wrappers (flex/100vh containers) paint nothing, so they are
+        // excluded and the reported box hugs the real visible content.
+        function contentBBox() {
+          var de = document.documentElement;
+          var vw = Math.max(1, de.clientWidth);
+          var vh = Math.max(1, de.clientHeight);
+          var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+          function mark(r) {
+            if (r.width <= 0 || r.height <= 0) return;
+            if (r.left < minX) minX = r.left;
+            if (r.top < minY) minY = r.top;
+            if (r.right > maxX) maxX = r.right;
+            if (r.bottom > maxY) maxY = r.bottom;
+          }
+          var nodes = document.body ? document.body.querySelectorAll('*') : [];
+          for (var i = 0; i < nodes.length; i++) {
+            var el = nodes[i];
+            var tag = el.tagName;
+            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK') continue;
+            if (isInsideSvg(el)) continue;
+            var style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) continue;
+            var r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            var bg = style.backgroundColor;
+            var paints = (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') ||
+              (parseFloat(style.borderTopWidth) || 0) > 0 ||
+              (parseFloat(style.borderLeftWidth) || 0) > 0 ||
+              tag === 'IMG' || tag === 'CANVAS' || tag === 'VIDEO' || tag === 'svg' ||
+              tag === 'IFRAME' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON';
+            if (paints) { mark(r); continue; }
+            if (el.childNodes) {
+              for (var j = 0; j < el.childNodes.length; j++) {
+                var n = el.childNodes[j];
+                if (n.nodeType === 3 && (n.textContent || '').trim()) {
+                  var range = document.createRange();
+                  range.selectNodeContents(n);
+                  var tr = range.getBoundingClientRect();
+                  if (tr.width > 0 && tr.height > 0) mark(tr);
+                }
+              }
+            }
+          }
+          if (minX === Infinity) return null;
+          return { x: minX, y: minY, w: maxX - minX, h: maxY - minY, vw: vw, vh: vh };
+        }
+
+        var contentSizeTimer = 0;
+        function postContentSize() {
+          try {
+            var b = contentBBox();
+            if (!b) return;
+            // Content that legitimately fills the frame has no dead space to trim.
+            if (b.w >= b.vw * 0.98 && b.h >= b.vh * 0.98) return;
+            window.parent.postMessage({
+              type: 'drawva-widget-inner-content-size',
+              width: Math.ceil(b.w) + 2,
+              height: Math.ceil(b.h) + 2
+            }, '*');
+          } catch (e) {}
+        }
+        function scheduleContentSize() {
+          if (contentSizeTimer) return;
+          contentSizeTimer = setTimeout(function() { contentSizeTimer = 0; postContentSize(); }, 200);
+        }
+        setTimeout(postContentSize, 350);
+        setTimeout(postContentSize, 1500);
+        if (window.ResizeObserver && document.body) {
+          new ResizeObserver(scheduleContentSize).observe(document.body);
+        }
+
         function canvasToDataUrl(canvas) {
           try {
             return canvas.toDataURL('image/webp', 0.92);
@@ -349,6 +421,12 @@
       if (!fromInner) return;
       // Forward snapshot response from inner iframe up to parent
       postAnywhere({ type: "drawva-widget-snapshot", reqId: data.reqId, dataUrl: data.dataUrl, w: data.w, h: data.h });
+    } else if (data.type === "drawva-widget-inner-content-size") {
+      if (!fromInner) return;
+      const cw = Math.round(Number(data.width));
+      const ch = Math.round(Number(data.height));
+      if (!Number.isFinite(cw) || !Number.isFinite(ch) || cw < 40 || ch < 30) return;
+      postAnywhere({ type: "drawva-widget-content-size", width: cw, height: ch });
     }
   });
 

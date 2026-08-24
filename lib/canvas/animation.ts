@@ -517,9 +517,12 @@ export function normalizeAnimationScene(
   const motions: AnimationMotion[] = [];
   for (const m of rec.motions) {
     const motion = normalizeMotion(m, ids, durationMs, width, height);
-    if (!motion) return null;
-    motions.push(motion);
+    // A single malformed motion (e.g. keyframes using unsupported properties
+    // like points or x1/y1) must not void the whole scene — drop it and keep
+    // the valid ones so the animation still renders.
+    if (motion) motions.push(motion);
   }
+  if (!motions.length) return null;
 
   return {
     tool: "animate_scene",

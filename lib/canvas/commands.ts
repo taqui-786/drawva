@@ -225,6 +225,13 @@ function viewOverlapRatio(box: Box, view?: Box): number {
   return (ix * iy) / Math.max(1, box.w * box.h);
 }
 
+/** Fraction of `box` that lies inside `outer`. */
+function containmentRatio(box: Box, outer: Box): number {
+  const ix = Math.max(0, Math.min(box.x + box.w, outer.x + outer.w) - Math.max(box.x, outer.x));
+  const iy = Math.max(0, Math.min(box.y + box.h, outer.y + outer.h) - Math.max(box.y, outer.y));
+  return (ix * iy) / Math.max(1, box.w * box.h);
+}
+
 function slotFor(anchor: Box, w: number, h: number, dir: Side, gap = PLACE_GAP): { x: number; y: number } {
   if (dir === "right") return { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) };
   if (dir === "left") return { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) };
@@ -499,6 +506,11 @@ function rescueCollision(
     return box;
   }
   if (!overlaps(box, anchor, 4)) return box;
+  // The model intentionally placed the item inside the user's fresh ink region
+  // (e.g. inside a drawn container or right on the answered equation). The
+  // "blocker" here is the user's own ink — evicting the item to a free side
+  // defeats the container-targeting instructions, so keep the model's coords.
+  if (containmentRatio(box, anchor) >= 0.6) return box;
   const blockers = occupancy(source.changedBox, source.sceneItems, source.visibleRect);
   const preferred = pickPreferredSide(placement, anchor, box.w, box.h, source.visibleRect, blockers, "below");
   const near = placeAroundAnchor(anchor, box.w, box.h, source.visibleRect, blockers, preferred);
