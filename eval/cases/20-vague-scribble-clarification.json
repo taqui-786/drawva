@@ -1,0 +1,65 @@
+{
+  "id": "vague-scribble-clarification",
+  "description": "ambiguous handwritten scribble asking for clarification",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-20",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 16000,
+        "y": 2000,
+        "w": 3000,
+        "h": 2000
+      },
+      "changedBox": {
+        "x": 16200,
+        "y": 2200,
+        "w": 200,
+        "h": 80
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 16200,
+          "y": 2200,
+          "w": 200,
+          "h": 80
+        },
+        "imageRect": {
+          "x": 1620,
+          "y": 220,
+          "w": 20,
+          "h": 8
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "?~?",
+      "spatialPlan": "Ask clarification question for unclear scribble",
+      "commands": [
+        {
+          "tool": "write_text",
+          "x": 16200,
+          "y": 2320,
+          "maxWidth": 1200,
+          "text": "What would you like me to do with this sketch? (e.g. solve, plot, explain)"
+        }
+      ]
+    },
+    "imageRef": "eval/images/vague-scribble-clarification.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "write_text"
+    ],
+    "minCommands": 1
+  }
+}

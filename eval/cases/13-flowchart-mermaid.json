@@ -1,0 +1,68 @@
+{
+  "id": "flowchart-mermaid",
+  "description": "flowchart diagram in mermaid format",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-13",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 2000,
+        "y": 7000,
+        "w": 3000,
+        "h": 2500
+      },
+      "changedBox": {
+        "x": 2200,
+        "y": 7200,
+        "w": 700,
+        "h": 120
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 2200,
+          "y": 7200,
+          "w": 700,
+          "h": 120
+        },
+        "imageRect": {
+          "x": 220,
+          "y": 720,
+          "w": 70,
+          "h": 12
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "login flowchart",
+      "spatialPlan": "Generate mermaid diagram below input",
+      "commands": [
+        {
+          "tool": "diagram_source",
+          "sourceFormat": "mermaid",
+          "title": "Login Flowchart",
+          "x": 2200,
+          "y": 7400,
+          "w": 800,
+          "h": 600,
+          "source": "graph TD\n  A[Start] --> B{Logged In?}\n  B -- Yes --> C[Dashboard]\n  B -- No --> D[Login Form]"
+        }
+      ]
+    },
+    "imageRef": "eval/images/flowchart-mermaid.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "diagram_source"
+    ],
+    "minCommands": 1
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "id": "box-container-html",
+  "description": "handwritten label + arrow into empty drawn box",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-01",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 7000,
+        "y": 9000,
+        "w": 4000,
+        "h": 3000
+      },
+      "changedBox": {
+        "x": 8000,
+        "y": 9800,
+        "w": 1800,
+        "h": 1200
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 8000,
+          "y": 9800,
+          "w": 1800,
+          "h": 1200
+        },
+        "imageRect": {
+          "x": 800,
+          "y": 980,
+          "w": 180,
+          "h": 120
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "news in this box -> [box]",
+      "spatialPlan": "Render HTML widget within drawn container",
+      "commands": [
+        {
+          "tool": "html_widget",
+          "title": "News Brief",
+          "x": 8020,
+          "y": 9820,
+          "w": 1760,
+          "h": 1160,
+          "placement": "inside_target",
+          "html": "<div style=\"padding:16px;\"><h2>Headlines</h2><ul><li>Launch Day</li></ul></div>"
+        }
+      ]
+    },
+    "imageRef": "eval/images/box-container-html.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "html_widget",
+      "diagram_source"
+    ],
+    "geometry": {
+      "insideBox": [
+        8000,
+        9800,
+        1800,
+        1200
+      ],
+      "tolerance": 120
+    },
+    "mustNotOverlapSceneItems": true,
+    "minCommands": 1
+  }
+}

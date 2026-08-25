@@ -1,0 +1,67 @@
+{
+  "id": "plot-single-variable",
+  "description": "plot single variable function y = sin(x)*exp(-0.2*x)",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-05",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 5000,
+        "y": 5000,
+        "w": 4000,
+        "h": 3000
+      },
+      "changedBox": {
+        "x": 5200,
+        "y": 5300,
+        "w": 600,
+        "h": 150
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 5200,
+          "y": 5300,
+          "w": 600,
+          "h": 150
+        },
+        "imageRect": {
+          "x": 520,
+          "y": 530,
+          "w": 60,
+          "h": 15
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "plot",
+      "observedText": "plot y = sin(x)*exp(-0.2*x)",
+      "spatialPlan": "Plot damped sinusoidal function below writing",
+      "commands": [
+        {
+          "tool": "plot_function",
+          "x": 5200,
+          "y": 5600,
+          "w": 1200,
+          "h": 800,
+          "expression": "sin(x)*exp(-0.2*x)",
+          "placement": "below"
+        }
+      ]
+    },
+    "imageRef": "eval/images/plot-single-variable.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "plot_function"
+    ],
+    "minCommands": 1
+  }
+}

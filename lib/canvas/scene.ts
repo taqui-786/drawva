@@ -59,6 +59,8 @@ export function buildScene(
       items.push(item);
     }
   }
+  // Sort items in spatial reading order (top-to-bottom, left-to-right)
+  items.sort((a, b) => (a.y !== b.y ? a.y - b.y : a.x - b.x));
   return { items, count: items.length };
 }
 

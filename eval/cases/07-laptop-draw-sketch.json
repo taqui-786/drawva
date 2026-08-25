@@ -1,0 +1,106 @@
+{
+  "id": "laptop-draw-sketch",
+  "description": "draw a simple laptop sketch with polyline strokes",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-07",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 4000,
+        "y": 2000,
+        "w": 3000,
+        "h": 2500
+      },
+      "changedBox": {
+        "x": 4200,
+        "y": 2200,
+        "w": 500,
+        "h": 100
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 4200,
+          "y": 2200,
+          "w": 500,
+          "h": 100
+        },
+        "imageRect": {
+          "x": 420,
+          "y": 220,
+          "w": 50,
+          "h": 10
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "draw a laptop",
+      "spatialPlan": "Draw screen rect and base polygon",
+      "commands": [
+        {
+          "tool": "draw",
+          "points": [
+            [
+              4200,
+              2400
+            ],
+            [
+              4600,
+              2400
+            ],
+            [
+              4600,
+              2700
+            ],
+            [
+              4200,
+              2700
+            ],
+            [
+              4200,
+              2400
+            ]
+          ],
+          "size": 4
+        },
+        {
+          "tool": "draw",
+          "points": [
+            [
+              4150,
+              2750
+            ],
+            [
+              4650,
+              2750
+            ],
+            [
+              4600,
+              2700
+            ],
+            [
+              4200,
+              2700
+            ]
+          ],
+          "size": 4
+        }
+      ]
+    },
+    "imageRef": "eval/images/laptop-draw-sketch.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "draw"
+    ],
+    "minCommands": 1
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "id": "widget-refine-in-place",
+  "description": "refine existing widget in-place with user annotations",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-10",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 8000,
+        "y": 2000,
+        "w": 4000,
+        "h": 3000
+      },
+      "changedBox": {
+        "x": 8500,
+        "y": 2600,
+        "w": 300,
+        "h": 120
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 8500,
+          "y": 2600,
+          "w": 300,
+          "h": 120
+        },
+        "imageRect": {
+          "x": 850,
+          "y": 260,
+          "w": 30,
+          "h": 12
+        }
+      },
+      "scene": "{\"items\":[{\"id\":\"w-1\",\"kind\":\"html\",\"x\":8200,\"y\":2200,\"w\":1000,\"h\":700,\"title\":\"Auth Flow\"}]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "add 2FA step",
+      "spatialPlan": "Update existing widget w-1 in place",
+      "commands": [
+        {
+          "tool": "html_widget",
+          "targetId": "w-1",
+          "placement": "in_place",
+          "title": "Auth Flow with 2FA",
+          "x": 8200,
+          "y": 2200,
+          "w": 1000,
+          "h": 700,
+          "html": "<div style=\"padding:16px;\"><h3>Auth Flow (2FA Added)</h3><p>Step 1: Password &rarr; Step 2: 2FA OTP</p></div>"
+        }
+      ]
+    },
+    "imageRef": "eval/images/widget-refine-in-place.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "html_widget"
+    ],
+    "minCommands": 1
+  }
+}

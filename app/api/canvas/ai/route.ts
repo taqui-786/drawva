@@ -6,6 +6,7 @@ import { widgetGeometryForViewport } from "@/lib/ai/geometry";
 import { validateCommands } from "@/lib/canvas/commands";
 import { SIZE } from "@/lib/canvas/constants";
 import { getEnabledPluginDescriptors } from "@/lib/plugins/registry";
+import { getModelTier } from "@/lib/ai/tiers";
 import type { AiRequest, AgentEvent, PluginDescriptor } from "@/lib/ai/types";
 import type { ProviderType } from "@/lib/ai/provider";
 
@@ -164,6 +165,7 @@ export async function POST(req: Request) {
     baseUrl,
     apiKey,
     model: modelId,
+    tier: getModelTier(modelId),
     enabledPluginIds,
     enabledPlugins,
   };

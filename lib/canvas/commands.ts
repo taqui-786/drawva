@@ -854,11 +854,15 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
 export function extractHtmlOrSvg(input: unknown, depth = 0): string {
   if (depth > 6 || input === null || input === undefined) return "";
   if (typeof input === "string") {
-    const s = input.trim();
+    let s = input.trim();
     if (!s) return "";
     if (s.startsWith("```")) {
-      const unwrapped = s.replace(/^```[a-zA-Z0-9_-]*\s*\n?/, "").replace(/\n?```$/, "").trim();
-      return unwrapped;
+      s = s.replace(/^```[a-zA-Z0-9_-]*\s*\n?/, "").replace(/\n?```$/, "").trim();
+    } else {
+      const fenceMatch = s.match(/```(?:html|svg|xml)?\s*([\s\S]*?)```/i);
+      if (fenceMatch && fenceMatch[1].trim()) {
+        s = fenceMatch[1].trim();
+      }
     }
     if ((s.startsWith("{") && s.endsWith("}")) || (s.startsWith("[") && s.endsWith("]"))) {
       try {
@@ -1145,8 +1149,9 @@ export function validateCommand(
         calculatedMaxWidth = Math.max(calculatedMaxWidth, Math.round(ctx.changedBox.w));
       }
 
-      if (Number.isFinite(Number(c.maxWidth)) && Number(c.maxWidth) >= minCharsWidth) {
-        calculatedMaxWidth = Math.max(calculatedMaxWidth, Number(c.maxWidth));
+      const rawMaxWidth = c.maxWidth ?? c.width ?? c.w;
+      if (Number.isFinite(Number(rawMaxWidth)) && Number(rawMaxWidth) >= minCharsWidth) {
+        calculatedMaxWidth = Math.max(calculatedMaxWidth, Number(rawMaxWidth));
       }
 
       const viewportW = ctx.visibleRect?.w ?? 2000;
@@ -1604,7 +1609,7 @@ export function canonicalToolName(value: unknown): string {
   if (raw === "diagramsource" || raw === "diagram" || raw === "mermaid") {
     return "diagram_source";
   }
-  if (raw === "draw" || raw === "sketch" || raw === "drawpoints") {
+  if (raw === "draw" || raw === "sketch" || raw === "drawpoints" || raw === "stroke" || raw === "strokes" || raw === "polyline") {
     return "draw";
   }
   if (raw === "erase" || raw === "eraser") {
@@ -1693,9 +1698,11 @@ export function validateCommands(
     // A draw command carrying an animate_scene-style objects array is a common
     // model guess — flatten it into real polyline strokes instead of rejecting.
     let expanded: Record<string, unknown>[] | null = null;
-    if (tool === "draw" && Array.isArray(c.objects) && !Array.isArray(c.points)) {
+    if ((tool === "draw" || (!c.html && !c.source && !c.text && !c.latex && !c.expression && !c.motions)) && Array.isArray(c.objects) && !Array.isArray(c.points)) {
       expanded = expandDrawObjects(c);
-      if (!expanded) {
+      if (expanded) {
+        tool = "draw";
+      } else if (tool === "draw") {
         reportReject("draw.bad");
         continue;
       }

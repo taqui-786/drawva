@@ -5,14 +5,15 @@ import { MAX_RETRIES } from "./model";
 import {
   AI_TIMEOUT_MS,
   CODE_SYSTEM_PROMPT_EXTRA,
+  FEWSHOT_SMALL_MODEL_PROMPT,
   PLUGIN_ROUTING_PROMPT,
-  PLUGIN_SYSTEM_PROMPT,
-  WIDGET_RENDERING_POLICY,
+  WIDGET_SYSTEM_PROMPT,
   THEME_PERSONAS,
   MANDATORY_VISIBLE_RESPONSE,
   RETRY_INSTRUCTION,
   SYSTEM_PROMPT,
 } from "./prompts";
+import { getModelTier, type ModelTier } from "./tiers";
 import { widgetGeometryForViewport } from "./geometry";
 import type { AiReply, AiRequest, AgentEvent, TokenUsage, AiDebugInfo } from "./types";
 
@@ -85,7 +86,12 @@ export async function runAgent(
   }
 }
 
-export function buildSystemPromptText(uiTheme?: string, pluginsEnabled = false): string {
+/**
+ * Builds the stable system prompt.
+ * Order: identity/rules -> persona -> routing/tool selection -> widget system -> (micro fewshot if not frontier) -> mandatory fallback -> JSON schema.
+ * Note: A stable prefix maximizes provider prompt caching; never interpolate volatile per-request data into system blocks.
+ */
+export function buildSystemPromptText(uiTheme?: string, pluginsEnabled = false, tier?: ModelTier): string {
   const persona = THEME_PERSONAS[uiTheme || "studio"] || THEME_PERSONAS.studio;
   const sections = [
     SYSTEM_PROMPT,
@@ -93,7 +99,11 @@ export function buildSystemPromptText(uiTheme?: string, pluginsEnabled = false):
   ];
 
   if (pluginsEnabled) {
-    sections.push(PLUGIN_ROUTING_PROMPT, PLUGIN_SYSTEM_PROMPT);
+    sections.push(PLUGIN_ROUTING_PROMPT, WIDGET_SYSTEM_PROMPT);
+  }
+
+  if (tier && tier !== "frontier") {
+    sections.push(FEWSHOT_SMALL_MODEL_PROMPT);
   }
 
   sections.push(
@@ -102,6 +112,55 @@ export function buildSystemPromptText(uiTheme?: string, pluginsEnabled = false):
   );
 
   return sections.join("\n\n");
+}
+
+export function buildRetryInstruction(rejectReasons?: string[]): string {
+  if (!rejectReasons || rejectReasons.length === 0) {
+    return RETRY_INSTRUCTION;
+  }
+
+  const corrections: string[] = [];
+  const seen = new Set<string>();
+
+  for (const r of rejectReasons) {
+    if (r.startsWith("draw.") && !seen.has("draw")) {
+      corrections.push(
+        "Your draw command was invalid. draw requires {tool:'draw', points:[[x,y],...], size:n} — one connected polyline in global coordinates. Resend the sketch as points; never use objects or nesting."
+      );
+      seen.add("draw");
+    } else if (r.startsWith("animate_scene.") && !seen.has("animate_scene")) {
+      corrections.push(
+        "animate_scene keyframes only support at, x, y, rotation, scale, opacity; drop unsupported motions or invalid object properties."
+      );
+      seen.add("animate_scene");
+    } else if (r.startsWith("plot_function.") && !seen.has("plot_function")) {
+      corrections.push(
+        "plot_function requires an ASCII math expression with variable x (e.g. sin(x)*exp(-x))."
+      );
+      seen.add("plot_function");
+    } else if (r.startsWith("html_widget.") && !seen.has("html_widget")) {
+      corrections.push(
+        "html_widget requires complete HTML/SVG document string in property 'html', with finite x, y, w, h."
+      );
+      seen.add("html_widget");
+    } else if (r.startsWith("not-allowed:") && !seen.has("not-allowed")) {
+      corrections.push(
+        "Use only enabled tools: write_text, draw_formula, plot_function, animate_scene, html_widget, diagram_source, draw, erase."
+      );
+      seen.add("not-allowed");
+    } else if (r.includes("max-1-widget") && !seen.has("widget-count")) {
+      corrections.push(
+        "Only 1 widget (html_widget or diagram_source) allowed per response. Companion write_text/draw_formula are permitted."
+      );
+      seen.add("widget-count");
+    }
+  }
+
+  if (corrections.length === 0) {
+    return RETRY_INSTRUCTION;
+  }
+
+  return `CORRECTIVE RETRY INSTRUCTION:\n${corrections.join("\n")}\nCarefully re-examine the canvas and return ONLY a valid JSON object conforming to the schema.`;
 }
 
 function userMessageText(req: AiRequest, sceneText: string): string {
@@ -133,7 +192,6 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     ...(pluginsEnabled
       ? {
           enabledPlugins: req.enabledPlugins,
-          widgetRenderingPolicy: WIDGET_RENDERING_POLICY,
         }
       : {}),
     canvasSize: { w: 20000, h: 20000 },
@@ -356,11 +414,12 @@ async function runModel(
   onEvent?.({ type: "provider_start", provider });
 
   let lastError: unknown = null;
+  let lastRejectReasons: string[] | undefined = undefined;
 
   for (let attemptNo = 0; attemptNo < MAX_RETRIES; attemptNo++) {
     const isRetry = attemptNo > 0;
     try {
-      const reply = await attemptReply(req, sceneText, model, controller, isRetry);
+      const reply = await attemptReply(req, sceneText, model, controller, isRetry, lastRejectReasons);
       console.log(`[AI Pipeline] ✅ Generation complete on attempt ${attemptNo + 1}/${MAX_RETRIES} (${reply.commands.length} commands).`);
       onEvent?.({ type: "provider_done", provider });
       return {
@@ -373,6 +432,11 @@ async function runModel(
       if (controller.signal.aborted) throw err;
       lastError = err;
       const msg = err instanceof Error ? err.message : String(err);
+      if (err && typeof err === "object" && "rejectReasons" in err && Array.isArray((err as { rejectReasons?: unknown }).rejectReasons)) {
+        lastRejectReasons = (err as { rejectReasons: string[] }).rejectReasons;
+      } else {
+        lastRejectReasons = undefined;
+      }
 
       if (isFatalAuthError(err)) {
         console.error(`[AI Pipeline] ❌ Provider rejected API key (401 Unauthorized): ${msg}`);
@@ -401,12 +465,14 @@ async function attemptReply(
   sceneText: string,
   model: BaseChatModel,
   controller: AbortController,
-  isRetry: boolean
+  isRetry: boolean,
+  lastRejectReasons?: string[]
 ): Promise<AgentReply> {
   const pluginsEnabled = Array.isArray(req.enabledPlugins) && req.enabledPlugins.length > 0;
+  const tier = req.tier ?? getModelTier(req.model);
   const system = isRetry
-    ? `${buildSystemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}\n\n${RETRY_INSTRUCTION}`
-    : `${buildSystemPromptText(req.uiTheme, pluginsEnabled)}\n\n${MANDATORY_VISIBLE_RESPONSE}`;
+    ? `${buildSystemPromptText(req.uiTheme, pluginsEnabled, tier)}\n\n${buildRetryInstruction(lastRejectReasons)}`
+    : buildSystemPromptText(req.uiTheme, pluginsEnabled, tier);
 
   const textContent = userMessageText(req, sceneText);
   const contentParts: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [

@@ -1,0 +1,72 @@
+{
+  "id": "math-derivation-multicommand",
+  "description": "quadratic formula solution with step-by-step formula and explanation",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-04",
+      "trigger": "manual",
+      "visibleRect": {
+        "x": 3000,
+        "y": 4000,
+        "w": 3500,
+        "h": 2500
+      },
+      "changedBox": {
+        "x": 3200,
+        "y": 4200,
+        "w": 800,
+        "h": 300
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 3200,
+          "y": 4200,
+          "w": 800,
+          "h": 300
+        },
+        "imageRect": {
+          "x": 320,
+          "y": 420,
+          "w": 80,
+          "h": 30
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "explain",
+      "observedText": "ax^2 + bx + c = 0, solve for x",
+      "spatialPlan": "Render explanation text and LaTeX formula side by side",
+      "commands": [
+        {
+          "tool": "write_text",
+          "x": 3200,
+          "y": 4600,
+          "maxWidth": 1600,
+          "text": "Complete the square to obtain the standard quadratic formula:"
+        },
+        {
+          "tool": "draw_formula",
+          "x": 3200,
+          "y": 4750,
+          "latex": "x = \\frac{-b \\pm \\sqrt{b^2 - 4ac}}{2a}"
+        }
+      ]
+    },
+    "imageRef": "eval/images/math-derivation-multicommand.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "draw_formula",
+      "write_text"
+    ],
+    "minCommands": 2
+  }
+}

@@ -1,0 +1,138 @@
+{
+  "id": "dancing-cat-animation",
+  "description": "animated dancing cat physics demonstration request",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-02",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 1000,
+        "y": 1000,
+        "w": 3000,
+        "h": 2000
+      },
+      "changedBox": {
+        "x": 1200,
+        "y": 1400,
+        "w": 600,
+        "h": 200
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 1200,
+          "y": 1400,
+          "w": 600,
+          "h": 200
+        },
+        "imageRect": {
+          "x": 120,
+          "y": 140,
+          "w": 60,
+          "h": 20
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "animate a dancing cat",
+      "spatialPlan": "Create 2D animation with cat body and paw oscillations",
+      "commands": [
+        {
+          "tool": "animate_scene",
+          "x": 1200,
+          "y": 1700,
+          "w": 800,
+          "h": 600,
+          "durationMs": 4000,
+          "loop": true,
+          "objects": [
+            {
+              "id": "body",
+              "type": "circle",
+              "cx": 400,
+              "cy": 300,
+              "r": 80,
+              "fill": "#f59e0b"
+            },
+            {
+              "id": "head",
+              "type": "circle",
+              "cx": 400,
+              "cy": 180,
+              "r": 50,
+              "fill": "#f59e0b"
+            },
+            {
+              "id": "pawL",
+              "type": "circle",
+              "cx": 330,
+              "cy": 320,
+              "r": 20,
+              "fill": "#ef4444"
+            },
+            {
+              "id": "pawR",
+              "type": "circle",
+              "cx": 470,
+              "cy": 320,
+              "r": 20,
+              "fill": "#ef4444"
+            }
+          ],
+          "motions": [
+            {
+              "type": "pulse",
+              "target": "body",
+              "from": 0.9,
+              "to": 1.1,
+              "periodMs": 1000
+            },
+            {
+              "type": "translate",
+              "target": "pawL",
+              "from": [
+                0,
+                0
+              ],
+              "to": [
+                0,
+                -30
+              ],
+              "periodMs": 500,
+              "alternate": true
+            },
+            {
+              "type": "translate",
+              "target": "pawR",
+              "from": [
+                0,
+                0
+              ],
+              "to": [
+                0,
+                30
+              ],
+              "periodMs": 500,
+              "alternate": true
+            }
+          ]
+        }
+      ]
+    },
+    "imageRef": "eval/images/dancing-cat-animation.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "animate_scene"
+    ],
+    "minCommands": 1
+  }
+}

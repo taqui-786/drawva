@@ -1,0 +1,65 @@
+{
+  "id": "chinese-handwriting-qa",
+  "description": "Chinese natural language physics question answered in Chinese",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-09",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 6000,
+        "y": 3000,
+        "w": 3000,
+        "h": 2000
+      },
+      "changedBox": {
+        "x": 6200,
+        "y": 3200,
+        "w": 900,
+        "h": 160
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 6200,
+          "y": 3200,
+          "w": 900,
+          "h": 160
+        },
+        "imageRect": {
+          "x": 620,
+          "y": 320,
+          "w": 90,
+          "h": 16
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "牛顿第二定律是什么？",
+      "spatialPlan": "以中文简要回答牛顿第二运动定律",
+      "commands": [
+        {
+          "tool": "write_text",
+          "x": 6200,
+          "y": 3450,
+          "maxWidth": 1600,
+          "text": "牛顿第二运动定律：物体的加速度与所受合外力成正比，与质量成反比，方向与合外力一致。即 F = ma。"
+        }
+      ]
+    },
+    "imageRef": "eval/images/chinese-handwriting-qa.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "write_text"
+    ],
+    "minCommands": 1
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "id": "malformed-keyframes-animation",
+  "description": "solar system animation with keyframes motion",
+  "mock": {
+    "userPromptText": {
+      "requestId": "case-12",
+      "trigger": "user_paused",
+      "visibleRect": {
+        "x": 12000,
+        "y": 3000,
+        "w": 3000,
+        "h": 2500
+      },
+      "changedBox": {
+        "x": 12200,
+        "y": 3200,
+        "w": 600,
+        "h": 100
+      },
+      "sourceRect": {
+        "x": 0,
+        "y": 0,
+        "w": 20000,
+        "h": 20000
+      },
+      "latestInput": {
+        "globalRect": {
+          "x": 12200,
+          "y": 3200,
+          "w": 600,
+          "h": 100
+        },
+        "imageRect": {
+          "x": 1220,
+          "y": 320,
+          "w": 60,
+          "h": 10
+        }
+      },
+      "scene": "{\"items\":[]}",
+      "enabledPlugins": []
+    },
+    "rawModelResponse": {
+      "intent": "answer",
+      "observedText": "solar system orbit",
+      "spatialPlan": "Animate planet orbiting sun",
+      "commands": [
+        {
+          "tool": "animate_scene",
+          "x": 12200,
+          "y": 3400,
+          "w": 900,
+          "h": 700,
+          "durationMs": 6000,
+          "loop": true,
+          "objects": [
+            {
+              "id": "sun",
+              "type": "circle",
+              "cx": 450,
+              "cy": 350,
+              "r": 60,
+              "fill": "#f59e0b"
+            },
+            {
+              "id": "planet",
+              "type": "circle",
+              "cx": 450,
+              "cy": 150,
+              "r": 24,
+              "fill": "#2563eb"
+            }
+          ],
+          "motions": [
+            {
+              "type": "orbit",
+              "target": "planet",
+              "center": "sun",
+              "rx": 200,
+              "ry": 200,
+              "periodMs": 4000
+            }
+          ]
+        }
+      ]
+    },
+    "imageRef": "eval/images/malformed-keyframes-animation.webp"
+  },
+  "expect": {
+    "toolAny": [
+      "animate_scene"
+    ],
+    "minCommands": 1
+  }
+}

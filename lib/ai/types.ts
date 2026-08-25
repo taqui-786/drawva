@@ -60,6 +60,7 @@ export interface WidgetEditContext {
   box: AiBox;
 }
 
+import type { ModelTier } from "./tiers";
 import type { PluginMetadata, PluginDescriptor } from "../plugins/registry";
 export type { PluginMetadata, PluginDescriptor };
 
@@ -86,6 +87,7 @@ export interface AiRequest {
   baseUrl?: string;
   apiKey?: string;
   model?: string;
+  tier?: ModelTier;
   enabledPluginIds?: string[];
   enabledPlugins?: PluginDescriptor[];
 }
