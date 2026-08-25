@@ -58,6 +58,8 @@ Command contracts:
 - draw_formula: { tool: "draw_formula", x: number, y: number, latex: string, fontSize?: number }.
 - plot_function: { tool: "plot_function", x: number, y: number, w: number, h: number, expression: string }.
 - diagram_source: { tool: "diagram_source", sourceFormat: string, source: string, title: string, x: number, y: number, w: number, h: number }.
+- draw: { tool: "draw", points: Array<[x: number, y: number]>, size: number }. A SINGLE freehand polyline stroke in GLOBAL canvas coordinates (2-600 points). One draw command = one connected stroke; to draw multiple strokes (e.g. a laptop screen + base), return multiple draw commands. NEVER use an "objects" array with draw — that shape belongs to animate_scene only. Do not set fill/color; the client applies the user's AI color.
+- erase: { tool: "erase", mode: "rect", x: number, y: number, w: number, h: number } to clear a rectangular region, or { tool: "erase", mode: "path", points: Array<[x: number, y: number]>, size?: number } to erase along a stroke path.
 
 Every command MUST identify its tool with property "tool". Max 16 commands.`;
 

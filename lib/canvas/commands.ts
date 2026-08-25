@@ -1346,6 +1346,72 @@ function isPointPair(v: unknown): v is [number, number] {
   return Array.isArray(v) && v.length === 2 && typeof v[0] === "number" && typeof v[1] === "number";
 }
 
+/**
+ * Salvage an animate_scene-style `objects` array inside a raw draw command by
+ * flattening every simple primitive into a polyline stroke. Models frequently
+ * guess this shape because the schema exposes `objects` for animate_scene, and
+ * rejecting the whole sketch turns the reply into a chat message. Object
+ * coordinates are treated as local to the command's x/y box.
+ */
+function expandDrawObjects(raw: Record<string, unknown>): Record<string, unknown>[] | null {
+  const objects = Array.isArray(raw.objects) ? (raw.objects as unknown[]) : [];
+  if (!objects.length || objects.length > 32) return null;
+  const ox = Number.isFinite(Number(raw.x)) ? Number(raw.x) : 0;
+  const oy = Number.isFinite(Number(raw.y)) ? Number(raw.y) : 0;
+  const strokes: Record<string, unknown>[] = [];
+  for (const obj of objects) {
+    if (!obj || typeof obj !== "object" || Array.isArray(obj)) continue;
+    const o = obj as Record<string, unknown>;
+    const type = String(o.type || "").toLowerCase();
+    const size = Math.min(1600, Math.max(1, Math.round(Number(o.lineWidth) || 6)));
+    let pts: [number, number][] | null = null;
+    if (type === "line") {
+      const x1 = Number(o.x1);
+      const y1 = Number(o.y1);
+      const x2 = Number(o.x2);
+      const y2 = Number(o.y2);
+      if ([x1, y1, x2, y2].every(Number.isFinite)) pts = [[x1, y1], [x2, y2]];
+    } else if (type === "rect") {
+      const x = Number(o.x);
+      const y = Number(o.y);
+      const w = Number(o.w);
+      const h = Number(o.h);
+      if ([x, y, w, h].every(Number.isFinite) && w > 0 && h > 0) {
+        pts = [[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]];
+      }
+    } else if (type === "circle" || type === "ellipse") {
+      const cx = Number(o.cx);
+      const cy = Number(o.cy);
+      const rx = type === "circle" ? Number(o.r) : Number(o.rx);
+      const ry = type === "circle" ? Number(o.r) : Number(o.ry);
+      if ([cx, cy, rx, ry].every(Number.isFinite) && rx > 0 && ry > 0) {
+        pts = [];
+        for (let i = 0; i <= 28; i++) {
+          const a = (i / 28) * Math.PI * 2;
+          pts.push([cx + rx * Math.cos(a), cy + ry * Math.sin(a)]);
+        }
+      }
+    } else if (type === "path") {
+      const rawPts = Array.isArray(o.points) ? o.points : [];
+      const poly: [number, number][] = [];
+      for (const p of rawPts.slice(0, 600)) {
+        if (Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))) {
+          poly.push([Number(p[0]), Number(p[1])]);
+        }
+      }
+      if (poly.length >= 2) pts = poly;
+    }
+    if (!pts) continue;
+    strokes.push({
+      tool: "draw",
+      points: pts.map(([px, py]) => ({ x: Math.round(ox + px), y: Math.round(oy + py) })),
+      size,
+    });
+    if (strokes.length >= 16) break;
+  }
+  return strokes.length ? strokes : null;
+}
+
 export function canonicalPluginId(value: unknown): string {
   const raw = String(value || "").trim().toLowerCase().replace(/_/g, "-");
   if (!raw) return "general";
@@ -1551,18 +1617,30 @@ export function validateCommands(
       reportReject(`not-allowed:${tool}`);
       continue;
     }
-    const cmd = validateCommand(
-      { ...c, tool },
-      { ...ctx, widgetSlots, plotBudget, sceneItems: siblingBoxes },
-      reportReject
-    );
-    if (!cmd) {
-      continue;
+    // A draw command carrying an animate_scene-style objects array is a common
+    // model guess — flatten it into real polyline strokes instead of rejecting.
+    let expanded: Record<string, unknown>[] | null = null;
+    if (tool === "draw" && Array.isArray(c.objects) && !Array.isArray(c.points)) {
+      expanded = expandDrawObjects(c);
+      if (!expanded) {
+        reportReject("draw.bad");
+        continue;
+      }
     }
-    if (cmd.tool === "html_widget" || cmd.tool === "diagram_source") widgetSlots--;
-    validated.push(cmd);
-    const placed = commandBounds(cmd);
-    if (placed) siblingBoxes.push({ kind: "ai", ...placed });
+    for (const rc of expanded ?? [c]) {
+      const cmd = validateCommand(
+        { ...rc, tool },
+        { ...ctx, widgetSlots, plotBudget, sceneItems: siblingBoxes },
+        reportReject
+      );
+      if (!cmd) {
+        continue;
+      }
+      if (cmd.tool === "html_widget" || cmd.tool === "diagram_source") widgetSlots--;
+      validated.push(cmd);
+      const placed = commandBounds(cmd);
+      if (placed) siblingBoxes.push({ kind: "ai", ...placed });
+    }
   }
 
   let hasWidget = false;
