@@ -158,14 +158,33 @@
         var contentSizeTimer = 0;
         function postContentSize() {
           try {
+            var de = document.documentElement;
+            var vw = Math.max(1, de.clientWidth);
+            var vh = Math.max(1, de.clientHeight);
             var b = contentBBox();
+            var w = 0, h = 0;
+            if (b) { w = Math.ceil(b.w) + 2; h = Math.ceil(b.h) + 2; }
+            // scroll sizes reveal content clipped by overflow:hidden that the
+            // painted bbox of laid-out children may miss.
+            var sw = Math.ceil(Math.max(de.scrollWidth, document.body ? document.body.scrollWidth : 0));
+            var sh = Math.ceil(Math.max(de.scrollHeight, document.body ? document.body.scrollHeight : 0));
+            if (sw > vw + 4 || sh > vh + 4) {
+              // Content is being cropped: report the full needed size so the
+              // widget frame can grow. Cropping is never acceptable.
+              window.parent.postMessage({
+                type: 'drawva-widget-inner-content-size',
+                width: Math.max(w, sw),
+                height: Math.max(h, sh)
+              }, '*');
+              return;
+            }
             if (!b) return;
-            // Content that legitimately fills the frame has no dead space to trim.
-            if (b.w >= b.vw * 0.98 && b.h >= b.vh * 0.98) return;
+            // Content fits; only report when there is meaningful dead space to trim.
+            if (w >= vw * 0.98 && h >= vh * 0.98) return;
             window.parent.postMessage({
               type: 'drawva-widget-inner-content-size',
-              width: Math.ceil(b.w) + 2,
-              height: Math.ceil(b.h) + 2
+              width: w,
+              height: h
             }, '*');
           } catch (e) {}
         }

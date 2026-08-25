@@ -2,11 +2,13 @@ import { Camera } from "./camera";
 import { SIZE } from "./constants";
 import type { CanvasMode, Point } from "./types";
 import {
+  MAX_CONTENT_H,
+  MAX_CONTENT_W,
+  MIN_WIDGET_H,
+  MIN_WIDGET_W,
   normalizeWidgetGeometry,
   resizeWidgetGeometry,
   settleWidgetContent,
-  MIN_WIDGET_W,
-  MIN_WIDGET_H,
   type WidgetResizeMode,
 } from "./widgetGeometry";
 
@@ -56,6 +58,7 @@ export interface WidgetMountOptions {
 }
 
 const WIDGET_HOST_URL = "/widget-host.html";
+const MAX_CONTENT_FIT_GROWS = 4;
 
 const ACCEPT_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path fill="currentColor" d="M1.25,12 C1.25,6.072 6.072,1.25 12,1.25 C17.928,1.25 22.75,6.072 22.75,12 C22.75,17.928 17.928,22.75 12,22.75 C6.072,22.75 1.25,17.928 1.25,12 Z M2.75,12 C2.75,17.1 6.9,21.25 12,21.25 C17.1,21.25 21.25,17.1 21.25,12 C21.25,6.9 17.1,2.75 12,2.75 C6.9,2.75 2.75,6.9 2.75,12 Z M9.757,15.385 C9.071,14.239 7.642,13.409 7.628,13.401 C7.269,13.195 7.145,12.737 7.35,12.378 C7.556,12.019 8.013,11.894 8.372,12.099 C8.426,12.13 9.405,12.695 10.266,13.605 C11.18,11.911 13.156,8.701 15.641,7.342 C16.004,7.143 16.46,7.277 16.659,7.64 C16.858,8.003 16.724,8.459 16.361,8.658 C13.42,10.266 11.106,15.262 11.083,15.312 C10.967,15.565 10.72,15.733 10.442,15.749 C10.435,15.749 10.428,15.749 10.421,15.75 C10.414,15.75 10.407,15.75 10.401,15.75 L10.4,15.75 C10.137,15.75 9.892,15.612 9.757,15.385 Z"></path></svg>`;
 const REMOVE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="22" height="22" color="currentColor" fill="none"><path fill="currentColor" d="M12.75,22.75 C6.813,22.75 2,17.937 2,12 C2,6.063 6.813,1.25 12.75,1.25 C18.687,1.25 23.5,6.063 23.5,12 C23.5,17.937 18.687,22.75 12.75,22.75 Z M3.5,12 C3.5,17.109 7.641,21.25 12.75,21.25 C17.859,21.25 22,17.109 22,12 C22,6.891 17.859,2.75 12.75,2.75 C7.641,2.75 3.5,6.891 3.5,12 Z M10.28,8.47 L12.75,10.94 L15.22,8.47 C15.512,8.177 15.987,8.177 16.28,8.47 C16.573,8.763 16.573,9.237 16.28,9.53 L13.811,12 L16.28,14.47 C16.573,14.763 16.573,15.238 16.28,15.53 C15.987,15.823 15.512,15.823 15.219,15.53 L12.75,13.061 L10.281,15.53 C9.988,15.823 9.513,15.823 9.22,15.53 C8.927,15.238 8.927,14.763 9.22,14.47 L11.689,12 L9.22,9.53 C8.927,9.237 8.927,8.763 9.22,8.47 C9.513,8.177 9.987,8.177 10.28,8.47 Z"></path></svg>`;
@@ -110,7 +113,7 @@ export class WidgetManager {
   private selectedId: string | null = null;
   private snapshotWaiters = new Map<string, Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>>();
   private lastLayoutSize = new Map<string, string>();
-  private lastContentFit = new Map<string, { w: number; h: number }>();
+  private lastContentFit = new Map<string, { w: number; h: number; grows: number }>();
 
   private onPointerMove = (e: PointerEvent) => {
     const cb = this.opts.callbacks;
@@ -440,23 +443,39 @@ export class WidgetManager {
   }
 
   /**
-   * Trim dead iframe space: the host measures the painted content bbox and we
-   * shrink the widget to hug it. Shrink-only (never grows, never fights a
-   * manual resize), epsilon-guarded so the measure -> relayout -> measure
-   * feedback loop cannot oscillate.
+   * Fit the widget frame to the measured content so nothing is ever cropped
+   * and there is no dead space: grow when the host reports clipped overflow
+   * (cropping is never acceptable), shrink when the frame has dead space.
+   * Epsilon-guarded, and growth is capped so the measure -> relayout ->
+   * measure feedback loop cannot oscillate.
    */
   private autoFitContent(id: string, measuredW: number, measuredH: number): void {
     const widget = this.widgets.get(id);
     if (!widget || widget.userResized) return;
     const applied = this.lastContentFit.get(id);
+    const grows = applied?.grows ?? 0;
     const curW = applied?.w ?? widget.w;
     const curH = applied?.h ?? widget.h;
-    const nextW = measuredW < curW - 8 ? Math.max(MIN_WIDGET_W, Math.round(measuredW)) : curW;
-    const nextH = measuredH < curH - 8 ? Math.max(MIN_WIDGET_H, Math.round(measuredH)) : curH;
+    let nextW = curW;
+    let nextH = curH;
+    if (measuredW < curW - 8) {
+      nextW = Math.max(MIN_WIDGET_W, Math.round(measuredW));
+    } else if (measuredW > curW + 8 && grows < MAX_CONTENT_FIT_GROWS) {
+      nextW = Math.min(MAX_CONTENT_W, Math.round(measuredW));
+    }
+    if (measuredH < curH - 8) {
+      nextH = Math.max(MIN_WIDGET_H, Math.round(measuredH));
+    } else if (measuredH > curH + 8 && grows < MAX_CONTENT_FIT_GROWS) {
+      nextH = Math.min(MAX_CONTENT_H, Math.round(measuredH));
+    }
     if (nextW === curW && nextH === curH) return;
     const next = settleWidgetContent(widget, nextW, nextH);
     Object.assign(widget, next);
-    this.lastContentFit.set(id, { w: next.w, h: next.h });
+    this.lastContentFit.set(id, {
+      w: next.w,
+      h: next.h,
+      grows: nextW > curW || nextH > curH ? grows + 1 : grows,
+    });
     this.position(widget);
   }
 
