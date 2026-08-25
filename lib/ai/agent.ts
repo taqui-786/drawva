@@ -464,6 +464,20 @@ async function attemptReply(
   }
 
   let commands = Array.isArray(response.commands) ? response.commands : [];
+  const planSaysReplace = typeof response.spatialPlan === "string" && /\b(replace|in[-_]place|refine|update|modify|convert|functional)\b/i.test(response.spatialPlan);
+  if (planSaysReplace || req.widgetEdit) {
+    for (const c of commands) {
+      if (typeof c === "object" && c !== null) {
+        const rec = c as Record<string, unknown>;
+        if (!rec.placement || rec.placement === "auto") {
+          rec.placement = "in_place";
+        }
+        if (req.widgetEdit?.id && !rec.targetId) {
+          rec.targetId = req.widgetEdit.id;
+        }
+      }
+    }
+  }
   if (req.widgetEdit) {
     const targetType = req.widgetEdit.widgetType;
     const inPlaceMatched = commands.filter(

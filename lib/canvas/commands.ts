@@ -43,6 +43,7 @@ export interface WriteTextCommand {
   lineHeight: number;
   color: string;
   placement?: string;
+  targetId?: string;
   targetBox?: { x: number; y: number; w: number; h: number };
 }
 
@@ -54,6 +55,7 @@ export interface DrawFormulaCommand {
   fontSize: number;
   color: string;
   placement?: string;
+  targetId?: string;
   targetBox?: { x: number; y: number; w: number; h: number };
 }
 
@@ -66,6 +68,7 @@ export interface PlotFunctionCommand {
   expression: string;
   color: string;
   placement?: string;
+  targetId?: string;
   targetBox?: { x: number; y: number; w: number; h: number };
 }
 
@@ -108,6 +111,7 @@ export interface HtmlWidgetCommand {
   copyText?: string;
   copyLabel?: string;
   placement?: string;
+  targetId?: string;
 }
 
 export interface DiagramSourceCommand {
@@ -124,6 +128,7 @@ export interface DiagramSourceCommand {
   source: string;
   diagramKind?: string;
   placement?: string;
+  targetId?: string;
 }
 
 export interface AnimateSceneCommand {
@@ -138,6 +143,7 @@ export interface AnimateSceneCommand {
   motions: unknown[];
   scene: AnimationScene;
   placement?: string;
+  targetId?: string;
 }
 
 export type CanvasCommand =
@@ -165,10 +171,11 @@ export interface CommandValidationContext {
   keepPosition?: boolean;
   /** Original widget box — used in refinement mode to snap placement back to the existing widget. */
   widgetEditBox?: { x: number; y: number; w: number; h: number };
-  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number }>;
+  sceneItems?: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>;
   widgetGeometry?: { max?: { w?: number; h?: number } } | null;
   /** Shared per-reply accumulator enforcing MAX_PLOT_PIXELS_TOTAL across plots. */
   plotBudget?: { used: number };
+  spatialPlan?: string;
 }
 
 const isFiniteNum = n as (v: unknown, min?: number, max?: number) => boolean;
@@ -528,8 +535,8 @@ function rescueCollision(
 
 function uniqueSceneWidgetByTitle(
   title: unknown,
-  widgetItems: Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }>
-): { kind: string; x: number; y: number; w: number; h: number; title?: string } | null {
+  widgetItems: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>
+): { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null {
   const cmdTitle = typeof title === "string" ? title.toLowerCase().trim() : "";
   if (!cmdTitle || widgetItems.length === 0) return null;
   const matched = widgetItems.filter((w) => {
@@ -539,6 +546,60 @@ function uniqueSceneWidgetByTitle(
   return matched.length === 1 ? matched[0] : null;
 }
 
+function findSceneWidgetMatch(
+  cmd: { title?: unknown; targetId?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown },
+  sceneWidgets: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>,
+  changedBox?: Box
+): { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null {
+  if (sceneWidgets.length === 0) return null;
+
+  // 1. Match by explicit targetId
+  const targetId = typeof cmd.targetId === "string" ? cmd.targetId.trim() : "";
+  if (targetId) {
+    const byId = sceneWidgets.find((w) => w.id === targetId);
+    if (byId) return byId;
+  }
+
+  // 2. Match by unique title
+  const titled = uniqueSceneWidgetByTitle(cmd.title, sceneWidgets);
+  if (titled) return titled;
+
+  // 3. Match by spatial overlap (IoU / Center proximity)
+  const cx = Number(cmd.x);
+  const cy = Number(cmd.y);
+  const cw = Number(cmd.w) || DEFAULT_WIDGET_WIDTH;
+  const ch = Number(cmd.h) || DEFAULT_WIDGET_HEIGHT;
+  if (Number.isFinite(cx) && Number.isFinite(cy)) {
+    const cmdBox: Box = { x: cx, y: cy, w: cw, h: ch };
+    let bestOverlap: { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null = null;
+    let maxIoU = 0;
+    for (const w of sceneWidgets) {
+      const ix = Math.max(0, Math.min(cmdBox.x + cmdBox.w, w.x + w.w) - Math.max(cmdBox.x, w.x));
+      const iy = Math.max(0, Math.min(cmdBox.y + cmdBox.h, w.y + w.h) - Math.max(cmdBox.y, w.y));
+      const intersection = ix * iy;
+      const union = cmdBox.w * cmdBox.h + w.w * w.h - intersection;
+      const iou = union > 0 ? intersection / union : 0;
+      const centerDist = Math.hypot(cmdBox.x + cmdBox.w / 2 - (w.x + w.w / 2), cmdBox.y + cmdBox.h / 2 - (w.y + w.h / 2));
+      if (iou >= 0.35 || (centerDist < 200 && iou > 0.1)) {
+        if (iou > maxIoU) {
+          maxIoU = iou;
+          bestOverlap = w;
+        }
+      }
+    }
+    if (bestOverlap) return bestOverlap;
+  }
+
+  // 4. Proximity to changedBox if only 1 widget exists
+  if (sceneWidgets.length === 1 && changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
+    const w = sceneWidgets[0];
+    const dist = Math.hypot(w.x + w.w / 2 - (changedBox.x + changedBox.w / 2), w.y + w.h / 2 - (changedBox.y + changedBox.h / 2));
+    if (dist < 800) return w;
+  }
+
+  return null;
+}
+
 export function fitWidgetGeometry(
   cmd: {
     x?: unknown;
@@ -546,6 +607,7 @@ export function fitWidgetGeometry(
     w?: unknown;
     h?: unknown;
     placement?: unknown;
+    targetId?: unknown;
     title?: unknown;
     targetBox?: unknown;
   },
@@ -553,10 +615,17 @@ export function fitWidgetGeometry(
   changedBox?: Box,
   reposition = true,
   widgetEditBox?: Box,
-  sceneItems?: Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }>,
-  widgetGeometry?: { max?: { w?: number; h?: number } } | null
+  sceneItems?: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>,
+  widgetGeometry?: { max?: { w?: number; h?: number } } | null,
+  spatialPlan?: string
 ): Box | null {
   const placement = String(cmd.placement || "").toLowerCase();
+  const planSaysReplace = typeof spatialPlan === "string" && /\b(replace|in[-_]place|refine|update|modify|convert|functional)\b/i.test(spatialPlan);
+  const widgetItems = Array.isArray(sceneItems)
+    ? sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html")
+    : [];
+  const matchedTarget = findSceneWidgetMatch(cmd, widgetItems, changedBox);
+
   const targetBox = (cmd.targetBox && typeof cmd.targetBox === "object"
     ? cmd.targetBox
     : null) as Record<string, unknown> | null;
@@ -578,17 +647,14 @@ export function fitWidgetGeometry(
     placement === "left" ||
     placement === "top";
 
-  // Refinement mode: snap to the widget the model actually edited.
-  const snapInPlace = placement === "in_place" || (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords);
+  // Refinement mode: snap to the widget the model actually edited or targeted
+  const snapInPlace =
+    placement === "in_place" ||
+    (planSaysReplace && (matchedTarget !== null || widgetEditBox !== undefined)) ||
+    (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords);
+
   if (snapInPlace) {
-    let target = widgetEditBox;
-    const widgetItems = Array.isArray(sceneItems)
-      ? sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html")
-      : [];
-    const titled = uniqueSceneWidgetByTitle(cmd.title, widgetItems);
-    if (titled && (reposition || !target || target.w <= 0 || target.h <= 0)) {
-      target = titled;
-    }
+    let target = matchedTarget || widgetEditBox;
     if ((!target || target.w <= 0 || target.h <= 0) && widgetItems.length > 0) {
       if (changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
         let closest = widgetItems[0];
@@ -609,6 +675,9 @@ export function fitWidgetGeometry(
       }
     }
     if (target && target.w > 0 && target.h > 0) {
+      cmd.placement = "in_place";
+      const targetId = ("id" in target && typeof (target as { id?: unknown }).id === "string") ? (target as { id: string }).id : undefined;
+      if (targetId && !cmd.targetId) cmd.targetId = targetId;
       return sanitizeWidgetGeometry(
         {
           x: Math.round(target.x),
@@ -1156,7 +1225,8 @@ export function validateCommand(
         !ctx.keepPosition,
         ctx.widgetEditBox,
         ctx.sceneItems,
-        ctx.widgetGeometry
+        ctx.widgetGeometry,
+        ctx.spatialPlan
       );
       const sceneCmd = {
         ...c,
@@ -1181,6 +1251,7 @@ export function validateCommand(
         motions: normalized.motions,
         scene: normalized,
         ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
+        ...(typeof c.targetId === "string" ? { targetId: c.targetId } : {}),
       };
     }
     case "html_widget": {
@@ -1193,7 +1264,7 @@ export function validateCommand(
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim().slice(0, 80) : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim().slice(0, 80) : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim().slice(0, 120) : "";
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry, ctx.spatialPlan);
       const rawTitle = typeof c.title === "string" ? (c.title as string).trim().slice(0, 120) : "";
       const title = rawTitle || diagramKind || (sourceFormat ? `${sourceFormat} Diagram` : "Visual Widget");
       const refreshSeconds = Number.isFinite(Number(c.refreshSeconds)) ? Math.max(0, Math.min(86400, Math.round(Number(c.refreshSeconds)))) : 0;
@@ -1222,6 +1293,7 @@ export function validateCommand(
         refreshSeconds,
         html,
         ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
+        ...(typeof c.targetId === "string" ? { targetId: c.targetId } : {}),
       };
       if (diagramKind) out.diagramKind = diagramKind;
       if (sourceFormat) out.sourceFormat = sourceFormat;
@@ -1236,7 +1308,7 @@ export function validateCommand(
       if (ctx.plugins && !ctx.plugins.has("flowchart")) {
         return fail("diagram_source.plugin-disabled");
       }
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry, ctx.spatialPlan);
       const rawFormat = typeof c.sourceFormat === "string" ? c.sourceFormat : "";
       const rawSource = extractDiagramSource(c.source ?? c.code ?? c.content ?? c.diagram ?? c.text ?? c.body ?? c.spec ?? c.data ?? c);
       const source = rawSource.trim();
@@ -1285,6 +1357,7 @@ export function validateCommand(
         source,
         ...(diagramKind ? { diagramKind } : {}),
         ...(typeof c.placement === "string" ? { placement: c.placement } : {}),
+        ...(typeof c.targetId === "string" ? { targetId: c.targetId } : {}),
       };
     }
     case "erase": {

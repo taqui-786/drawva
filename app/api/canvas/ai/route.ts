@@ -27,12 +27,13 @@ function clampBox(b: unknown): { x: number; y: number; w: number; h: number } {
   return { x: n(c.x), y: n(c.y), w: n(c.w), h: n(c.h) };
 }
 
-function parseSceneItems(scene?: string): Array<{ kind: string; x: number; y: number; w: number; h: number; title?: string }> {
+function parseSceneItems(scene?: string): Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }> {
   if (!scene) return [];
   try {
     const parsed = JSON.parse(scene);
     if (Array.isArray(parsed?.items)) {
       return parsed.items.map((i: Record<string, unknown>) => ({
+        id: typeof i.id === "string" ? i.id : undefined,
         kind: String(i.kind || "object"),
         x: Number(i.x) || 0,
         y: Number(i.y) || 0,
@@ -74,6 +75,7 @@ function validateReply(
     widgetEditBox,
     sceneItems: parseSceneItems(sceneText),
     widgetGeometry,
+    spatialPlan: reply.spatialPlan,
   };
   const { commands, rejected } = validateCommands(reply.commands, ctx);
   return {

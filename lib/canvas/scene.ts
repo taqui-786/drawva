@@ -4,6 +4,7 @@ import type { ObjectManager } from "./objects";
 import { detectDiagramFormat } from "./diagram";
 
 export interface SceneItemJson {
+  id?: string;
   kind: string;
   x: number;
   y: number;
@@ -27,6 +28,7 @@ export function buildScene(
   if (widgets) {
     for (const w of widgets.all()) {
       const item: SceneItemJson = {
+        id: w.id,
         kind: w.kind,
         x: w.x,
         y: w.y,
@@ -44,6 +46,7 @@ export function buildScene(
   if (objects) {
     for (const o of objects.all()) {
       const item: SceneItemJson = {
+        id: o.id,
         kind: o.kind,
         x: o.x,
         y: o.y,

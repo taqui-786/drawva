@@ -1046,11 +1046,11 @@ export function CanvasApp() {
     const draft = new DraftManager();
     draft.setRenderer("html_widget", (_eng, cmd) => {
       if (cmd.tool !== "html_widget") return;
-      const targetId = activeEditTargetRef.current;
+      const targetId = (cmd as { targetId?: string }).targetId || activeEditTargetRef.current;
       activeEditTargetRef.current = null;
       const lockTarget = lockEditTargetRef.current;
       lockEditTargetRef.current = false;
-      const isInPlace = (cmd as { placement?: string }).placement === "in_place";
+      const isInPlace = (cmd as { placement?: string }).placement === "in_place" || Boolean((cmd as { targetId?: string }).targetId);
       const oldWidget = isInPlace
         ? findInPlaceWidget(wm, {
             targetId,
@@ -1182,11 +1182,11 @@ export function CanvasApp() {
     });
     draft.setRenderer("diagram_source", async (_eng, cmd) => {
       if (cmd.tool !== "diagram_source") return;
-      const targetId = activeEditTargetRef.current;
+      const targetId = (cmd as { targetId?: string }).targetId || activeEditTargetRef.current;
       activeEditTargetRef.current = null;
       const lockTarget = lockEditTargetRef.current;
       lockEditTargetRef.current = false;
-      const isInPlace = (cmd as { placement?: string }).placement === "in_place";
+      const isInPlace = (cmd as { placement?: string }).placement === "in_place" || Boolean((cmd as { targetId?: string }).targetId);
       const oldWidget = isInPlace
         ? findInPlaceWidget(wm, {
             targetId,
