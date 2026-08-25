@@ -89,11 +89,35 @@ export const PROVIDER_INFOS: Record<ProviderType, ProviderInfo> = {
   },
 };
 
+export type ReasoningEffort = "default" | "low" | "medium" | "high" | "max";
+
+export const REASONING_EFFORT_OPTIONS: { value: ReasoningEffort; label: string; description: string }[] = [
+  { value: "default", label: "Auto", description: "Default model reasoning behavior" },
+  { value: "low", label: "Low", description: "Light reasoning for simple tasks" },
+  { value: "medium", label: "Medium", description: "Balanced depth and speed" },
+  { value: "high", label: "High", description: "Deep reasoning for complex math/diagrams" },
+  { value: "max", label: "Max", description: "Maximum budget for difficult derivations" },
+];
+
 const PROVIDER_KEY = "drawva.aiProvider";
 const MODELS_KEY = "drawva.aiModels";
 const MODEL_KEY = "drawva.aiModel";
+const REASONING_EFFORT_KEY = "drawva.aiReasoningEffort";
 const TOKEN_USAGE_KEY = "drawva.tokenUsage";
 const PLUGINS_KEY = "drawva.enabledPlugins";
+
+export function getReasoningEffort(): ReasoningEffort {
+  const val = read<string>(REASONING_EFFORT_KEY, "default");
+  if (REASONING_EFFORT_OPTIONS.some((opt) => opt.value === val)) {
+    return val as ReasoningEffort;
+  }
+  return "default";
+}
+
+export function setReasoningEffort(effort: ReasoningEffort): void {
+  write(REASONING_EFFORT_KEY, effort);
+  notify();
+}
 
 export const DEFAULT_ENABLED_PLUGINS = [
   "general",

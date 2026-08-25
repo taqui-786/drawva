@@ -3,7 +3,7 @@ import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
 import { ChatGroq } from "@langchain/groq";
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
-import type { ProviderType } from "./provider";
+import type { ProviderType, ReasoningEffort } from "./provider";
 import { AI_TIMEOUT_MS } from "./prompts";
 
 export const MAX_RETRIES = 3;
@@ -15,6 +15,7 @@ export interface CreateChatModelOptions {
   model: string;
   timeoutMs?: number;
   temperature?: number;
+  reasoningEffort?: ReasoningEffort;
 }
 
 export function createChatModel({
@@ -24,6 +25,7 @@ export function createChatModel({
   model,
   timeoutMs = AI_TIMEOUT_MS,
   temperature = 0.2,
+  reasoningEffort = "default",
 }: CreateChatModelOptions): BaseChatModel {
   if (!apiKey || !model) {
     throw new Error("Missing apiKey or model for provider.");
@@ -31,13 +33,34 @@ export function createChatModel({
 
   const cleanBaseUrl = baseUrl ? baseUrl.replace(/\/+$/, "") : undefined;
 
+  const openAiReasoningEffort =
+    reasoningEffort === "low"
+      ? "low"
+      : reasoningEffort === "medium"
+      ? "medium"
+      : reasoningEffort === "high" || reasoningEffort === "max"
+      ? "high"
+      : undefined;
+
   switch (providerType) {
     case "anthropic": {
+      const thinkingConfig =
+        reasoningEffort === "low"
+          ? { type: "enabled" as const, budget_tokens: 2048 }
+          : reasoningEffort === "medium"
+          ? { type: "enabled" as const, budget_tokens: 4096 }
+          : reasoningEffort === "high"
+          ? { type: "enabled" as const, budget_tokens: 8192 }
+          : reasoningEffort === "max"
+          ? { type: "enabled" as const, budget_tokens: 16384 }
+          : undefined;
+
       return new ChatAnthropic({
         model,
         apiKey,
-        temperature,
+        temperature: thinkingConfig?.type === "enabled" ? 1 : temperature,
         maxRetries: 0,
+        ...(thinkingConfig && model.includes("claude-3-7") ? { thinking: thinkingConfig } : {}),
         clientOptions: {
           timeout: timeoutMs,
           ...(cleanBaseUrl ? { baseURL: cleanBaseUrl } : {}),
@@ -71,6 +94,7 @@ export function createChatModel({
         temperature,
         timeout: timeoutMs,
         maxRetries: 0,
+        modelKwargs: openAiReasoningEffort ? { reasoning_effort: openAiReasoningEffort } : undefined,
       }) as unknown as BaseChatModel;
     }
     case "groq": {
@@ -82,6 +106,7 @@ export function createChatModel({
           temperature,
           timeout: timeoutMs,
           maxRetries: 0,
+          modelKwargs: openAiReasoningEffort ? { reasoning_effort: openAiReasoningEffort } : undefined,
         }) as unknown as BaseChatModel;
       }
       return new ChatGroq({
@@ -100,6 +125,7 @@ export function createChatModel({
         temperature,
         timeout: timeoutMs,
         maxRetries: 0,
+        modelKwargs: openAiReasoningEffort ? { reasoning_effort: openAiReasoningEffort } : undefined,
       }) as unknown as BaseChatModel;
     }
     case "custom":
@@ -114,6 +140,7 @@ export function createChatModel({
         temperature,
         timeout: timeoutMs,
         maxRetries: 0,
+        modelKwargs: openAiReasoningEffort ? { reasoning_effort: openAiReasoningEffort } : undefined,
       }) as unknown as BaseChatModel;
     }
   }

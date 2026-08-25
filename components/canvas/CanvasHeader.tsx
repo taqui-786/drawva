@@ -56,10 +56,13 @@ import {
   Maximize01Icon,
   Menu01Icon,
   MoreHorizontalIcon,
+  MoreIcon,
   PencilIcon,
   RedoIcon,
   Settings01Icon,
   AiEditingIcon,
+  AiBrain01Icon,
+  AiChipIcon,
   SquareIcon,
   TextIcon,
   TerminalIcon,
@@ -70,6 +73,10 @@ import {
 } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import type { CanvasMode } from "@/lib/canvas/types";
+import {
+  type ReasoningEffort,
+  REASONING_EFFORT_OPTIONS,
+} from "@/lib/ai/provider";
 
 export interface AiRunState {
   phase: "idle" | "running" | "done" | "error";
@@ -185,7 +192,9 @@ export function CanvasHeader({
   onAskAi,
   models,
   activeModel,
-  onModelChange,
+  reasoningEffort = "default",
+  onReasoningEffortChange,
+  onOpenModelSelect,
   onOpenSettings,
   syncStatus,
   syncRoomCode,
@@ -220,7 +229,10 @@ export function CanvasHeader({
   onAskAi: () => void;
   models: string[];
   activeModel: string | null;
-  onModelChange: (model: string | null) => void;
+  onModelChange?: (model: string | null) => void;
+  reasoningEffort?: ReasoningEffort;
+  onReasoningEffortChange: (effort: ReasoningEffort) => void;
+  onOpenModelSelect: () => void;
   onOpenSettings: () => void;
   syncStatus: "idle" | "hosting" | "connecting" | "connected" | "error";
   syncRoomCode: string | null;
@@ -250,12 +262,6 @@ export function CanvasHeader({
   const isShapeActive = ["rect", "ellipse", "arrow"].includes(mode);
   const activeShapeTool =
     SHAPE_TOOLS.find((s) => s.mode === mode) || SHAPE_TOOLS[0];
-
-  const hasModels = models.length > 0;
-  const settleValue =
-    activeModel && hasModels && models.includes(activeModel)
-      ? activeModel
-      : (models[0] ?? "");
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-2 sm:px-3">
@@ -544,6 +550,21 @@ export function CanvasHeader({
             />
             <TooltipContent>Clear board</TooltipContent>
           </Tooltip>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  data-icon="true"
+                  aria-label="More"
+                >
+                  <HugeiconsIcon icon={MoreIcon} />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" />
+          </DropdownMenu>
         </div>
 
         {/* Mobile Extra Tools Dropdown */}
@@ -672,37 +693,53 @@ export function CanvasHeader({
                 </motion.div>
               )}
 
-              {hasModels && (
-                <div className="hidden lg:block">
-                  <Select
-                    value={settleValue}
-                    onValueChange={onModelChange}
-                    items={models.map((m) => ({ label: m, value: m }))}
-                  >
-                    <SelectTrigger
+              {/* Model Select Trigger Pill */}
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
                       size="sm"
-                      className="w-auto min-w-36 max-w-64 font-mono text-xs"
+                      variant="outline"
+                      onClick={onOpenModelSelect}
+                      className="hidden sm:inline-flex h-7 gap-1.5 px-2 font-mono text-xs max-w-[140px] md:max-w-[180px] truncate shadow-2xs hover:border-primary/40"
+                      aria-label="Select AI Model"
                     >
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent
-                      align="end"
-                      alignItemWithTrigger={false}
-                      className="w-auto min-w-[280px] max-w-lg font-mono text-xs"
-                    >
-                      {models.map((m) => (
-                        <SelectItem
-                          key={m}
-                          value={m}
-                          className="font-mono text-xs whitespace-nowrap"
-                        >
-                          {m}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+                      <HugeiconsIcon icon={AiChipIcon} className="size-3.5 shrink-0 text-muted-foreground" />
+                      <span className="truncate">{activeModel || (models.length > 0 ? "Choose Model" : "No Model")}</span>
+                    </Button>
+                  }
+                />
+                <TooltipContent>AI Model: {activeModel || "None selected"} (Click to browse & change)</TooltipContent>
+              </Tooltip>
+
+              {/* Reasoning / Thinking Effort Controller */}
+              <div className="hidden sm:block">
+                <Select
+                  value={reasoningEffort}
+                  onValueChange={(val) => onReasoningEffortChange((val as ReasoningEffort) || "default")}
+                  items={REASONING_EFFORT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="h-7 w-auto gap-1 px-2 text-xs font-medium"
+                    title="Reasoning / Thinking Depth"
+                  >
+                    <HugeiconsIcon icon={AiBrain01Icon} className="size-3.5 shrink-0 text-primary" />
+                    <span className="hidden lg:inline text-muted-foreground mr-0.5">Thinking:</span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end" alignItemWithTrigger={false} className="w-56 text-xs">
+                    {REASONING_EFFORT_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value} className="text-xs cursor-pointer">
+                        <div className="flex flex-col py-0.5">
+                          <span className="font-medium">{opt.label}</span>
+                          <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <label className="hidden sm:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none">
                 <Switch

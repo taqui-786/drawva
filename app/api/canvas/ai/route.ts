@@ -166,11 +166,19 @@ export async function POST(req: Request) {
     apiKey,
     model: modelId,
     tier: getModelTier(modelId),
+    reasoningEffort: p.reasoningEffort,
     enabledPluginIds,
     enabledPlugins,
   };
 
-  const model = createChatModel({ providerType, baseUrl, apiKey, model: modelId, timeoutMs: AI_TIMEOUT_MS });
+  const model = createChatModel({
+    providerType,
+    baseUrl,
+    apiKey,
+    model: modelId,
+    timeoutMs: AI_TIMEOUT_MS,
+    reasoningEffort: p.reasoningEffort,
+  });
   const sceneText = aiRequest.scene || "";
 
   // keepPosition is ONLY the explicit Refine button. A nearby/selected widgetEdit

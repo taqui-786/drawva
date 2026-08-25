@@ -1,4 +1,4 @@
-import type { ProviderType } from "./provider";
+import type { ProviderType, ReasoningEffort } from "./provider";
 
 export interface AiBox {
   x: number;
@@ -88,6 +88,7 @@ export interface AiRequest {
   apiKey?: string;
   model?: string;
   tier?: ModelTier;
+  reasoningEffort?: ReasoningEffort;
   enabledPluginIds?: string[];
   enabledPlugins?: PluginDescriptor[];
 }

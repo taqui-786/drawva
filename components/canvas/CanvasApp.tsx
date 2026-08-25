@@ -20,6 +20,7 @@ import { rasterizeText, renderTextBlock } from "@/lib/canvas/textTool";
 import { placeImageAt } from "@/lib/canvas/images";
 import { CanvasHeader, type AiRunState } from "./CanvasHeader";
 import { SettingsDialog } from "./SettingsDialog";
+import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
 import { UserManualDialog } from "./UserManualDialog";
 import { CanvasFooter } from "./CanvasFooter";
@@ -37,7 +38,17 @@ import { BoardHistory } from "@/lib/canvas/history";
 import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
-import { getActiveModel, getCachedModels, getProviderConfig, setActiveModel, addTokenUsageRecord, getEnabledPlugins } from "@/lib/ai/provider";
+import {
+  getActiveModel,
+  getCachedModels,
+  getProviderConfig,
+  setActiveModel,
+  addTokenUsageRecord,
+  getEnabledPlugins,
+  getReasoningEffort,
+  setReasoningEffort,
+  type ReasoningEffort,
+} from "@/lib/ai/provider";
 import { Textarea } from "@/components/ui/textarea";
 import {
   SyncManager,
@@ -345,6 +356,8 @@ export function CanvasApp() {
 
   const [models, setModels] = useState<string[]>([]);
   const [activeModel, setActiveModelState] = useState<string | null>(null);
+  const [reasoningEffort, setReasoningEffortState] = useState<ReasoningEffort>(() => getReasoningEffort());
+  const [modelSelectOpen, setModelSelectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [latestLog, setLatestLog] = useState<AiLogEntry | null>(null);
@@ -361,6 +374,7 @@ export function CanvasApp() {
     const refresh = () => {
       setModels(getCachedModels());
       setActiveModelState(getActiveModel());
+      setReasoningEffortState(getReasoningEffort());
     };
     refresh();
     window.addEventListener("storage", refresh);
@@ -370,6 +384,11 @@ export function CanvasApp() {
   const handleModelChange = (model: string | null) => {
     setActiveModel(model);
     setActiveModelState(model);
+  };
+
+  const handleReasoningEffortChange = (effort: ReasoningEffort) => {
+    setReasoningEffort(effort);
+    setReasoningEffortState(effort);
   };
 
   const [aiRun, setAiRun] = useState<AiRunState>({
@@ -527,6 +546,7 @@ export function CanvasApp() {
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model,
+      reasoningEffort: getReasoningEffort(),
       enabledPluginIds: getEnabledPlugins(),
     };
 
@@ -1999,6 +2019,9 @@ export function CanvasApp() {
         models={models}
         activeModel={activeModel}
         onModelChange={handleModelChange}
+        reasoningEffort={reasoningEffort}
+        onReasoningEffortChange={handleReasoningEffortChange}
+        onOpenModelSelect={() => setModelSelectOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
         syncStatus={syncState.status}
         syncRoomCode={syncState.roomCode}
@@ -2080,6 +2103,17 @@ export function CanvasApp() {
         className="hidden"
       />
 
+      <ModelSelectDialog
+        open={modelSelectOpen}
+        onOpenChange={setModelSelectOpen}
+        models={models}
+        activeModel={activeModel}
+        onSelectModel={handleModelChange}
+        onOpenSettings={() => {
+          setModelSelectOpen(false);
+          setSettingsOpen(true);
+        }}
+      />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       <LogsDialog
         open={logsOpen}
