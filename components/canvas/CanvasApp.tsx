@@ -59,6 +59,7 @@ import {
   compactWidgetForSync,
 } from "@/lib/canvas/sync";
 import { ConnectDialog } from "./ConnectDialog";
+import { MobileOrientationPrompt } from "./MobileOrientationPrompt";
 import { strokeSegment } from "@/lib/canvas/strokes";
 import { eraseRegion, pasteDataUrl } from "@/lib/canvas/selection";
 
@@ -645,6 +646,11 @@ export function CanvasApp() {
         doneProvider: prev.doneProvider,
         durationStage: "normal",
       }));
+      // Auto-revert "done" badge after 3 seconds to un-clutter header and prevent overflow
+      setTimeout(() => {
+        setAiStatus("idle");
+        setAiRun((prev) => (prev.phase === "done" ? { ...prev, phase: "idle" } : prev));
+      }, 3000);
     };
 
     setAiStatus("thinking");
@@ -689,6 +695,10 @@ export function CanvasApp() {
       if (controller.signal.aborted) return;
       setAiStatus("error");
       setAiRun((prev) => ({ ...prev, phase: "error", durationStage: "normal" }));
+      setTimeout(() => {
+        setAiStatus("idle");
+        setAiRun((prev) => (prev.phase === "error" ? { ...prev, phase: "idle" } : prev));
+      }, 4000);
       const desc = err instanceof Error ? parseCleanErrorMessage(err.message) : "AI request failed";
 
       const logEntry: AiLogEntry = {
@@ -2126,6 +2136,8 @@ export function CanvasApp() {
         }}
         className="hidden"
       />
+
+      <MobileOrientationPrompt />
 
       <ModelSelectDialog
         open={modelSelectOpen}

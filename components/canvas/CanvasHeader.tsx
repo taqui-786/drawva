@@ -70,6 +70,7 @@ import {
   Upload01Icon,
   PeerToPeer01Icon,
   Wifi01Icon,
+  ScreenRotationIcon,
 } from "@hugeicons/core-free-icons";
 import { cn } from "@/lib/utils";
 import type { CanvasMode } from "@/lib/canvas/types";
@@ -78,6 +79,7 @@ import {
   REASONING_EFFORT_OPTIONS,
   getModelCapabilitiesCached,
 } from "@/lib/ai/provider";
+import { requestFullscreenLandscape } from "@/lib/canvas/orientation";
 
 export interface AiRunState {
   phase: "idle" | "running" | "done" | "error";
@@ -154,8 +156,9 @@ function ToolButton({
             aria-pressed={active}
             onClick={() => onMode(tool.mode)}
             data-icon="true"
+            className="shrink-0 size-7 sm:size-8 p-0"
           >
-            <HugeiconsIcon icon={tool.icon} />
+            <HugeiconsIcon icon={tool.icon} className="size-4" />
           </Button>
         }
       />
@@ -278,10 +281,10 @@ export function CanvasHeader({
   }, [activeModel, capabilitiesVersion]);
 
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-2 sm:px-3">
+    <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-1.5 sm:px-3 w-full max-w-full overflow-hidden">
       {/* ── Left: Brand & Combined Menu ─────────────────────────── */}
-      <div className="flex items-center gap-1 sm:gap-2">
-        <span className="brand-wordmark pr-1 text-lg font-bold leading-none">
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0">
+        <span className="brand-wordmark pr-1 text-base sm:text-lg font-bold leading-none select-none">
           Drawva
         </span>
 
@@ -346,6 +349,10 @@ export function CanvasHeader({
                 <HugeiconsIcon icon={Maximize01Icon} />
                 {isFullscreen ? "Exit Fullscreen" : "Fullscreen Mode"}
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void requestFullscreenLandscape()}>
+                <HugeiconsIcon icon={ScreenRotationIcon} />
+                Landscape Mode (Rotate)
+              </DropdownMenuItem>
               <DropdownMenuItem onClick={onOpenConnect}>
                 <HugeiconsIcon icon={PeerToPeer01Icon} />
                 Live P2P Sync
@@ -368,6 +375,23 @@ export function CanvasHeader({
               >
                 <HugeiconsIcon icon={Delete02Icon} />
                 Clear Board
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>AI Intelligence</DropdownMenuLabel>
+              <DropdownMenuItem onClick={onOpenModelSelect}>
+                <HugeiconsIcon icon={AiChipIcon} />
+                <div className="flex flex-col text-left">
+                  <span>Select AI Model</span>
+                  <span className="text-[10px] font-mono text-muted-foreground truncate max-w-[150px]">
+                    {activeModel || "No model"}
+                  </span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onOpenSettings}>
+                <HugeiconsIcon icon={Settings01Icon} />
+                AI Settings & Keys
               </DropdownMenuItem>
             </DropdownMenuGroup>
           </DropdownMenuContent>
@@ -414,7 +438,7 @@ export function CanvasHeader({
       <Separator orientation="vertical" className="mx-1 h-6 hidden sm:block" />
 
       {/* ── Center: Handy Drawing Tools ────────────────────────────── */}
-      <div className="flex items-center gap-0.5">
+      <div className="flex items-center gap-0.5 sm:gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5 px-0.5">
         {/* Handy Tools (Select, Hand, Pen, Highlighter, Eraser) */}
         {PRIMARY_TOOLS.slice(0, 5).map((t) => (
           <ToolButton key={t.mode} mode={mode} tool={t} onMode={onMode} />
@@ -429,8 +453,9 @@ export function CanvasHeader({
                 variant={isShapeActive ? "secondaryPrimary" : "ghost"}
                 aria-label="Shapes"
                 data-icon="true"
+                className="shrink-0 size-7 sm:size-8 p-0"
               >
-                <HugeiconsIcon icon={activeShapeTool.icon} />
+                <HugeiconsIcon icon={activeShapeTool.icon} className="size-4" />
               </Button>
             }
           />
@@ -461,8 +486,9 @@ export function CanvasHeader({
                 variant="ghost"
                 data-icon="true"
                 aria-label="Colors & Stroke"
+                className="shrink-0 size-7 sm:size-8 p-0"
               >
-                <HugeiconsIcon icon={ColorsIcon} />
+                <HugeiconsIcon icon={ColorsIcon} className="size-4" />
               </Button>
             }
           />
@@ -657,14 +683,14 @@ export function CanvasHeader({
                 `}</style>
                 <div
                   className={cn(
-                    "flex gap-1 rounded-sm border p-1 bg-background/90 shadow-xs transition-colors duration-500",
+                    "flex gap-0.5 sm:gap-1 rounded-sm border p-0.5 sm:p-1 bg-background/90 shadow-xs transition-colors duration-500 shrink-0",
                     containerBorderClass
                   )}
                 >
-                  {Array.from({ length: 12 }).map((_, index) => (
+                  {Array.from({ length: 8 }).map((_, index) => (
                     <div
                       key={index}
-                      className={cn("h-4 w-2 rounded-[1px]", barColorClass)}
+                      className={cn("h-3.5 sm:h-4 w-1.5 sm:w-2 rounded-[1px]", barColorClass)}
                       style={{
                         animation: "bars-fill 1s ease-in-out infinite",
                         animationDelay: `${index * 0.08}s`,
@@ -680,7 +706,7 @@ export function CanvasHeader({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex items-center gap-1 sm:gap-1.5"
+              className="flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto"
             >
               {aiStatus === "done" && (
                 <motion.div
@@ -688,10 +714,10 @@ export function CanvasHeader({
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ duration: 0.15 }}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-border/50 bg-muted/30 px-2 py-0.5 text-[11px] font-mono text-muted-foreground select-none"
+                  className="inline-flex items-center gap-1 sm:gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 sm:px-2 py-0.5 text-[11px] font-mono text-emerald-700 dark:text-emerald-300 select-none shrink-0"
                 >
-                  <span className="size-1.5 rounded-full bg-emerald-500" />
-                  <span>Ready</span>
+                  <span className="size-1.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
+                  <span className="hidden sm:inline">Ready</span>
                 </motion.div>
               )}
 
@@ -700,10 +726,10 @@ export function CanvasHeader({
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2 py-0.5 text-[11px] font-mono text-destructive select-none"
+                  className="inline-flex items-center gap-1 sm:gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-1.5 sm:px-2 py-0.5 text-[11px] font-mono text-destructive select-none shrink-0"
                 >
-                  <span className="size-1.5 rounded-full bg-destructive" />
-                  <span>Failed</span>
+                  <span className="size-1.5 rounded-full bg-destructive shrink-0" />
+                  <span className="hidden sm:inline">Failed</span>
                 </motion.div>
               )}
 
@@ -715,7 +741,7 @@ export function CanvasHeader({
                       size="sm"
                       variant="outline"
                       onClick={onOpenModelSelect}
-                      className="hidden sm:inline-flex h-7 gap-1.5 px-2 font-mono text-xs max-w-[140px] md:max-w-[180px] truncate shadow-2xs hover:border-primary/40"
+                      className="hidden md:inline-flex h-7 gap-1.5 px-2 font-mono text-xs max-w-[130px] lg:max-w-[180px] truncate shadow-2xs hover:border-primary/40 shrink-0"
                       aria-label="Select AI Model"
                     >
                       <HugeiconsIcon icon={AiChipIcon} className="size-3.5 shrink-0 text-muted-foreground" />
@@ -728,7 +754,7 @@ export function CanvasHeader({
 
               {/* Reasoning / Thinking Effort Controller - Only visible for reasoning models */}
               {supportsReasoning && (
-                <div className="hidden sm:block">
+                <div className="hidden sm:block shrink-0">
                   <Select
                     value={reasoningEffort}
                     onValueChange={(val) => onReasoningEffortChange((val as ReasoningEffort) || "default")}
@@ -736,7 +762,7 @@ export function CanvasHeader({
                   >
                     <SelectTrigger
                       size="sm"
-                      className="h-7 w-auto gap-1 px-2 text-xs font-medium"
+                      className="h-7 w-auto gap-1 px-2 text-xs font-medium shrink-0"
                       title="Reasoning / Thinking Depth"
                     >
                       <HugeiconsIcon icon={AiBrain01Icon} className="size-3.5 shrink-0 text-primary" />
@@ -757,7 +783,7 @@ export function CanvasHeader({
                 </div>
               )}
 
-              <label className="hidden sm:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none">
+              <label className="hidden md:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none shrink-0">
                 <Switch
                   size="sm"
                   checked={autoOn}
@@ -770,10 +796,10 @@ export function CanvasHeader({
                 <Button
                   size="sm"
                   onClick={onAskAi}
-                  className="gap-1 px-2.5 text-xs"
+                  className="gap-1 px-2 sm:px-2.5 h-8 text-xs shrink-0 font-medium"
                 >
-                  <HugeiconsIcon icon={AiEditingIcon} className="size-3.5" />
-                  <span>Ask AI</span>
+                  <HugeiconsIcon icon={AiEditingIcon} className="size-3.5 shrink-0" />
+                  <span className="hidden xs:inline">Ask AI</span>
                 </Button>
               )}
 
@@ -786,8 +812,9 @@ export function CanvasHeader({
                       onClick={onOpenSettings}
                       data-icon="true"
                       aria-label="AI settings"
+                      className="shrink-0 size-8 p-0"
                     >
-                      <HugeiconsIcon icon={Settings01Icon} />
+                      <HugeiconsIcon icon={Settings01Icon} className="size-4" />
                     </Button>
                   }
                 />
