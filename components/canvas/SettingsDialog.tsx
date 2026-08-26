@@ -133,6 +133,18 @@ const LOCAL_PRESETS = [
       { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
     ],
   },
+  {
+    name: "AgentRouter Gateway",
+    baseUrl: "https://agentrouter.org/v1",
+    apiKey: "",
+    models: [
+      { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
+      { id: "claude-opus-5", name: "Claude Opus 5" },
+      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
+      { id: "glm-5.3", name: "GLM 5.3" },
+      { id: "gpt-5.6-sol", name: "GPT 5.6 Sol" },
+    ],
+  },
 ];
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
@@ -566,7 +578,7 @@ function ModelsTabContent({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
             {LOCAL_PRESETS.map((preset) => (
               <Button
                 key={preset.name}

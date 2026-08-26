@@ -69,12 +69,9 @@ export async function POST(req: Request) {
   const rawModelMap: Record<string, Record<string, unknown>> = {};
 
   if (baseUrl) {
-    const candidates = [
-      `${baseUrl}/models`,
-      baseUrl.endsWith("/v1")
-        ? `${baseUrl}/models`
-        : `${baseUrl}/v1/models`,
-    ];
+    const candidates = baseUrl.endsWith("/v1")
+      ? [`${baseUrl}/models`]
+      : [`${baseUrl}/v1/models`, `${baseUrl}/models`];
     const seen = new Set<string>();
 
     for (const url of candidates) {
@@ -84,6 +81,13 @@ export async function POST(req: Request) {
       try {
         const headers: Record<string, string> = {
           accept: "application/json",
+          "User-Agent": "claude-cli/0.2.29 (external, cli)",
+          "X-Stainless-Lang": "js",
+          "X-Stainless-Package-Version": "0.2.29",
+          "X-Stainless-OS": "MacOS",
+          "X-Stainless-Arch": "arm64",
+          "X-Stainless-Runtime": "node",
+          "X-Stainless-Runtime-Version": "v20.10.0",
         };
         if (apiKey) {
           headers.authorization = `Bearer ${apiKey}`;
@@ -99,7 +103,8 @@ export async function POST(req: Request) {
           signal: AbortSignal.timeout(10000),
         });
 
-        if (res.ok) {
+        const contentType = res.headers.get("content-type") || "";
+        if (res.ok && contentType.includes("application/json")) {
           const data = (await res.json()) as {
             data?: Array<Record<string, unknown>>;
             models?: Array<Record<string, unknown>>;
@@ -124,6 +129,8 @@ export async function POST(req: Request) {
             fetchedModels = compatible.map((m) => String(m.id || m.name));
             if (fetchedModels.length > 0) break;
           }
+        } else if (res.ok) {
+          fetchError = `Endpoint returned non-JSON response (${contentType || "text/html"}). Check Base URL path (e.g. add /v1).`;
         } else {
           const text = (await res.text()).slice(0, 300);
           fetchError = `HTTP ${res.status}: ${text}`;
