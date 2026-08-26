@@ -242,9 +242,28 @@ export function getCachedModelCapabilities(): Record<string, ModelCapabilities> 
   return read<Record<string, ModelCapabilities>>(MODEL_CAPABILITIES_KEY, {});
 }
 
-export function setCachedModelCapabilities(caps: Record<string, ModelCapabilities>): void {
+export function setCachedModelCapabilities(
+  caps: Record<string, ModelCapabilities>,
+  shouldNotify = true
+): void {
+  const current = getCachedModelCapabilities();
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(caps || {});
+  if (
+    currentKeys.length === nextKeys.length &&
+    nextKeys.every(
+      (k) =>
+        current[k]?.vision === caps[k]?.vision &&
+        current[k]?.reasoning === caps[k]?.reasoning &&
+        current[k]?.status === caps[k]?.status
+    )
+  ) {
+    return;
+  }
   write(MODEL_CAPABILITIES_KEY, caps || {});
-  notify();
+  if (shouldNotify) {
+    notify();
+  }
 }
 
 export function getModelCapabilitiesCached(modelId: string): ModelCapabilities {

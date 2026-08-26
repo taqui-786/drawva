@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -65,12 +65,17 @@ export function ModelSelectDialog({
   onOpenSettings,
 }: ModelSelectDialogProps) {
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [filter, setFilter] = useState<FilterCategory>("all");
   const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(() => getProviderConfig());
   const [capabilitiesMap, setCapabilitiesMap] = useState<Record<string, ModelCapabilities>>(() =>
     getCachedModelCapabilities()
   );
+  const [isValidatingAll, setIsValidatingAll] = useState(false);
   const [validatingModelId, setValidatingModelId] = useState<string | null>(null);
+
+  const requestedModelsRef = useRef<Set<string>>(new Set());
+  const inFlightRef = useRef(false);
 
   // Sync provider configuration on storage changes
   useEffect(() => {
@@ -82,33 +87,52 @@ export function ModelSelectDialog({
     return () => window.removeEventListener("storage", syncState);
   }, []);
 
-  // Background capability hydration for all models in list when dialog opens
+  // Single-batch background capability hydration when dialog opens
   useEffect(() => {
     if (!open || models.length === 0) return;
 
+    // Check which models genuinely need verification from server
+    const cached = getCachedModelCapabilities();
+    const missing = models.filter((m) => {
+      if (requestedModelsRef.current.has(m)) return false;
+      const cap = cached[m];
+      return !cap || cap.status === "unknown";
+    });
+
+    if (missing.length === 0 || inFlightRef.current) return;
+
+    // Mark as requested to guarantee 100% deduplication
+    missing.forEach((m) => requestedModelsRef.current.add(m));
+
     let cancelled = false;
-    const fetchCapabilities = async () => {
-      try {
-        const res = await fetch("/api/canvas/model-validate", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ modelIds: models }),
-        });
+    inFlightRef.current = true;
+    setIsValidatingAll(true);
 
-        if (res.ok && !cancelled) {
-          const data = (await res.json()) as { capabilities?: Record<string, ModelCapabilities> };
-          if (data.capabilities && Object.keys(data.capabilities).length > 0) {
-            const merged = { ...getCachedModelCapabilities(), ...data.capabilities };
-            setCachedModelCapabilities(merged);
-            setCapabilitiesMap(merged);
-          }
+    fetch("/api/canvas/model-validate", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ modelIds: missing }),
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as { capabilities?: Record<string, ModelCapabilities> };
+        if (data.capabilities && !cancelled) {
+          const merged = { ...getCachedModelCapabilities(), ...data.capabilities };
+          // shouldNotify = false avoids dispatching storage event loop
+          setCachedModelCapabilities(merged, false);
+          setCapabilitiesMap(merged);
         }
-      } catch (err) {
-        console.warn("[ModelSelectDialog] Background validation failed:", err);
-      }
-    };
+      })
+      .catch((err) => {
+        console.warn("[ModelSelectDialog] Batch validation error:", err);
+      })
+      .finally(() => {
+        inFlightRef.current = false;
+        if (!cancelled) {
+          setIsValidatingAll(false);
+        }
+      });
 
-    fetchCapabilities();
     return () => {
       cancelled = true;
     };
@@ -132,11 +156,12 @@ export function ModelSelectDialog({
   }, [models, capabilitiesMap]);
 
   const filteredModels = useMemo(() => {
+    const q = deferredSearch.trim().toLowerCase();
     return modelItems.filter((item) => {
       const matchesSearch =
-        !search.trim() ||
-        item.name.toLowerCase().includes(search.toLowerCase().trim()) ||
-        item.id.toLowerCase().includes(search.toLowerCase().trim());
+        !q ||
+        item.name.toLowerCase().includes(q) ||
+        item.id.toLowerCase().includes(q);
 
       let matchesFilter = true;
       if (filter === "reasoning") {
@@ -147,7 +172,7 @@ export function ModelSelectDialog({
 
       return matchesSearch && matchesFilter;
     });
-  }, [modelItems, search, filter]);
+  }, [modelItems, deferredSearch, filter]);
 
   const counts = useMemo(() => {
     const total = modelItems.length;
@@ -198,9 +223,8 @@ export function ModelSelectDialog({
           const result = data.capabilities?.[item.id];
 
           if (result) {
-            // Update cache and local state
             const updatedCaps = { ...getCachedModelCapabilities(), [item.id]: result };
-            setCachedModelCapabilities(updatedCaps);
+            setCachedModelCapabilities(updatedCaps, false);
             setCapabilitiesMap(updatedCaps);
 
             if (result.vision) {
@@ -255,11 +279,22 @@ export function ModelSelectDialog({
                 </DialogDescription>
               </div>
             </div>
-            {providerConfig && (
-              <Badge variant="outline" className="hidden sm:inline-flex text-[11px] font-mono capitalize">
-                {providerConfig.type}
-              </Badge>
-            )}
+            <div className="flex items-center gap-2">
+              {isValidatingAll && (
+                <Badge
+                  variant="outline"
+                  className="text-[10px] gap-1 text-muted-foreground animate-pulse border-primary/30 bg-primary/5 hidden sm:inline-flex"
+                >
+                  <HugeiconsIcon icon={Loading03Icon} className="size-2.5 animate-spin text-primary" />
+                  Verifying capabilities...
+                </Badge>
+              )}
+              {providerConfig && (
+                <Badge variant="outline" className="text-[11px] font-mono capitalize">
+                  {providerConfig.type}
+                </Badge>
+              )}
+            </div>
           </div>
 
           {/* Search bar */}
@@ -279,7 +314,7 @@ export function ModelSelectDialog({
               <button
                 type="button"
                 onClick={() => setSearch("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground cursor-pointer"
                 aria-label="Clear search"
               >
                 <HugeiconsIcon icon={Cancel01Icon} className="size-3.5" />
@@ -293,7 +328,7 @@ export function ModelSelectDialog({
               type="button"
               onClick={() => setFilter("all")}
               className={cn(
-                "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none",
+                "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none cursor-pointer",
                 filter === "all"
                   ? "bg-primary text-primary-foreground font-medium"
                   : "bg-muted hover:bg-muted/80 text-muted-foreground"
@@ -308,7 +343,7 @@ export function ModelSelectDialog({
                 type="button"
                 onClick={() => setFilter("reasoning")}
                 className={cn(
-                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none",
+                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none cursor-pointer",
                   filter === "reasoning"
                     ? "bg-violet-600 text-white font-medium dark:bg-violet-700"
                     : "bg-violet-50 hover:bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
@@ -325,7 +360,7 @@ export function ModelSelectDialog({
                 type="button"
                 onClick={() => setFilter("frontier")}
                 className={cn(
-                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none",
+                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none cursor-pointer",
                   filter === "frontier"
                     ? "bg-purple-600 text-white font-medium dark:bg-purple-700"
                     : "bg-purple-50 hover:bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300"
@@ -342,7 +377,7 @@ export function ModelSelectDialog({
                 type="button"
                 onClick={() => setFilter("mid")}
                 className={cn(
-                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none",
+                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none cursor-pointer",
                   filter === "mid"
                     ? "bg-blue-600 text-white font-medium dark:bg-blue-700"
                     : "bg-blue-50 hover:bg-blue-100 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300"
@@ -359,7 +394,7 @@ export function ModelSelectDialog({
                 type="button"
                 onClick={() => setFilter("small")}
                 className={cn(
-                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none",
+                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none cursor-pointer",
                   filter === "small"
                     ? "bg-emerald-600 text-white font-medium dark:bg-emerald-700"
                     : "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
@@ -421,7 +456,7 @@ export function ModelSelectDialog({
             <div className="space-y-1">
               {filteredModels.map((item) => {
                 const isActive = activeModel === item.id;
-                const isValidating = validatingModelId === item.id;
+                const isValidatingThis = validatingModelId === item.id;
                 const isVerifiedVision = item.capabilities.status === "verified_vision" || item.capabilities.vision;
                 const isVerifiedNoVision = item.capabilities.status === "verified_no_vision";
                 const isReasoning = item.capabilities.reasoning;
@@ -430,7 +465,7 @@ export function ModelSelectDialog({
                   <button
                     key={item.id}
                     type="button"
-                    disabled={isValidating}
+                    disabled={isValidatingThis}
                     onClick={() => handleSelect(item)}
                     className={cn(
                       "flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-left transition-all",
@@ -456,7 +491,7 @@ export function ModelSelectDialog({
                             : "bg-muted text-muted-foreground"
                         )}
                       >
-                        {isValidating ? (
+                        {isValidatingThis ? (
                           <HugeiconsIcon icon={Loading03Icon} className="size-3.5 animate-spin" />
                         ) : isActive ? (
                           <HugeiconsIcon icon={Tick02Icon} className="size-3.5" />
@@ -495,6 +530,14 @@ export function ModelSelectDialog({
                         >
                           <HugeiconsIcon icon={Alert02Icon} className="size-2.5" />
                           No Vision
+                        </Badge>
+                      ) : isValidatingAll ? (
+                        <Badge
+                          variant="outline"
+                          className="bg-muted text-muted-foreground border-border/40 text-[10px] py-0 px-1.5 gap-0.5 animate-pulse"
+                        >
+                          <HugeiconsIcon icon={Loading03Icon} className="size-2.5 animate-spin" />
+                          Checking...
                         </Badge>
                       ) : (
                         <Badge

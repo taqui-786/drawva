@@ -373,9 +373,20 @@ export function CanvasApp() {
 
   useEffect(() => {
     const refresh = () => {
-      setModels(getCachedModels());
-      setActiveModelState(getActiveModel());
-      setReasoningEffortState(getReasoningEffort());
+      const nextModels = getCachedModels();
+      setModels((prev) => {
+        if (
+          prev.length === nextModels.length &&
+          prev.every((m, i) => m === nextModels[i])
+        ) {
+          return prev;
+        }
+        return nextModels;
+      });
+      const nextActive = getActiveModel();
+      setActiveModelState((prev) => (prev === nextActive ? prev : nextActive));
+      const nextEffort = getReasoningEffort();
+      setReasoningEffortState((prev) => (prev === nextEffort ? prev : nextEffort));
     };
     refresh();
     window.addEventListener("storage", refresh);
