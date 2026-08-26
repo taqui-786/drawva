@@ -47,6 +47,7 @@ import {
   getEnabledPlugins,
   getReasoningEffort,
   setReasoningEffort,
+  getModelCapabilitiesCached,
   type ReasoningEffort,
 } from "@/lib/ai/provider";
 import { Textarea } from "@/components/ui/textarea";
@@ -436,6 +437,18 @@ export function CanvasApp() {
         action: {
           label: "Open settings",
           onClick: () => setSettingsOpen(true),
+        },
+      });
+      return;
+    }
+
+    const caps = getModelCapabilitiesCached(model);
+    if (!caps.vision && caps.status === "verified_no_vision") {
+      toast.error("Vision Input Required", {
+        description: `Selected model "${model}" is a text-only model and cannot process canvas drawings. Drawva requires a vision-capable model.`,
+        action: {
+          label: "Choose Model",
+          onClick: () => setModelSelectOpen(true),
         },
       });
       return;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -17,14 +17,25 @@ import {
   AiSearch02Icon,
   AiChipIcon,
   AiBrain01Icon,
+  AiViewIcon,
+  Alert02Icon,
   FlashIcon,
   Tick02Icon,
   Settings01Icon,
   Cancel01Icon,
   SparklesIcon,
+  Loading03Icon,
 } from "@hugeicons/core-free-icons";
-import { getModelTier } from "@/lib/ai/tiers";
-import { getProviderConfig, PROVIDER_INFOS, type ProviderConfig } from "@/lib/ai/provider";
+import { getModelTier, type ModelTier } from "@/lib/ai/tiers";
+import {
+  getProviderConfig,
+  PROVIDER_INFOS,
+  type ProviderConfig,
+  getModelCapabilitiesCached,
+  setCachedModelCapabilities,
+  getCachedModelCapabilities,
+} from "@/lib/ai/provider";
+import type { ModelCapabilities } from "@/lib/ai/capabilities";
 import { cn } from "@/lib/utils";
 
 interface ModelSelectDialogProps {
@@ -36,7 +47,14 @@ interface ModelSelectDialogProps {
   onOpenSettings: () => void;
 }
 
-type FilterCategory = "all" | "frontier" | "mid" | "small";
+type FilterCategory = "all" | "reasoning" | "frontier" | "mid" | "small";
+
+interface ModelItem {
+  id: string;
+  name: string;
+  tier: ModelTier;
+  capabilities: ModelCapabilities;
+}
 
 export function ModelSelectDialog({
   open,
@@ -49,29 +67,69 @@ export function ModelSelectDialog({
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<FilterCategory>("all");
   const [providerConfig, setProviderConfig] = useState<ProviderConfig | null>(() => getProviderConfig());
+  const [capabilitiesMap, setCapabilitiesMap] = useState<Record<string, ModelCapabilities>>(() =>
+    getCachedModelCapabilities()
+  );
+  const [validatingModelId, setValidatingModelId] = useState<string | null>(null);
 
+  // Sync provider configuration on storage changes
   useEffect(() => {
     const syncState = () => {
       setProviderConfig(getProviderConfig());
+      setCapabilitiesMap(getCachedModelCapabilities());
     };
     window.addEventListener("storage", syncState);
     return () => window.removeEventListener("storage", syncState);
   }, []);
 
+  // Background capability hydration for all models in list when dialog opens
+  useEffect(() => {
+    if (!open || models.length === 0) return;
+
+    let cancelled = false;
+    const fetchCapabilities = async () => {
+      try {
+        const res = await fetch("/api/canvas/model-validate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ modelIds: models }),
+        });
+
+        if (res.ok && !cancelled) {
+          const data = (await res.json()) as { capabilities?: Record<string, ModelCapabilities> };
+          if (data.capabilities && Object.keys(data.capabilities).length > 0) {
+            const merged = { ...getCachedModelCapabilities(), ...data.capabilities };
+            setCachedModelCapabilities(merged);
+            setCapabilitiesMap(merged);
+          }
+        }
+      } catch (err) {
+        console.warn("[ModelSelectDialog] Background validation failed:", err);
+      }
+    };
+
+    fetchCapabilities();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, models]);
+
   const providerName = providerConfig?.type
     ? PROVIDER_INFOS[providerConfig.type]?.name ?? providerConfig.type
     : "AI Provider";
 
-  const modelItems = useMemo(() => {
+  const modelItems: ModelItem[] = useMemo(() => {
     return models.map((m) => {
       const tier = getModelTier(m);
+      const capabilities = capabilitiesMap[m] || getModelCapabilitiesCached(m);
       return {
         id: m,
         name: m,
         tier,
+        capabilities,
       };
     });
-  }, [models]);
+  }, [models, capabilitiesMap]);
 
   const filteredModels = useMemo(() => {
     return modelItems.filter((item) => {
@@ -80,9 +138,12 @@ export function ModelSelectDialog({
         item.name.toLowerCase().includes(search.toLowerCase().trim()) ||
         item.id.toLowerCase().includes(search.toLowerCase().trim());
 
-      const matchesFilter =
-        filter === "all" ||
-        item.tier === filter;
+      let matchesFilter = true;
+      if (filter === "reasoning") {
+        matchesFilter = item.capabilities.reasoning;
+      } else if (filter !== "all") {
+        matchesFilter = item.tier === filter;
+      }
 
       return matchesSearch && matchesFilter;
     });
@@ -90,17 +151,93 @@ export function ModelSelectDialog({
 
   const counts = useMemo(() => {
     const total = modelItems.length;
+    const reasoning = modelItems.filter((m) => m.capabilities.reasoning).length;
     const frontier = modelItems.filter((m) => m.tier === "frontier").length;
     const mid = modelItems.filter((m) => m.tier === "mid").length;
     const small = modelItems.filter((m) => m.tier === "small").length;
-    return { total, frontier, mid, small };
+    return { total, reasoning, frontier, mid, small };
   }, [modelItems]);
 
-  const handleSelect = (modelId: string) => {
-    onSelectModel(modelId);
-    toast.success(`Active model set to ${modelId}`);
-    onOpenChange(false);
-  };
+  const handleSelect = useCallback(
+    async (item: ModelItem) => {
+      // 1. If already verified as Vision model -> select immediately
+      if (item.capabilities.vision && item.capabilities.status === "verified_vision") {
+        onSelectModel(item.id);
+        if (item.capabilities.reasoning) {
+          toast.success(`Active model set to ${item.id}`, {
+            description: "Vision & Reasoning controls are active in the header.",
+          });
+        } else {
+          toast.success(`Active model set to ${item.id}`, {
+            description: "Vision model active.",
+          });
+        }
+        onOpenChange(false);
+        return;
+      }
+
+      // 2. If already verified as NO vision -> reject immediately
+      if (item.capabilities.status === "verified_no_vision") {
+        toast.error("Vision Input Not Supported", {
+          description: `"${item.id}" is a text-only model and does not support image/canvas inputs. Drawva requires a vision-capable model to inspect handwriting. Please select another model.`,
+        });
+        return;
+      }
+
+      // 3. Unverified or unknown model -> validate on select via API
+      setValidatingModelId(item.id);
+      try {
+        const res = await fetch("/api/canvas/model-validate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ modelId: item.id }),
+        });
+
+        if (res.ok) {
+          const data = (await res.json()) as { capabilities?: Record<string, ModelCapabilities> };
+          const result = data.capabilities?.[item.id];
+
+          if (result) {
+            // Update cache and local state
+            const updatedCaps = { ...getCachedModelCapabilities(), [item.id]: result };
+            setCachedModelCapabilities(updatedCaps);
+            setCapabilitiesMap(updatedCaps);
+
+            if (result.vision) {
+              onSelectModel(item.id);
+              toast.success(`Active model set to ${item.id}`, {
+                description: result.reasoning
+                  ? "Vision & Reasoning verified and active."
+                  : "Vision model verified and active.",
+              });
+              onOpenChange(false);
+              return;
+            }
+
+            if (result.status === "verified_no_vision") {
+              toast.error("Vision Input Not Supported", {
+                description: `"${item.id}" does not support image/canvas inputs. Drawva requires a vision-capable model.`,
+              });
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("[ModelSelectDialog] On-select validation error:", err);
+      } finally {
+        setValidatingModelId(null);
+      }
+
+      // 4. Fallback for custom / unknown endpoints: allow selection with advisory warning
+      onSelectModel(item.id);
+      toast.warning(`Selected ${item.id}`, {
+        description:
+          "Vision support could not be verified automatically for this model. If drawing generation fails, please select a verified vision model.",
+      });
+      onOpenChange(false);
+    },
+    [onSelectModel, onOpenChange]
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -134,7 +271,7 @@ export function ModelSelectDialog({
             <Input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search models (e.g. gpt-4o, claude-3-7, gemini, qwen)..."
+              placeholder="Search models (e.g. gpt-4o, claude-3-7, gemini, muse, grok)..."
               className="pl-9 pr-8 h-9 text-xs font-mono bg-background"
               autoFocus
             />
@@ -165,6 +302,23 @@ export function ModelSelectDialog({
               All
               <span className="text-[10px] opacity-80">({counts.total})</span>
             </button>
+
+            {counts.reasoning > 0 && (
+              <button
+                type="button"
+                onClick={() => setFilter("reasoning")}
+                className={cn(
+                  "inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs transition-colors select-none",
+                  filter === "reasoning"
+                    ? "bg-violet-600 text-white font-medium dark:bg-violet-700"
+                    : "bg-violet-50 hover:bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300"
+                )}
+              >
+                <HugeiconsIcon icon={AiBrain01Icon} className="size-3" />
+                Reasoning
+                <span className="text-[10px] opacity-80">({counts.reasoning})</span>
+              </button>
+            )}
 
             {counts.frontier > 0 && (
               <button
@@ -267,16 +421,26 @@ export function ModelSelectDialog({
             <div className="space-y-1">
               {filteredModels.map((item) => {
                 const isActive = activeModel === item.id;
+                const isValidating = validatingModelId === item.id;
+                const isVerifiedVision = item.capabilities.status === "verified_vision" || item.capabilities.vision;
+                const isVerifiedNoVision = item.capabilities.status === "verified_no_vision";
+                const isReasoning = item.capabilities.reasoning;
+
                 return (
                   <button
                     key={item.id}
                     type="button"
-                    onClick={() => handleSelect(item.id)}
+                    disabled={isValidating}
+                    onClick={() => handleSelect(item)}
                     className={cn(
                       "flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-left transition-all",
                       isActive
                         ? "bg-primary/10 border border-primary/30 text-foreground font-medium"
-                        : "hover:bg-muted/70 text-muted-foreground hover:text-foreground border border-transparent"
+                        : isVerifiedVision
+                        ? "hover:bg-muted/70 text-muted-foreground hover:text-foreground border border-transparent cursor-pointer"
+                        : isVerifiedNoVision
+                        ? "hover:bg-destructive/5 text-muted-foreground border border-destructive/20 opacity-80 cursor-pointer"
+                        : "hover:bg-muted/50 text-muted-foreground border border-border/30 cursor-pointer"
                     )}
                   >
                     <div className="flex items-center gap-2.5 min-w-0">
@@ -285,11 +449,21 @@ export function ModelSelectDialog({
                           "flex size-6 shrink-0 items-center justify-center rounded-md text-xs",
                           isActive
                             ? "bg-primary text-primary-foreground"
+                            : isVerifiedVision
+                            ? "bg-muted text-muted-foreground"
+                            : isVerifiedNoVision
+                            ? "bg-destructive/10 text-destructive"
                             : "bg-muted text-muted-foreground"
                         )}
                       >
-                        {isActive ? (
+                        {isValidating ? (
+                          <HugeiconsIcon icon={Loading03Icon} className="size-3.5 animate-spin" />
+                        ) : isActive ? (
                           <HugeiconsIcon icon={Tick02Icon} className="size-3.5" />
+                        ) : isVerifiedVision ? (
+                          <HugeiconsIcon icon={AiChipIcon} className="size-3.5" />
+                        ) : isVerifiedNoVision ? (
+                          <HugeiconsIcon icon={Alert02Icon} className="size-3.5" />
                         ) : (
                           <HugeiconsIcon icon={AiChipIcon} className="size-3.5" />
                         )}
@@ -304,7 +478,45 @@ export function ModelSelectDialog({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                      {/* Vision Capability Badge */}
+                      {isVerifiedVision ? (
+                        <Badge
+                          variant="outline"
+                          className="bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20 text-[10px] py-0 px-1.5 gap-0.5"
+                        >
+                          <HugeiconsIcon icon={AiViewIcon} className="size-2.5" />
+                          Vision
+                        </Badge>
+                      ) : isVerifiedNoVision ? (
+                        <Badge
+                          variant="outline"
+                          className="bg-destructive/10 text-destructive border-destructive/30 text-[10px] py-0 px-1.5 gap-0.5"
+                        >
+                          <HugeiconsIcon icon={Alert02Icon} className="size-2.5" />
+                          No Vision
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="bg-muted text-muted-foreground border-border/40 text-[10px] py-0 px-1.5 gap-0.5"
+                        >
+                          Unverified
+                        </Badge>
+                      )}
+
+                      {/* Reasoning Capability Badge */}
+                      {isReasoning && (
+                        <Badge
+                          variant="outline"
+                          className="bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20 text-[10px] py-0 px-1.5 gap-0.5"
+                        >
+                          <HugeiconsIcon icon={AiBrain01Icon} className="size-2.5" />
+                          Reasoning
+                        </Badge>
+                      )}
+
+                      {/* Tier Badge */}
                       {item.tier === "frontier" && (
                         <Badge
                           variant="secondary"
@@ -329,6 +541,7 @@ export function ModelSelectDialog({
                           Fast
                         </Badge>
                       )}
+
                       {isActive && (
                         <span className="text-[11px] font-semibold text-primary pl-1">
                           Active

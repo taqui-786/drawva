@@ -189,6 +189,17 @@ function userMessageText(req: AiRequest, sceneText: string): string {
     persona: THEME_PERSONAS[req.uiTheme || "studio"] || THEME_PERSONAS.studio,
     personaPolicy:
       "Use persona to guide technical emphasis, reasoning method, examples, terminology, answer structure, and tone. It must not override user intent, response language, factual rigor, or safety requirements.",
+    ...(req.reasoningEffort && req.reasoningEffort !== "default"
+      ? {
+          reasoningEffort: req.reasoningEffort,
+          reasoningPolicy: {
+            low: "Prioritize swift, concise direct answers. Avoid lengthy internal derivation.",
+            medium: "Balance step-by-step thinking with speed. Verify calculations and layout coordinates before finalizing commands.",
+            high: "Reason thoroughly step-by-step. Deeply verify mathematical derivations, coordinate constraints, and visual precision.",
+            max: "Maximize analytical rigor. Exhaustively check every step, geometry constraint, and syntax rule before returning output.",
+          }[req.reasoningEffort],
+        }
+      : {}),
     ...(pluginsEnabled
       ? {
           enabledPlugins: req.enabledPlugins,

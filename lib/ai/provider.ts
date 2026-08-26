@@ -99,9 +99,15 @@ export const REASONING_EFFORT_OPTIONS: { value: ReasoningEffort; label: string; 
   { value: "max", label: "Max", description: "Maximum budget for difficult derivations" },
 ];
 
+import {
+  getModelCapabilities,
+  type ModelCapabilities,
+} from "./capabilities";
+
 const PROVIDER_KEY = "drawva.aiProvider";
 const MODELS_KEY = "drawva.aiModels";
 const MODEL_KEY = "drawva.aiModel";
+const MODEL_CAPABILITIES_KEY = "drawva.aiModelCapabilities";
 const REASONING_EFFORT_KEY = "drawva.aiReasoningEffort";
 const TOKEN_USAGE_KEY = "drawva.tokenUsage";
 const PLUGINS_KEY = "drawva.enabledPlugins";
@@ -230,6 +236,24 @@ export function setActiveModel(model: string | null): void {
     } catch {}
   }
   notify();
+}
+
+export function getCachedModelCapabilities(): Record<string, ModelCapabilities> {
+  return read<Record<string, ModelCapabilities>>(MODEL_CAPABILITIES_KEY, {});
+}
+
+export function setCachedModelCapabilities(caps: Record<string, ModelCapabilities>): void {
+  write(MODEL_CAPABILITIES_KEY, caps || {});
+  notify();
+}
+
+export function getModelCapabilitiesCached(modelId: string): ModelCapabilities {
+  if (!modelId) return { vision: false, reasoning: false, status: "unknown" };
+  const cached = getCachedModelCapabilities();
+  if (cached[modelId]) {
+    return cached[modelId];
+  }
+  return getModelCapabilities(modelId);
 }
 
 export function getTokenUsageHistory(): TokenUsageRecord[] {

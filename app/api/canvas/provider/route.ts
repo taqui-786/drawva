@@ -4,6 +4,8 @@ import {
   type ProviderType,
   type CustomModel,
 } from "@/lib/ai/provider";
+import type { ModelCapabilities } from "@/lib/ai/capabilities";
+import { inspectModelCapabilities } from "@/lib/ai/modelRegistry";
 
 export const runtime = "nodejs";
 
@@ -13,7 +15,7 @@ interface ProviderRequestBody {
   providerType?: ProviderType;
   baseUrl?: unknown;
   apiKey?: unknown;
-  customModels?: CustomModel[];
+  customModels?: unknown;
 }
 
 export async function POST(req: Request) {
@@ -34,53 +36,67 @@ export async function POST(req: Request) {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  const providerType: ProviderType = body.providerType || "custom";
+  const providerType = body.providerType;
+  if (!providerType || !(providerType in PROVIDER_INFOS)) {
+    return json({ error: "Invalid or missing providerType." }, 400);
+  }
+
+  const info = PROVIDER_INFOS[providerType];
+  const baseUrl =
+    typeof body.baseUrl === "string" && body.baseUrl.trim()
+      ? body.baseUrl.trim().replace(/\/+$/, "")
+      : info.defaultBaseUrl;
+
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
-  const baseUrlInput =
-    typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
-  const customModels = Array.isArray(body.customModels)
-    ? body.customModels
+
+  const customModels: CustomModel[] = Array.isArray(body.customModels)
+    ? (body.customModels as unknown[])
+        .filter(
+          (m): m is CustomModel =>
+            typeof m === "object" &&
+            m !== null &&
+            typeof (m as CustomModel).id === "string" &&
+            Boolean((m as CustomModel).id.trim()),
+        )
+        .map((m) => ({
+          id: m.id.trim(),
+          name: typeof m.name === "string" ? m.name.trim() : m.id.trim(),
+        }))
     : [];
-
-  if (!apiKey) {
-    return json({ error: "Missing API key" }, 400);
-  }
-
-  if (providerType === "custom" && !baseUrlInput && customModels.length === 0) {
-    return json(
-      { error: "Custom provider requires a Base URL or custom models list." },
-      400,
-    );
-  }
-
-  const info = PROVIDER_INFOS[providerType] || PROVIDER_INFOS.custom;
-  const baseUrl = baseUrlInput || info.defaultBaseUrl || "";
 
   let fetchedModels: string[] = [];
   let fetchError: string | null = null;
+  const rawModelMap: Record<string, Record<string, unknown>> = {};
 
   if (baseUrl) {
-    const cleanUrl = baseUrl.replace(/\/+$/, "");
-    const candidates = cleanUrl.endsWith("/v1")
-      ? [`${cleanUrl}/models`, `${cleanUrl.slice(0, -3)}/models`]
-      : [`${cleanUrl}/models`, `${cleanUrl}/v1/models`];
+    const candidates = [
+      `${baseUrl}/models`,
+      baseUrl.endsWith("/v1")
+        ? `${baseUrl}/models`
+        : `${baseUrl}/v1/models`,
+    ];
+    const seen = new Set<string>();
 
-    for (const endpoint of candidates) {
+    for (const url of candidates) {
+      if (seen.has(url)) continue;
+      seen.add(url);
+
       try {
         const headers: Record<string, string> = {
           accept: "application/json",
         };
-        if (providerType === "anthropic") {
-          headers["x-api-key"] = apiKey;
-          headers["anthropic-version"] = "2023-06-01";
-        } else {
-          headers["authorization"] = `Bearer ${apiKey}`;
+        if (apiKey) {
+          headers.authorization = `Bearer ${apiKey}`;
+        }
+        if (baseUrl.includes("openrouter.ai")) {
+          headers["HTTP-Referer"] = "https://drawva.app";
+          headers["X-Title"] = "Drawva";
         }
 
-        const res = await fetch(endpoint, {
+        const res = await fetch(url, {
           method: "GET",
           headers,
-          signal: AbortSignal.timeout(15_000),
+          signal: AbortSignal.timeout(10000),
         });
 
         if (res.ok) {
@@ -97,9 +113,14 @@ export async function POST(req: Request) {
             (m) => typeof m?.id === "string" || typeof m?.name === "string",
           );
           if (rows.length > 0) {
-            const compatible = rows.filter(
-              (m) => providerType === "custom" || isCompatibleModel(m),
+            for (const r of rows) {
+              const rowId = String(r.id || r.name);
+              rawModelMap[rowId] = r;
+            }
+            const compatibleFlags = await Promise.all(
+              rows.map((m) => providerType === "custom" || isCompatibleModel(m)),
             );
+            const compatible = rows.filter((_, i) => compatibleFlags[i]);
             fetchedModels = compatible.map((m) => String(m.id || m.name));
             if (fetchedModels.length > 0) break;
           }
@@ -117,8 +138,9 @@ export async function POST(req: Request) {
 
   if (customModels.length > 0) {
     for (const m of customModels) {
-      if (m.id && (providerType === "custom" || isCompatibleModel(m.id))) {
-        if (!combinedCandidates.includes(m.id)) {
+      if (m.id) {
+        const ok = providerType === "custom" || (await isCompatibleModel(m.id));
+        if (ok && !combinedCandidates.includes(m.id)) {
           combinedCandidates.push(m.id);
         }
       }
@@ -126,20 +148,16 @@ export async function POST(req: Request) {
   }
 
   for (const m of fetchedModels) {
-    if (
-      !combinedCandidates.includes(m) &&
-      (providerType === "custom" || isCompatibleModel(m))
-    ) {
+    if (!combinedCandidates.includes(m)) {
       combinedCandidates.push(m);
     }
   }
 
   if (combinedCandidates.length === 0 && info.defaultModels.length > 0) {
     for (const m of info.defaultModels) {
-      if (providerType === "custom" || isCompatibleModel(m)) {
-        if (!combinedCandidates.includes(m)) {
-          combinedCandidates.push(m);
-        }
+      const ok = providerType === "custom" || (await isCompatibleModel(m));
+      if (ok && !combinedCandidates.includes(m)) {
+        combinedCandidates.push(m);
       }
     }
   }
@@ -155,102 +173,28 @@ export async function POST(req: Request) {
     );
   }
 
+  const capabilities: Record<string, ModelCapabilities> = {};
+  await Promise.all(
+    combinedCandidates.map(async (m) => {
+      const rawMeta = rawModelMap[m];
+      capabilities[m] = await inspectModelCapabilities(m, rawMeta);
+    }),
+  );
+
   return json({
     models: combinedCandidates,
+    capabilities,
     filteredByVision: true,
     providerType,
   });
 }
 
-function hasModality(list: string[], value: string): boolean {
-  return list.some((s) => s.trim().toLowerCase() === value);
-}
-
-function isCompatibleModel(m: Record<string, unknown> | string): boolean {
+async function isCompatibleModel(m: Record<string, unknown> | string): Promise<boolean> {
   const modelObj = typeof m === "string" ? { id: m } : m;
-  const cap = supportsCanvasChat(modelObj);
-  if (cap !== null) {
-    return cap;
-  }
-  const id =
-    typeof modelObj.id === "string"
-      ? modelObj.id.toLowerCase()
-      : String(m).toLowerCase();
-  return (
-    id.includes("vision") ||
-    id.includes("-vl") ||
-    id.includes("vl-") ||
-    id.includes("gpt-4o") ||
-    id.includes("gpt-4-turbo") ||
-    id.includes("claude-3") ||
-    id.includes("gemini") ||
-    id.includes("pixtral") ||
-    id.includes("llava") ||
-    id.includes("neva") ||
-    id.includes("llama-3.2-11b-vision") ||
-    id.includes("llama-3.2-90b-vision") ||
-    id.includes("molmo") ||
-    id.includes("paligemma") ||
-    id.includes("fuyu") ||
-    id.includes("cogvlm") ||
-    id.includes("internvl") ||
-    id.includes("deepseek-vl") ||
-    id.includes("phi-3-vision") ||
-    id.includes("phi-3.5-vision") ||
-    id.includes("qwen-vl") ||
-    id.includes("minicpm") ||
-    id.includes("idefics") ||
-    id.includes("reka")
-  );
-}
-
-function supportsCanvasChat(m: Record<string, unknown>): boolean | null {
-  const arch =
-    m.architecture && typeof m.architecture === "object"
-      ? (m.architecture as Record<string, unknown>)
-      : undefined;
-  let inputs = Array.isArray(arch?.input_modalities)
-    ? arch.input_modalities.map(String)
-    : null;
-  let outputs = Array.isArray(arch?.output_modalities)
-    ? arch.output_modalities.map(String)
-    : null;
-
-  if (!inputs && Array.isArray(m.input_modalities)) {
-    inputs = m.input_modalities.map(String);
-  }
-  if (!outputs && Array.isArray(m.output_modalities)) {
-    outputs = m.output_modalities.map(String);
-  }
-
-  if (typeof m.modality === "string") {
-    const sides = m.modality.split("->");
-    if (!inputs && sides[0]) {
-      inputs = sides[0].split(",").map((s) => s.trim());
-    }
-    if (!outputs && sides[1]) {
-      outputs = sides[1].split(",").map((s) => s.trim());
-    }
-  }
-
-  if (inputs && outputs) {
-    return (
-      hasModality(inputs, "image") &&
-      hasModality(inputs, "text") &&
-      hasModality(outputs, "text")
-    );
-  }
-
-  if (Array.isArray(m.modalities)) {
-    const mods = m.modalities.map((s) => String(s).toLowerCase());
-    if (mods.includes("image") && mods.includes("text")) {
-      return true;
-    }
-  }
-
-  const flag = m.supports_image ?? m.supportsImage ?? m.vision;
-  if (typeof flag === "boolean") return flag;
-  return null;
+  const id = typeof modelObj.id === "string" ? modelObj.id : String(m);
+  const caps = await inspectModelCapabilities(id, modelObj);
+  // Compatible if verified vision or unknown (never prematurely drop unverified custom models)
+  return caps.vision || caps.status !== "verified_no_vision";
 }
 
 function json(body: unknown, status = 200): NextResponse {

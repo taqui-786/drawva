@@ -51,6 +51,7 @@ import {
   setEnabledPlugins,
   setProviderConfig,
   setCachedModels,
+  setCachedModelCapabilities,
   setActiveModel,
   getTokenUsageHistory,
   clearTokenUsageHistory,
@@ -265,6 +266,7 @@ function ProviderTabContent({
 
       const data = (await res.json()) as {
         models?: string[];
+        capabilities?: Record<string, { vision: boolean; reasoning: boolean }>;
         error?: string;
         filteredByVision?: boolean;
       };
@@ -283,6 +285,9 @@ function ProviderTabContent({
 
       setProviderConfig(config);
       setCachedModels(data.models);
+      if (data.capabilities) {
+        setCachedModelCapabilities(data.capabilities);
+      }
       setVerifiedCount(data.models.length);
 
       const currentActive = getActiveModel();
