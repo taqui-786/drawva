@@ -3,6 +3,7 @@ import type { Rect } from "./types";
 
 export const PLACE_GAP = 48;
 const MAX_SLOT_ATTEMPTS = 20;
+const MAX_CANDIDATES = 150;
 
 export interface TidyItemInput {
   id: string;
@@ -40,327 +41,216 @@ export interface TidyResult {
 }
 
 export function rectsIntersect(a: Rect, b: Rect): boolean {
-  return (
-    a.x < b.x + b.w &&
-    a.x + a.w > b.x &&
-    a.y < b.y + b.h &&
-    a.y + a.h > b.y
-  );
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
 }
 
 export function getItemCreatedAt(item: { id: string; createdAt?: number }): number {
-  if (typeof item.createdAt === "number" && Number.isFinite(item.createdAt)) {
-    return item.createdAt;
-  }
-  const match = item.id.match(/\b(\d{12,15})\b/);
-  if (match) {
-    const ts = Number(match[1]);
-    if (Number.isFinite(ts)) return ts;
-  }
-  return 0;
+  if (typeof item.createdAt === "number" && Number.isFinite(item.createdAt)) return item.createdAt;
+  const match = item.id.match(/(\d{12,15})/);
+  return match ? Number(match[1]) || 0 : 0;
 }
 
-interface CandidateInternal extends Rect {
+function boxOf(item: TidyItemInput): Rect {
+  return { x: Math.round(item.x), y: Math.round(item.y), w: Math.round(item.w), h: Math.round(item.h) };
+}
+
+function inView(b: Rect, view: Rect): boolean {
+  return rectsIntersect(b, view);
+}
+
+/** True when `inner` covers most of `outer` — the ink bbox grew from this object. */
+function isSelfInk(item: Rect, ink: Rect): boolean {
+  const ix = Math.max(0, Math.min(item.x + item.w, ink.x + ink.w) - Math.max(item.x, ink.x));
+  const iy = Math.max(0, Math.min(item.y + item.h, ink.y + ink.h) - Math.max(item.y, ink.y));
+  return (ix * iy) / Math.max(1, ink.w * ink.h) >= 0.5;
+}
+
+function hits(item: Rect, blockers: Rect[]): Rect[] {
+  return blockers.filter((b) => rectsIntersect(item, b));
+}
+
+function clampBox(b: Rect): Rect {
+  const w = Math.max(1, Math.min(b.w, SIZE));
+  const h = Math.max(1, Math.min(b.h, SIZE));
+  return { x: Math.max(0, Math.min(SIZE - w, b.x)), y: Math.max(0, Math.min(SIZE - h, b.y)), w, h };
+}
+
+function slide(item: Rect, blockers: Rect[], dir: 1 | -1): Rect | null {
+  const next = { ...item };
+  for (let step = 0; step < MAX_SLOT_ATTEMPTS; step++) {
+    const hit = hits(next, blockers);
+    if (!hit.length) return clampBox(next);
+    if (dir === 1) {
+      next.y = Math.max(...hit.map((b) => b.y + b.h)) + PLACE_GAP;
+      if (next.y + next.h > SIZE) {
+        next.y = SIZE - next.h;
+        return hits(next, blockers).length ? null : clampBox(next);
+      }
+    } else {
+      next.y = Math.min(...hit.map((b) => b.y)) - next.h - PLACE_GAP;
+      if (next.y < 0) {
+        next.y = 0;
+        return hits(next, blockers).length ? null : clampBox(next);
+      }
+    }
+  }
+  return null;
+}
+
+interface Cand extends Rect {
   id: string;
   kind: "widget" | "object";
   createdAt: number;
 }
 
 export function computeTidyMoves(input: ComputeTidyInput): TidyResult | null {
-  const { visibleRect, inkRect } = input;
+  const view = input.visibleRect;
+  const ink =
+    input.inkRect && input.inkRect.w > 4 && input.inkRect.h > 4
+      ? {
+          x: Math.round(input.inkRect.x),
+          y: Math.round(input.inkRect.y),
+          w: Math.round(input.inkRect.w),
+          h: Math.round(input.inkRect.h),
+        }
+      : null;
 
-  // 1. Detect locked items in viewport
-  const lockedInViewport: Array<Rect & { id: string }> = [];
-  for (const w of input.widgets) {
-    if (w.locked && rectsIntersect(w, visibleRect)) {
-      lockedInViewport.push({ id: w.id, x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h) });
-    }
-  }
-  for (const o of input.objects) {
-    if (o.locked && rectsIntersect(o, visibleRect)) {
-      lockedInViewport.push({ id: o.id, x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h) });
-    }
-  }
+  const locked: Array<Rect & { id: string }> = [];
+  const drafts: Rect[] = [...(input.pendingDrafts ?? [])];
+  const outside: Rect[] = [];
+  const candidates: Cand[] = [];
 
-  // 2. Draft items & ink blockers
-  const drafts: Rect[] = [];
-  for (const w of input.widgets) {
-    if (w.status === "draft") {
-      drafts.push({ x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h) });
+  const ingest = (item: TidyItemInput, kind: "widget" | "object") => {
+    const b = boxOf(item);
+    if (item.locked) {
+      if (inView(b, view)) locked.push({ ...b, id: item.id });
+      outside.push(b);
+      return;
     }
-  }
-  for (const o of input.objects) {
-    if (o.status === "draft") {
-      drafts.push({ x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h) });
+    if (item.status === "draft") {
+      drafts.push(b);
+      return;
     }
-  }
-  if (Array.isArray(input.pendingDrafts)) {
-    for (const d of input.pendingDrafts) {
-      drafts.push({ x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.w), h: Math.round(d.h) });
+    if (!inView(b, view)) {
+      outside.push(b);
+      return;
     }
-  }
+    candidates.push({ ...b, id: item.id, kind, createdAt: getItemCreatedAt(item) });
+  };
 
-  // Count locked items colliding with other locked items, drafts, or ink
-  const overlappingLockedIds = new Set<string>();
-  for (let i = 0; i < lockedInViewport.length; i++) {
-    for (let j = i + 1; j < lockedInViewport.length; j++) {
-      if (rectsIntersect(lockedInViewport[i], lockedInViewport[j])) {
-        overlappingLockedIds.add(lockedInViewport[i].id);
-        overlappingLockedIds.add(lockedInViewport[j].id);
-      }
-    }
-    if (inkRect && inkRect.w > 0 && inkRect.h > 0 && rectsIntersect(lockedInViewport[i], inkRect)) {
-      overlappingLockedIds.add(lockedInViewport[i].id);
-    }
-    for (const d of drafts) {
-      if (rectsIntersect(lockedInViewport[i], d)) {
-        overlappingLockedIds.add(lockedInViewport[i].id);
-      }
-    }
-  }
-  const skippedLocked = overlappingLockedIds.size;
+  for (const w of input.widgets) ingest(w, "widget");
+  for (const o of input.objects) ingest(o, "object");
 
-  // 3. Collect candidates (accepted, !locked, in viewport)
-  let candidates: CandidateInternal[] = [];
-  const blockers: Rect[] = [...drafts];
-
-  if (inkRect && inkRect.w > 0 && inkRect.h > 0) {
-    blockers.push({
-      x: Math.round(inkRect.x),
-      y: Math.round(inkRect.y),
-      w: Math.round(inkRect.w),
-      h: Math.round(inkRect.h),
-    });
-  }
-
-  // Add all locked items to blockers (locked items never move)
-  for (const w of input.widgets) {
-    if (w.locked) {
-      blockers.push({ x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h) });
-    }
-  }
-  for (const o of input.objects) {
-    if (o.locked) {
-      blockers.push({ x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h) });
-    }
-  }
-
-  // Collect candidate items vs accepted items outside viewport
-  for (const w of input.widgets) {
-    if (w.status === "accepted" && !w.locked) {
-      const box = { x: Math.round(w.x), y: Math.round(w.y), w: Math.round(w.w), h: Math.round(w.h) };
-      if (rectsIntersect(box, visibleRect)) {
-        candidates.push({ ...box, id: w.id, kind: "widget", createdAt: getItemCreatedAt(w) });
-      } else {
-        blockers.push(box);
-      }
-    }
-  }
-  for (const o of input.objects) {
-    if (o.status === "accepted" && !o.locked) {
-      const box = { x: Math.round(o.x), y: Math.round(o.y), w: Math.round(o.w), h: Math.round(o.h) };
-      if (rectsIntersect(box, visibleRect)) {
-        candidates.push({ ...box, id: o.id, kind: "object", createdAt: getItemCreatedAt(o) });
-      } else {
-        blockers.push(box);
-      }
-    }
-  }
+  const skippedLocked = new Set(
+    locked.flatMap((a, i) => locked.filter((b, j) => j > i && rectsIntersect(a, b)).flatMap((b) => [a.id, b.id]))
+  ).size;
 
   const totalCandidates = candidates.length;
-  if (totalCandidates === 0) {
-    if (skippedLocked > 0) {
-      return {
-        moves: [],
-        movedCount: 0,
-        totalCandidates: 0,
-        cappedAt150: false,
-        skippedLocked,
-        partialFailures: 0,
-      };
-    }
-    return null;
+  if (!totalCandidates) {
+    return skippedLocked ? { moves: [], movedCount: 0, totalCandidates: 0, cappedAt150: false, skippedLocked, partialFailures: 0 } : null;
   }
 
-  // 4. Cap at 150 candidates to avoid janking rAF loop; spatial hash if ever needed
+  const staticBlockers = [...drafts, ...outside, ...locked];
   let cappedAt150 = false;
-  if (candidates.length > 150) {
+  if (candidates.length > MAX_CANDIDATES) {
+    // ponytail: O(n²) overlap count, spatial hash if n>>150 ever matters
     cappedAt150 = true;
-    const allForScoring = [...candidates, ...blockers];
-    const scored = candidates.map((c) => {
-      let area = 0;
-      let count = 0;
-      for (const b of allForScoring) {
-        if (b === c) continue;
-        const ix = Math.max(0, Math.min(c.x + c.w, b.x + b.w) - Math.max(c.x, b.x));
-        const iy = Math.max(0, Math.min(c.y + c.h, b.y + b.h) - Math.max(c.y, b.y));
-        if (ix > 0 && iy > 0) {
-          area += ix * iy;
-          count++;
-        }
-      }
-      return { candidate: c, area, count };
+    candidates.sort((a, b) => {
+      const score = (c: Cand) =>
+        candidates.reduce((n, o) => n + (o !== c && rectsIntersect(c, o) ? 1 : 0), 0) +
+        staticBlockers.reduce((n, o) => n + (rectsIntersect(c, o) ? 1 : 0), 0);
+      return score(b) - score(a);
     });
-
-    scored.sort((a, b) => (b.area !== a.area ? b.area - a.area : b.count - a.count));
-    candidates = scored.slice(0, 150).map((s) => s.candidate);
-    const overflow = scored.slice(150).map((s) => s.candidate);
-    blockers.push(...overflow);
+    staticBlockers.push(...candidates.splice(MAX_CANDIDATES));
   }
 
-  // 5. Check if there are any overlaps at all
-  let hasAnyOverlap = false;
-  for (let i = 0; i < candidates.length; i++) {
-    for (let j = i + 1; j < candidates.length; j++) {
-      if (rectsIntersect(candidates[i], candidates[j])) {
-        hasAnyOverlap = true;
-        break;
-      }
-    }
-    if (hasAnyOverlap) break;
-    for (const b of blockers) {
-      if (rectsIntersect(candidates[i], b)) {
-        hasAnyOverlap = true;
-        break;
-      }
-    }
-    if (hasAnyOverlap) break;
-  }
+  candidates.sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id));
 
-  if (!hasAnyOverlap) {
-    if (skippedLocked > 0) {
-      return {
-        moves: [],
-        movedCount: 0,
-        totalCandidates,
-        cappedAt150,
-        skippedLocked,
-        partialFailures: 0,
-      };
-    }
-    return null;
-  }
+  const blockersFor = (c: Cand, placed: Rect[]): Rect[] => {
+    const extra = ink && !isSelfInk(c, ink) ? [ink] : [];
+    return [...staticBlockers, ...placed, ...extra];
+  };
 
-  // 6. Sort candidates by createdAt ascending (oldest stays put)
-  candidates.sort((a, b) => {
-    if (a.createdAt !== b.createdAt) {
-      return a.createdAt - b.createdAt;
-    }
-    return a.id.localeCompare(b.id);
+  const needsMove = candidates.some((c, i) => {
+    const others = candidates.filter((_, j) => j !== i);
+    return hits(c, blockersFor(c, others)).length > 0;
   });
+  if (!needsMove) {
+    return skippedLocked
+      ? { moves: [], movedCount: 0, totalCandidates, cappedAt150, skippedLocked, partialFailures: 0 }
+      : null;
+  }
 
-  // 7. Sliding algorithm
-  const placed: Rect[] = [...blockers];
+  const placed: Rect[] = [];
   const moves: TidyMove[] = [];
   let partialFailures = 0;
 
   for (const c of candidates) {
-    // If rect does NOT collide with already-placed items or blockers, leave it put
-    if (!placed.some((b) => rectsIntersect(c, b))) {
-      placed.push({ x: c.x, y: c.y, w: c.w, h: c.h });
+    const here = { x: c.x, y: c.y, w: c.w, h: c.h };
+    const walls = blockersFor(c, placed);
+    if (!hits(here, walls).length) {
+      placed.push(here);
       continue;
     }
-
-    let next: Rect = { x: c.x, y: c.y, w: c.w, h: c.h };
-    let resolved = false;
-
-    // Try sliding downward in increments (reuse slot/slide idea)
-    for (let step = 0; step < MAX_SLOT_ATTEMPTS; step++) {
-      const hits = placed.filter((b) => rectsIntersect(next, b));
-      if (hits.length === 0) {
-        resolved = true;
-        break;
-      }
-      let maxBottom = 0;
-      for (const h of hits) {
-        if (h.y + h.h > maxBottom) maxBottom = h.y + h.h;
-      }
-      next.y = maxBottom + PLACE_GAP;
-
-      // Downward slide clamps at SIZE - h
-      if (next.y + next.h > SIZE) {
-        next.y = Math.max(0, SIZE - next.h);
-        if (!placed.some((b) => rectsIntersect(next, b))) {
-          resolved = true;
-        }
-        break;
-      }
+    let next = slide(here, walls, 1);
+    if (!next) {
+      let south = 0;
+      for (const b of [...placed, ...walls]) south = Math.max(south, b.y + b.h);
+      const below = clampBox({ ...here, y: south + PLACE_GAP });
+      if (below.y + below.h <= SIZE && !hits(below, walls).length) next = below;
     }
-
-    // Fall back to "below southernmost content" after failed slots
-    if (!resolved) {
-      let southernmost = 0;
-      for (const b of placed) {
-        if (b.y + b.h > southernmost) southernmost = b.y + b.h;
-      }
-      const fallbackY = southernmost + PLACE_GAP;
-      if (fallbackY + next.h <= SIZE) {
-        const fallbackBox: Rect = { ...next, y: fallbackY };
-        if (!placed.some((b) => rectsIntersect(fallbackBox, b))) {
-          next = fallbackBox;
-          resolved = true;
-        }
-      }
-    }
-
-    // If still blocked, try upward slide
-    if (!resolved) {
-      const upBox: Rect = { x: c.x, y: c.y, w: c.w, h: c.h };
-      for (let step = 0; step < MAX_SLOT_ATTEMPTS; step++) {
-        const hits = placed.filter((b) => rectsIntersect(upBox, b));
-        if (hits.length === 0) {
-          next = upBox;
-          resolved = true;
-          break;
-        }
-        let minTop = SIZE;
-        for (const h of hits) {
-          if (h.y < minTop) minTop = h.y;
-        }
-        upBox.y = minTop - upBox.h - PLACE_GAP;
-        if (upBox.y < 0) {
-          upBox.y = 0;
-          if (!placed.some((b) => rectsIntersect(upBox, b))) {
-            next = upBox;
-            resolved = true;
-          }
-          break;
-        }
-      }
-    }
-
-    if (resolved) {
-      if (next.x !== c.x || next.y !== c.y) {
-        moves.push({ kind: c.kind, id: c.id, x: next.x, y: next.y });
-      }
-      placed.push(next);
-    } else {
-      // Partial failure: could not find open slot without collision
+    if (!next) next = slide(here, walls, -1);
+    if (!next) {
       partialFailures++;
-      placed.push({ x: c.x, y: c.y, w: c.w, h: c.h });
+      placed.push(here);
+      continue;
     }
+    if (next.x !== c.x || next.y !== c.y) moves.push({ kind: c.kind, id: c.id, x: next.x, y: next.y });
+    placed.push(next);
   }
 
-  if (moves.length === 0) {
-    if (skippedLocked > 0) {
-      return {
-        moves: [],
-        movedCount: 0,
-        totalCandidates,
-        cappedAt150,
-        skippedLocked,
-        partialFailures,
-      };
-    }
-    return null;
+  if (!moves.length) {
+    return skippedLocked || partialFailures
+      ? { moves: [], movedCount: 0, totalCandidates, cappedAt150, skippedLocked, partialFailures }
+      : null;
   }
+  return { moves, movedCount: moves.length, totalCandidates, cappedAt150, skippedLocked, partialFailures };
+}
 
-  return {
-    moves,
-    movedCount: moves.length,
-    totalCandidates,
-    cappedAt150,
-    skippedLocked,
-    partialFailures,
-  };
+function assert(cond: unknown, msg: string): void {
+  if (!cond) throw new Error(msg);
+}
+
+function demo(): void {
+  const view = { x: 0, y: 0, w: 4000, h: 3000 };
+  assert(computeTidyMoves({ widgets: [], objects: [], visibleRect: view }) === null, "empty");
+
+  const one = { id: "text-1000000000000", x: 100, y: 100, w: 200, h: 80, status: "accepted" as const };
+  assert(computeTidyMoves({ widgets: [], objects: [one], visibleRect: view }) === null, "single");
+
+  const a = { id: "text-1000000000001", x: 100, y: 100, w: 200, h: 80, status: "accepted" as const };
+  const b = { id: "text-1000000000002", x: 110, y: 110, w: 200, h: 80, status: "accepted" as const };
+  const pair = computeTidyMoves({ widgets: [], objects: [a, b], visibleRect: view, inkRect: { x: 100, y: 100, w: 210, h: 90 } });
+  assert(pair && pair.moves.length === 1 && pair.moves[0].id === b.id && pair.moves[0].y >= a.y + a.h + PLACE_GAP, "pair slides younger");
+
+  const lockedOld = { ...a, id: "text-1000000000003", locked: true };
+  const young = { ...b, id: "text-1000000000004" };
+  const lockedPair = computeTidyMoves({ widgets: [], objects: [lockedOld, young], visibleRect: view });
+  assert(lockedPair && lockedPair.moves.length === 1 && lockedPair.moves[0].id === young.id, "locked oldest stays");
+
+  const l1 = { ...a, id: "text-1000000000005", locked: true };
+  const l2 = { ...b, id: "text-1000000000006", locked: true };
+  const bothLocked = computeTidyMoves({ widgets: [], objects: [l1, l2], visibleRect: view });
+  assert(bothLocked && bothLocked.moves.length === 0 && bothLocked.skippedLocked === 2, "both locked skipped");
+
+  const draft = { id: "plot-1000000000007", x: 100, y: 100, w: 200, h: 80, status: "draft" as const };
+  const acc = { id: "text-1000000000008", x: 110, y: 110, w: 200, h: 80, status: "accepted" as const };
+  const vsDraft = computeTidyMoves({ widgets: [], objects: [draft, acc], visibleRect: view });
+  assert(vsDraft && vsDraft.moves.length === 1 && vsDraft.moves[0].id === acc.id, "draft is blocker");
+
+  console.log("tidy self-check ok");
+}
+
+if (typeof process !== "undefined" && process.argv[1]?.includes("tidy.ts")) {
+  demo();
 }
