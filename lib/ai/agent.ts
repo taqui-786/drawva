@@ -130,7 +130,7 @@ export function buildRetryInstruction(rejectReasons?: string[]): string {
       seen.add("draw");
     } else if (r.startsWith("animate_scene.") && !seen.has("animate_scene")) {
       corrections.push(
-        "animate_scene keyframes only support at, x, y, rotation, scale, opacity; drop unsupported motions or invalid object properties."
+        "Your animate_scene was invalid. Keep the same visual plan. Objects need id + type (circle/ellipse/rect/line/path/text/group). Paths may use points:[[x,y],...] or SVG d. Translate may use from/to offsets or path:\"M...\". Pulse/fade use numeric from/to. Skip unknown fields rather than dropping the scene."
       );
       seen.add("animate_scene");
     } else if (r.startsWith("plot_function.") && !seen.has("plot_function")) {

@@ -8,6 +8,7 @@ import {
   type AnimationScene,
   normalizeAnimationScene,
 } from "./animation";
+import { sampleSvgPath } from "./svgPath";
 
 export const MAX_COMMANDS = 16;
 export const AI_TEXT_MAX_LENGTH = 800;
@@ -204,9 +205,68 @@ function matchedTextFontSize(
   scale: number,
   changedBoxHeight?: number
 ): number {
+  const effectiveScale = Number.isFinite(scale) && scale > 0 ? scale : 0.25;
+  const modelSize = Number(value);
+  const longForm = Array.from(String(text).replace(/\s/g, "")).length >= 10;
+  if (Number.isFinite(modelSize) && modelSize > 0) {
+    // Honor the model's size for body copy. Only bump if it would be unreadably
+    // small on screen (~18px). Do not floor to the 42px short-answer size —
+    // that turns a compact notes column into a viewport-wide slab.
+    const minWorld = Math.round((longForm ? 18 : 32) / Math.max(0.03, Math.min(3, effectiveScale)));
+    return Math.max(24, Math.min(650, Math.max(Math.round(modelSize), minWorld)));
+  }
   const size = matchedFontSize(value, scale, changedBoxHeight);
-  const characters = Array.from(String(text).replace(/\s/g, "")).length;
-  return characters < 10 ? size : Math.max(24, Math.round(size * 0.5));
+  return longForm ? Math.max(24, Math.round(size * 0.5)) : size;
+}
+
+function textColumnWidth(
+  rawWidth: unknown,
+  fontSize: number,
+  scale: number,
+  viewportW: number
+): number {
+  const cap = Math.max(280, Math.min(3200, Math.round(Math.max(1, viewportW) * 0.9)));
+  const modelW = Number(rawWidth);
+  if (Number.isFinite(modelW) && modelW >= 280) {
+    return clampNum(modelW, 280, cap);
+  }
+  const fallback = Math.max(Math.round(fontSize * 18), Math.round(650 / Math.max(0.05, scale)));
+  return clampNum(fallback, 280, cap);
+}
+
+function textContentBox(
+  text: string,
+  fontSize: number,
+  lineHeight: number,
+  maxWidth: number
+): { w: number; h: number } {
+  const avgChar = Math.max(8, fontSize * 0.55);
+  const lines = String(text).split("\n");
+  let longest = 1;
+  for (const line of lines) longest = Math.max(longest, Array.from(line).length);
+  const unwound = Math.ceil(longest * avgChar);
+  const w = Math.max(fontSize * 2, Math.min(maxWidth, unwound || maxWidth));
+  const wrapLines = lines.reduce((n, line) => {
+    const chars = Math.max(1, Array.from(line).length);
+    return n + Math.max(1, Math.ceil((chars * avgChar) / Math.max(1, w)));
+  }, 0);
+  const h = Math.round(fontSize * lineHeight * Math.min(16, Math.max(1, wrapLines)));
+  return { w: Math.round(w), h };
+}
+
+/** Model x,y is usable when it sits in/near the current work area, not a y=0 dump. */
+function coordsNearWork(x: number, y: number, ctx: CommandValidationContext): boolean {
+  if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > SIZE || y > SIZE) return false;
+  const view = ctx.visibleRect || ctx.changedBox;
+  if (!view || view.w < 4 || view.h < 4) return true;
+  const padX = Math.max(view.w * 0.5, 800);
+  const padY = Math.max(view.h * 0.5, 800);
+  return (
+    x >= view.x - padX &&
+    x <= view.x + view.w + padX &&
+    y >= view.y - padY &&
+    y <= view.y + view.h + padY
+  );
 }
 
 function clampNum(v: number, lo: number, hi: number): number {
@@ -434,7 +494,10 @@ function placeContent(
     placement === "left" ||
     placement === "top";
 
-  if (Number.isFinite(rawX) && Number.isFinite(rawY) && (isTargetPlacement || !isRelativeSide)) {
+  // x,y from the model are the spatial plan. Placement is only a fallback when
+  // coords are missing or dumped at the origin. Never throw away a point that
+  // already sits in the current work area just because placement says "right".
+  if (Number.isFinite(rawX) && Number.isFinite(rawY) && (isTargetPlacement || !isRelativeSide || coordsNearWork(rawX, rawY, ctx))) {
     return rescueCollision(
       {
         x: clampNum(rawX, 0, SIZE - w),
@@ -1140,29 +1203,10 @@ export function validateCommand(
       const fontSize = matchedTextFontSize(c.fontSize, text, ctx.scale, ctx.changedBox?.h);
       const lineHeight = Math.max(1, Math.min(2.2, Number(c.lineHeight) || 1.35));
 
-      const screenMaxWidth = 650;
-      const worldScreenMaxWidth = Math.round(screenMaxWidth / Math.max(0.05, ctx.scale));
-      const minCharsWidth = Math.round(fontSize * 28);
-      let calculatedMaxWidth = Math.max(minCharsWidth, worldScreenMaxWidth);
-
-      if (ctx.changedBox && ctx.changedBox.w > 40) {
-        calculatedMaxWidth = Math.max(calculatedMaxWidth, Math.round(ctx.changedBox.w));
-      }
-
-      const rawMaxWidth = c.maxWidth ?? c.width ?? c.w;
-      if (Number.isFinite(Number(rawMaxWidth)) && Number(rawMaxWidth) >= minCharsWidth) {
-        calculatedMaxWidth = Math.max(calculatedMaxWidth, Number(rawMaxWidth));
-      }
-
       const viewportW = ctx.visibleRect?.w ?? 2000;
-      const maxWidth = Math.max(
-        280,
-        Math.min(Math.round(viewportW * 0.9), Math.min(3200, calculatedMaxWidth))
-      );
-
-      const lines = Math.min(8, Math.max(2, text.split("\n").length + 1));
-      const blockH = Math.round(fontSize * lineHeight * lines);
-      const near = placeContent(placement, text, maxWidth, blockH, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
+      const maxWidth = textColumnWidth(c.maxWidth ?? c.width ?? c.w, fontSize, ctx.scale, viewportW);
+      const content = textContentBox(text, fontSize, lineHeight, maxWidth);
+      const near = placeContent(placement, text, content.w, content.h, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
       let x = near.x;
       let y = near.y;
 
@@ -1470,14 +1514,21 @@ function expandDrawObjects(raw: Record<string, unknown>): Record<string, unknown
         }
       }
     } else if (type === "path") {
-      const rawPts = Array.isArray(o.points) ? o.points : [];
-      const poly: [number, number][] = [];
-      for (const p of rawPts.slice(0, 600)) {
-        if (Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))) {
-          poly.push([Number(p[0]), Number(p[1])]);
-        }
+      const d = typeof o.d === "string" ? o.d : typeof o.path === "string" ? o.path : "";
+      if (d.trim()) {
+        const sampled = sampleSvgPath(d, 600);
+        if (sampled && sampled.length >= 2) pts = sampled;
       }
-      if (poly.length >= 2) pts = poly;
+      if (!pts) {
+        const rawPts = Array.isArray(o.points) ? o.points : [];
+        const poly: [number, number][] = [];
+        for (const p of rawPts.slice(0, 600)) {
+          if (Array.isArray(p) && Number.isFinite(Number(p[0])) && Number.isFinite(Number(p[1]))) {
+            poly.push([Number(p[0]), Number(p[1])]);
+          }
+        }
+        if (poly.length >= 2) pts = poly;
+      }
     }
     if (!pts) continue;
     strokes.push({
@@ -1633,6 +1684,7 @@ function commandBounds(cmd: CanvasCommand): Box | null {
     case "plot_function":
     case "html_widget":
     case "diagram_source":
+    case "animate_scene":
       return { x: cmd.x, y: cmd.y, w: cmd.w, h: cmd.h };
     default:
       return null;

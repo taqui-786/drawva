@@ -35,6 +35,8 @@ export interface WidgetItem {
   userResized?: boolean;
   resizeMode?: WidgetResizeMode;
   cachedImage?: HTMLImageElement | HTMLCanvasElement;
+  locked?: boolean;
+  createdAt?: number;
 }
 
 export interface WidgetCallbacks {

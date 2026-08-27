@@ -26,6 +26,12 @@ export function DrawvaNavbar() {
         {/* Right: Nav Links (GitHub + About) + Launch Canvas CTA */}
         <div className="flex items-center gap-8">
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-muted-foreground">
+            <Link
+              href="/manual"
+              className="transition-colors hover:text-foreground"
+            >
+              Manual
+            </Link>
             <a
               href="https://github.com/taqui-786/drawva"
               target="_blank"

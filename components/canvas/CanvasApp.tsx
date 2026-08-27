@@ -35,6 +35,7 @@ import { buildScene } from "@/lib/canvas/scene";
 import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
 import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles } from "@/lib/canvas/persistence";
 import { BoardHistory } from "@/lib/canvas/history";
+import { computeTidyMoves } from "@/lib/canvas/tidy";
 import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
@@ -1745,6 +1746,122 @@ export function CanvasApp() {
     setTextAnchor(null);
   }, [engine, textAnchor, textValue, color, pen, addObject]);
 
+  const isTidyingRef = useRef(false);
+
+  const handleTidy = useCallback(() => {
+    if (isTidyingRef.current) return;
+    if (appState.aiStatus === "thinking") return;
+    if (
+      widgetDrag.current !== null ||
+      widgetResize.current !== null ||
+      objectDrag.current !== null ||
+      objectResize.current !== null ||
+      textAnchor !== null
+    ) {
+      return;
+    }
+
+    const eng = engine;
+    const wm = widgets.current;
+    const om = objects.current;
+    if (!eng || !wm || !om) return;
+
+    isTidyingRef.current = true;
+    try {
+      const visibleRect = eng.visibleRect();
+      const inkRect = inkBoxRef.current ? { ...inkBoxRef.current } : null;
+
+      const pendingDrafts: Rect[] = [];
+      if (drafts.current?.hasPending) {
+        for (const cmd of drafts.current.getPending()) {
+          const c = cmd as { x?: number; y?: number; w?: number; h?: number };
+          if (typeof c.x === "number" && typeof c.y === "number") {
+            pendingDrafts.push({
+              x: Math.round(c.x),
+              y: Math.round(c.y),
+              w: Math.round(c.w || 200),
+              h: Math.round(c.h || 100),
+            });
+          }
+        }
+      }
+
+      const result = computeTidyMoves({
+        widgets: wm.all(),
+        objects: om.all(),
+        visibleRect,
+        inkRect,
+        pendingDrafts,
+      });
+
+      if (!result || result.moves.length === 0) {
+        if (result && result.skippedLocked > 0) {
+          toast(result.skippedLocked === 1 ? "Skipped 1 locked item" : `Skipped ${result.skippedLocked} locked items`);
+        } else {
+          toast("Nothing to tidy");
+        }
+        return;
+      }
+
+      // Single undo entry pattern: snapshot before mutations
+      history.current?.recordObjects();
+      history.current?.recordWidgets();
+
+      for (const move of result.moves) {
+        if (move.kind === "widget") {
+          const item = wm.get(move.id);
+          if (item) {
+            const dx = move.x - item.x;
+            const dy = move.y - item.y;
+            wm.move(move.id, dx, dy);
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_MOVE",
+              id: move.id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              contentW: item.contentW,
+              contentH: item.contentH,
+              userResized: item.userResized,
+              resizeMode: item.resizeMode,
+            });
+          }
+        } else {
+          const item = om.get(move.id);
+          if (item) {
+            const dx = move.x - item.x;
+            const dy = move.y - item.y;
+            om.move(move.id, dx, dy);
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_MOVE",
+              id: move.id,
+              x: item.x,
+              y: item.y,
+            });
+          }
+        }
+      }
+
+      eng.requestRender();
+      afterBoardChangeRef.current();
+
+      if (result.cappedAt150) {
+        toast(`Tidied 150 of ${result.totalCandidates}`);
+      } else {
+        toast(`Tidied ${result.movedCount} item${result.movedCount > 1 ? "s" : ""}`);
+      }
+      if (result.skippedLocked > 0) {
+        toast(result.skippedLocked === 1 ? "Skipped 1 locked item" : `Skipped ${result.skippedLocked} locked items`);
+      }
+      if (result.partialFailures > 0) {
+        toast(`Could not place ${result.partialFailures} item${result.partialFailures > 1 ? "s" : ""} (no space)`);
+      }
+    } finally {
+      isTidyingRef.current = false;
+    }
+  }, [engine, textAnchor]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = (e.target as HTMLElement)?.tagName;
@@ -2063,6 +2180,7 @@ export function CanvasApp() {
         onOpenConnect={() => setConnectOpen(true)}
         onOpenLogs={() => setLogsOpen(true)}
         onOpenManual={() => setManualOpen(true)}
+        onTidy={handleTidy}
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">

@@ -54,6 +54,7 @@ import {
   Image01Icon,
   MathIcon,
   Maximize01Icon,
+  MagicWand01Icon,
   Menu01Icon,
   MoreHorizontalIcon,
   MoreIcon,
@@ -206,6 +207,7 @@ export function CanvasHeader({
   onOpenConnect,
   onOpenLogs,
   onOpenManual,
+  onTidy,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
@@ -244,6 +246,7 @@ export function CanvasHeader({
   onOpenConnect: () => void;
   onOpenLogs?: () => void;
   onOpenManual?: () => void;
+  onTidy?: () => void;
 }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
 
@@ -603,7 +606,15 @@ export function CanvasHeader({
                 </Button>
               }
             />
-            <DropdownMenuContent align="end" />
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem
+                disabled={aiStatus === "thinking"}
+                onClick={onTidy}
+              >
+                <HugeiconsIcon icon={MagicWand01Icon} />
+                Tidy layout
+              </DropdownMenuItem>
+            </DropdownMenuContent>
           </DropdownMenu>
         </div>
 
@@ -630,6 +641,13 @@ export function CanvasHeader({
               <DropdownMenuItem onClick={onRedo} disabled={!canRedo}>
                 <HugeiconsIcon icon={RedoIcon} />
                 Redo
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                disabled={aiStatus === "thinking"}
+                onClick={onTidy}
+              >
+                <HugeiconsIcon icon={MagicWand01Icon} />
+                Tidy layout
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onImportImage}>
                 <HugeiconsIcon icon={ImageAdd01Icon} />
@@ -799,7 +817,7 @@ export function CanvasHeader({
                   className="gap-1 px-2 sm:px-2.5 h-8 text-xs shrink-0 font-medium"
                 >
                   <HugeiconsIcon icon={AiEditingIcon} className="size-3.5 shrink-0" />
-                  <span className="hidden xs:inline">Ask AI</span>
+                  <span className="hidden xl:inline">Ask AI</span>
                 </Button>
               )}
 

@@ -25,6 +25,8 @@ export interface ObjectItem {
   paused?: boolean;
   playheadMs?: number;
   startedAt?: number;
+  locked?: boolean;
+  createdAt?: number;
 }
 
 export interface ObjectCallbacks {

@@ -22,6 +22,8 @@ export const ANIMATION_MOTION_TYPES = new Set([
   "keyframes",
 ]);
 
+import { parseSvgPathToPolylines, sampleSvgPath } from "./svgPath";
+
 export const ANIMATION_PALETTE = [
   "#f59e0b",
   "#2563eb",
@@ -57,6 +59,7 @@ export interface AnimationStyle {
 export interface BaseAnimationObject extends AnimationStyle {
   id: string;
   type: string;
+  rotation?: number;
 }
 
 export interface GroupAnimationObject extends BaseAnimationObject {
@@ -103,6 +106,8 @@ export interface LineAnimationObject extends BaseAnimationObject {
 export interface PathAnimationObject extends BaseAnimationObject {
   type: "path";
   points: [number, number][];
+  d?: string;
+  subpaths?: [number, number][][];
   closed?: boolean;
   smooth?: boolean;
 }
@@ -147,6 +152,7 @@ export interface AnimationMotion {
   clockwise?: boolean;
   from?: [number, number] | number;
   to?: [number, number] | number;
+  path?: [number, number][];
   alternate?: boolean;
   frames?: AnimationKeyframe[];
 }
@@ -186,10 +192,50 @@ function safeNumber(value: unknown, fallback = 0): number {
 }
 
 function safePoint(value: unknown): [number, number] | null {
-  if (Array.isArray(value) && value.length === 2 && finite(value[0]) && finite(value[1])) {
-    return [value[0], value[1]];
+  if (Array.isArray(value) && value.length >= 2 && finite(Number(value[0])) && finite(Number(value[1]))) {
+    return [Number(value[0]), Number(value[1])];
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const rec = value as Record<string, unknown>;
+    if (finite(Number(rec.x)) && finite(Number(rec.y))) return [Number(rec.x), Number(rec.y)];
   }
   return null;
+}
+
+function salvageId(raw: unknown, index: number): string {
+  const seed = typeof raw === "string" ? raw : "";
+  const cleaned = seed.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 47);
+  const withLetter = /^[A-Za-z]/.test(cleaned) ? cleaned : `o${cleaned}`;
+  if (/^[A-Za-z][A-Za-z0-9_-]{0,47}$/.test(withLetter)) return withLetter;
+  return `obj${index + 1}`;
+}
+
+function parseRotate(value: unknown): number {
+  if (finite(Number(value))) return Number(value);
+  if (typeof value !== "string") return 0;
+  const m = value.match(/rotate\(\s*(-?[\d.]+)/i);
+  return m ? Number(m[1]) || 0 : 0;
+}
+
+function collectPathPolylines(rec: Record<string, unknown>): {
+  points: [number, number][];
+  subpaths?: [number, number][][];
+  d?: string;
+} | null {
+  const d = typeof rec.d === "string" ? rec.d : typeof rec.path === "string" ? rec.path : "";
+  if (d.trim()) {
+    const subs = parseSvgPathToPolylines(d, MAX_ANIMATION_PATH_POINTS);
+    if (subs && subs.length) {
+      return { points: subs[0], subpaths: subs.length > 1 ? subs : undefined, d: d.trim() };
+    }
+  }
+  const rawPts = Array.isArray(rec.points) ? rec.points : Array.isArray(rec.path) ? rec.path : [];
+  const points: [number, number][] = [];
+  for (const pt of rawPts.slice(0, MAX_ANIMATION_PATH_POINTS)) {
+    const p = safePoint(pt);
+    if (p) points.push(p);
+  }
+  return points.length >= 2 ? { points } : null;
 }
 
 function safePeriod(value: unknown, fallback: number): number {
@@ -199,6 +245,7 @@ function safePeriod(value: unknown, fallback: number): number {
 function safeColor(value: unknown, fallback: string | null = null): string | null {
   if (typeof value !== "string") return fallback;
   const color = value.trim().toLowerCase();
+  if (color === "none" || color === "transparent") return null;
   if (
     /^#[0-9a-f]{3,8}$/i.test(color) ||
     /^rgba?\(\s*[\d.]+%?\s*,\s*[\d.]+%?\s*,\s*[\d.]+%?(?:\s*,\s*[\d.]+%?)?\s*\)$/i.test(color) ||
@@ -213,7 +260,8 @@ function normalizeStyle(source: Record<string, unknown>, index: number, type: st
   const outlined = type === "line" || type === "path";
   const fill = safeColor(source.fill, outlined ? null : ANIMATION_PALETTE[index % ANIMATION_PALETTE.length]);
   const stroke = safeColor(source.stroke, outlined ? ANIMATION_PALETTE[index % ANIMATION_PALETTE.length] : null);
-  const lineWidth = clamp(safeNumber(source.lineWidth, outlined ? 4 : 2), 0.5, 80);
+  const rawWidth = source.lineWidth ?? source.strokeWidth ?? source["stroke-width"];
+  const lineWidth = clamp(safeNumber(rawWidth, outlined ? 4 : 2), 0.5, 80);
   const opacity = clamp(safeNumber(source.opacity, 1), 0, 1);
   return { fill, stroke, lineWidth, opacity };
 }
@@ -233,11 +281,10 @@ function normalizeObject(
   const type = String(rec.type || "").toLowerCase();
   if (!ANIMATION_OBJECT_TYPES.has(type)) return null;
 
-  const id = typeof rec.id === "string" && /^[A-Za-z][A-Za-z0-9_-]{0,47}$/.test(rec.id) ? rec.id : null;
-  if (!id) return null;
-
+  const id = salvageId(rec.id, index);
   const style = normalizeStyle(rec, index, type);
-  const base = { id, type, ...style };
+  const rotation = parseRotate(rec.transform ?? rec.rotation);
+  const base = { id, type, ...style, ...(rotation ? { rotation } : {}) };
 
   if (type === "group") {
     const children = Array.isArray(rec.children)
@@ -301,18 +348,15 @@ function normalizeObject(
   }
 
   if (type === "path") {
-    const rawPts = Array.isArray(rec.points) ? rec.points : [];
-    const points: [number, number][] = [];
-    for (const pt of rawPts.slice(0, MAX_ANIMATION_PATH_POINTS)) {
-      const p = safePoint(pt);
-      if (p) points.push(p);
-    }
-    if (points.length < 2) return null;
+    const parsed = collectPathPolylines(rec);
+    if (!parsed) return null;
     return {
       ...base,
       type: "path",
-      points,
-      closed: Boolean(rec.closed),
+      points: parsed.points,
+      ...(parsed.d ? { d: parsed.d } : {}),
+      ...(parsed.subpaths ? { subpaths: parsed.subpaths } : {}),
+      closed: Boolean(rec.closed) || /z\s*$/i.test(parsed.d || ""),
       smooth: Boolean(rec.smooth),
     };
   }
@@ -322,15 +366,16 @@ function normalizeObject(
     const y = Number(rec.y);
     const text = typeof rec.text === "string" ? rec.text : "";
     if (!finite(x) || !finite(y) || !text.length) return null;
+    const anchor = String(rec.align || rec.textAnchor || rec["text-anchor"] || "").toLowerCase();
     const align: CanvasTextAlign =
-      rec.align === "center" || rec.align === "right" ? rec.align : "left";
+      anchor === "center" || anchor === "middle" ? "center" : anchor === "right" || anchor === "end" ? "right" : "left";
     return {
       ...base,
       type: "text",
       x,
       y,
       text: text.slice(0, MAX_ANIMATION_TEXT_LENGTH),
-      fontSize: clamp(safeNumber(rec.fontSize, 32), 6, 400),
+      fontSize: clamp(safeNumber(rec.fontSize ?? rec["font-size"], 32), 6, 400),
       fontFamily:
         typeof rec.fontFamily === "string" && rec.fontFamily.length <= 80
           ? rec.fontFamily
@@ -374,15 +419,17 @@ function normalizeMotion(
 ): AnimationMotion | null {
   if (!source || typeof source !== "object" || Array.isArray(source)) return null;
   const rec = source as Record<string, unknown>;
-  const type = String(rec.type || "").toLowerCase() as AnimationMotion["type"];
+  let type = String(rec.type || "").toLowerCase();
+  if (type === "follow" || type === "along" || type === "animatemotion" || type === "move") type = "translate";
+  const motionType = type as AnimationMotion["type"];
   const target = String(rec.target || "");
-  if (!ANIMATION_MOTION_TYPES.has(type) || !ids.has(target)) return null;
+  if (!ANIMATION_MOTION_TYPES.has(motionType) || !ids.has(target)) return null;
 
   const base = {
-    type,
+    type: motionType,
     target,
-    periodMs: safePeriod(rec.periodMs, durationMs),
-    phase: (safeNumber(rec.phaseDeg) * Math.PI) / 180,
+    periodMs: safePeriod(rec.periodMs ?? rec.durationMs ?? rec.duration, durationMs),
+    phase: (safeNumber(rec.phaseDeg ?? rec.phase) * Math.PI) / 180,
   };
 
   if (type === "orbit") {
@@ -400,6 +447,16 @@ function normalizeMotion(
   }
 
   if (type === "translate") {
+    const rawPath = rec.path ?? rec.d ?? rec.along;
+    const pathPts =
+      typeof rawPath === "string"
+        ? sampleSvgPath(rawPath, MAX_ANIMATION_PATH_POINTS)
+        : Array.isArray(rawPath)
+          ? (rawPath as unknown[]).map(safePoint).filter((p): p is [number, number] => p !== null).slice(0, MAX_ANIMATION_PATH_POINTS)
+          : null;
+    if (pathPts && pathPts.length >= 2) {
+      return { ...base, type: "translate", path: pathPts, alternate: rec.alternate === true };
+    }
     const from = safePoint(rec.from) || [0, 0];
     const to = safePoint(rec.to);
     if (!to) return null;
@@ -458,26 +515,24 @@ export function normalizeAnimationScene(
     return null;
   }
 
-  if (
-    !Array.isArray(rec.objects) ||
-    !rec.objects.length ||
-    rec.objects.length > MAX_ANIMATION_OBJECTS ||
-    !Array.isArray(rec.motions) ||
-    !rec.motions.length ||
-    rec.motions.length > MAX_ANIMATION_MOTIONS
-  ) {
+  if (!Array.isArray(rec.objects) || !rec.objects.length || rec.objects.length > MAX_ANIMATION_OBJECTS) {
     return null;
   }
 
   const objects: AnimationObject[] = [];
+  const seenIds = new Set<string>();
   for (let i = 0; i < rec.objects.length; i++) {
     const obj = normalizeObject(rec.objects[i], i, width, height);
-    if (!obj) return null;
-    objects.push(obj);
+    if (!obj) continue;
+    let id = obj.id;
+    if (seenIds.has(id)) id = salvageId(`${id}_${i}`, i);
+    if (seenIds.has(id)) continue;
+    seenIds.add(id);
+    objects.push(id === obj.id ? obj : { ...obj, id });
   }
+  if (!objects.length) return null;
 
   const ids = new Set(objects.map((o) => o.id));
-  if (ids.size !== objects.length) return null;
 
   const byId = new Map(objects.map((o) => [o.id, o]));
   const childIds = new Set<string>();
@@ -485,14 +540,27 @@ export function normalizeAnimationScene(
   for (const obj of objects) {
     if (obj.type !== "group") continue;
     const localChildren = new Set<string>();
+    const kept: string[] = [];
     for (const child of obj.children) {
       if (!ids.has(child) || child === obj.id || localChildren.has(child) || childIds.has(child)) {
-        return null;
+        continue;
       }
       localChildren.add(child);
       childIds.add(child);
+      kept.push(child);
+    }
+    obj.children = kept;
+  }
+
+  for (let i = objects.length - 1; i >= 0; i--) {
+    const obj = objects[i];
+    if (obj.type === "group" && !obj.children.length) {
+      objects.splice(i, 1);
+      ids.delete(obj.id);
+      byId.delete(obj.id);
     }
   }
+  if (!objects.length) return null;
 
   const visiting = new Set<string>();
   const visited = new Set<string>();
@@ -515,14 +583,12 @@ export function normalizeAnimationScene(
   }
 
   const motions: AnimationMotion[] = [];
-  for (const m of rec.motions) {
+  const rawMotions = Array.isArray(rec.motions) ? rec.motions.slice(0, MAX_ANIMATION_MOTIONS) : [];
+  for (const m of rawMotions) {
     const motion = normalizeMotion(m, ids, durationMs, width, height);
-    // A single malformed motion (e.g. keyframes using unsupported properties
-    // like points or x1/y1) must not void the whole scene — drop it and keep
-    // the valid ones so the animation still renders.
+    // A single malformed motion must not void the whole scene — drop it.
     if (motion) motions.push(motion);
   }
-  if (!motions.length) return null;
 
   return {
     tool: "animate_scene",
@@ -550,9 +616,11 @@ export function objectAnchor(object: AnimationObject): { x: number; y: number } 
     return { x: (object.x1 + object.x2) / 2, y: (object.y1 + object.y2) / 2 };
   }
   if (object.type === "path") {
-    const sumX = object.points.reduce((sum, item) => sum + item[0], 0);
-    const sumY = object.points.reduce((sum, item) => sum + item[1], 0);
-    return { x: sumX / object.points.length, y: sumY / object.points.length };
+    const pts = object.subpaths?.length ? object.subpaths.flat() : object.points;
+    if (!pts.length) return { x: 0, y: 0 };
+    const sumX = pts.reduce((sum, item) => sum + item[0], 0);
+    const sumY = pts.reduce((sum, item) => sum + item[1], 0);
+    return { x: sumX / pts.length, y: sumY / pts.length };
   }
   if (object.type === "text") {
     return { x: object.x, y: object.y };
@@ -628,11 +696,19 @@ export function animationStates(
     } else if (motion.type === "spin") {
       state.rotation += (motion.clockwise ? 1 : -1) * progress * Math.PI * 2;
     } else if (motion.type === "translate") {
-      const from = Array.isArray(motion.from) ? motion.from : [0, 0];
-      const to = Array.isArray(motion.to) ? motion.to : [0, 0];
-      const ratio = motion.alternate ? 0.5 - Math.cos(progress * Math.PI * 2) / 2 : progress;
-      state.dx += from[0] + (to[0] - from[0]) * ratio;
-      state.dy += from[1] + (to[1] - from[1]) * ratio;
+      if (motion.path && motion.path.length >= 2) {
+        const t = motion.alternate ? 0.5 - Math.cos(progress * Math.PI * 2) / 2 : progress;
+        const pt = pointAlongPolyline(motion.path, t);
+        const anchor = objectAnchor(target);
+        state.dx += pt[0] - anchor.x;
+        state.dy += pt[1] - anchor.y;
+      } else {
+        const from = Array.isArray(motion.from) ? motion.from : [0, 0];
+        const to = Array.isArray(motion.to) ? motion.to : [0, 0];
+        const ratio = motion.alternate ? 0.5 - Math.cos(progress * Math.PI * 2) / 2 : progress;
+        state.dx += from[0] + (to[0] - from[0]) * ratio;
+        state.dy += from[1] + (to[1] - from[1]) * ratio;
+      }
     } else if (motion.type === "pulse") {
       const from = typeof motion.from === "number" ? motion.from : 0.85;
       const to = typeof motion.to === "number" ? motion.to : 1.15;
@@ -662,22 +738,82 @@ function roundedRect(context: CanvasRenderingContext2D, object: RectAnimationObj
   }
 }
 
-function drawPath(context: CanvasRenderingContext2D, object: PathAnimationObject): void {
-  const points = object.points;
-  context.moveTo(points[0][0], points[0][1]);
-  if (!object.smooth || points.length < 3) {
-    for (let i = 1; i < points.length; i++) {
-      context.lineTo(points[i][0], points[i][1]);
-    }
-  } else {
-    for (let i = 1; i < points.length - 1; i++) {
-      const curr = points[i];
-      const next = points[i + 1];
-      context.quadraticCurveTo(curr[0], curr[1], (curr[0] + next[0]) / 2, (curr[1] + next[1]) / 2);
-    }
-    context.lineTo(points[points.length - 1][0], points[points.length - 1][1]);
+function pointAlongPolyline(points: [number, number][], t: number): [number, number] {
+  if (points.length === 1) return points[0];
+  const clamped = clamp(t, 0, 1);
+  let total = 0;
+  const segs: number[] = [];
+  for (let i = 1; i < points.length; i++) {
+    const len = Math.hypot(points[i][0] - points[i - 1][0], points[i][1] - points[i - 1][1]);
+    segs.push(len);
+    total += len;
   }
-  if (object.closed) context.closePath();
+  if (total <= 0) return points[points.length - 1];
+  let remain = clamped * total;
+  for (let i = 1; i < points.length; i++) {
+    const len = segs[i - 1];
+    if (remain <= len || i === points.length - 1) {
+      const r = len <= 0 ? 1 : remain / len;
+      return [
+        points[i - 1][0] + (points[i][0] - points[i - 1][0]) * r,
+        points[i - 1][1] + (points[i][1] - points[i - 1][1]) * r,
+      ];
+    }
+    remain -= len;
+  }
+  return points[points.length - 1];
+}
+
+function drawPath(context: CanvasRenderingContext2D, object: PathAnimationObject): void {
+  if (object.d && typeof Path2D !== "undefined") {
+    try {
+      const path = new Path2D(object.d);
+      if (object.fill) {
+        context.fillStyle = object.fill;
+        context.fill(path);
+      }
+      if (object.stroke) {
+        context.strokeStyle = object.stroke;
+        context.lineWidth = object.lineWidth || 2;
+        context.lineCap = "round";
+        context.lineJoin = "round";
+        context.stroke(path);
+      }
+      return;
+    } catch {
+      // Fall through to sampled polylines.
+    }
+  }
+  const polylines = object.subpaths && object.subpaths.length ? object.subpaths : [object.points];
+  for (const points of polylines) {
+    if (!points || points.length < 2) continue;
+    context.beginPath();
+    context.moveTo(points[0][0], points[0][1]);
+    if (!object.smooth || points.length < 3) {
+      for (let i = 1; i < points.length; i++) {
+        context.lineTo(points[i][0], points[i][1]);
+      }
+    } else {
+      for (let i = 1; i < points.length - 1; i++) {
+        const curr = points[i];
+        const next = points[i + 1];
+        context.quadraticCurveTo(curr[0], curr[1], (curr[0] + next[0]) / 2, (curr[1] + next[1]) / 2);
+      }
+      context.lineTo(points[points.length - 1][0], points[points.length - 1][1]);
+    }
+    if (object.closed) context.closePath();
+    if (object.fill) {
+      context.fillStyle = object.fill;
+      context.fill();
+    }
+    if (object.stroke) {
+      context.strokeStyle = object.stroke;
+      context.lineWidth = object.lineWidth || 2;
+      context.lineCap = "round";
+      context.lineJoin = "round";
+      context.stroke();
+    }
+  }
 }
 
 function drawShape(context: CanvasRenderingContext2D, object: AnimationObject): void {
@@ -702,6 +838,7 @@ function drawShape(context: CanvasRenderingContext2D, object: AnimationObject): 
     context.lineTo(object.x2, object.y2);
   } else if (object.type === "path") {
     drawPath(context, object);
+    return;
   }
 
   if (object.fill && object.type !== "line") {
@@ -750,7 +887,7 @@ export function renderAnimationScene(
     } else {
       const anchor = objectAnchor(object);
       context.translate(anchor.x + state.dx, anchor.y + state.dy);
-      context.rotate(state.rotation);
+      context.rotate(state.rotation + ((object.rotation || 0) * Math.PI) / 180);
       context.scale(state.scale, state.scale);
       context.translate(-anchor.x, -anchor.y);
       drawShape(context, object);
