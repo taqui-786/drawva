@@ -305,18 +305,18 @@ function normalizeObject(
   }
 
   if (type === "circle") {
-    const cx = Number(rec.cx);
-    const cy = Number(rec.cy);
-    const r = Number(rec.r);
+    const cx = Number(rec.cx ?? rec.x);
+    const cy = Number(rec.cy ?? rec.y);
+    const r = Number(rec.r ?? rec.radius);
     if (![cx, cy, r].every(finite) || r <= 0 || r > Math.max(width, height) * 2) return null;
     return { ...base, type: "circle", cx, cy, r };
   }
 
   if (type === "ellipse") {
-    const cx = Number(rec.cx);
-    const cy = Number(rec.cy);
-    const rx = Number(rec.rx);
-    const ry = Number(rec.ry);
+    const cx = Number(rec.cx ?? rec.x);
+    const cy = Number(rec.cy ?? rec.y);
+    const rx = Number(rec.rx ?? rec.radiusX ?? rec.r1);
+    const ry = Number(rec.ry ?? rec.radiusY ?? rec.r2);
     if (![cx, cy, rx, ry].every(finite) || rx <= 0 || ry <= 0 || rx > width * 2 || ry > height * 2) return null;
     return { ...base, type: "ellipse", cx, cy, rx, ry };
   }
@@ -324,8 +324,8 @@ function normalizeObject(
   if (type === "rect") {
     const x = Number(rec.x);
     const y = Number(rec.y);
-    const w = Number(rec.w);
-    const h = Number(rec.h);
+    const w = Number(rec.w ?? rec.width);
+    const h = Number(rec.h ?? rec.height);
     if (![x, y, w, h].every(finite) || w <= 0 || h <= 0 || w > width * 3 || h > height * 3) return null;
     return {
       ...base,
@@ -334,15 +334,16 @@ function normalizeObject(
       y,
       w,
       h,
-      radius: clamp(safeNumber(rec.radius), 0, Math.min(w, h) / 2),
+      radius: clamp(safeNumber(rec.radius ?? rec.rx ?? rec.borderRadius), 0, Math.min(w, h) / 2),
     };
   }
 
   if (type === "line") {
-    const x1 = Number(rec.x1);
-    const y1 = Number(rec.y1);
-    const x2 = Number(rec.x2);
-    const y2 = Number(rec.y2);
+    const rawPts = Array.isArray(rec.points) ? rec.points : null;
+    const x1 = Number(rec.x1 ?? rawPts?.[0]?.[0] ?? (rec.from as [number, number])?.[0]);
+    const y1 = Number(rec.y1 ?? rawPts?.[0]?.[1] ?? (rec.from as [number, number])?.[1]);
+    const x2 = Number(rec.x2 ?? rawPts?.[1]?.[0] ?? (rec.to as [number, number])?.[0]);
+    const y2 = Number(rec.y2 ?? rawPts?.[1]?.[1] ?? (rec.to as [number, number])?.[1]);
     if (![x1, y1, x2, y2].every(finite)) return null;
     return { ...base, type: "line", x1, y1, x2, y2 };
   }
@@ -364,7 +365,7 @@ function normalizeObject(
   if (type === "text") {
     const x = Number(rec.x);
     const y = Number(rec.y);
-    const text = typeof rec.text === "string" ? rec.text : "";
+    const text = typeof rec.text === "string" ? rec.text : typeof rec.content === "string" ? rec.content : typeof rec.label === "string" ? rec.label : typeof rec.value === "string" ? rec.value : "";
     if (!finite(x) || !finite(y) || !text.length) return null;
     const anchor = String(rec.align || rec.textAnchor || rec["text-anchor"] || "").toLowerCase();
     const align: CanvasTextAlign =
@@ -418,11 +419,66 @@ function normalizeMotion(
   height: number
 ): AnimationMotion | null {
   if (!source || typeof source !== "object" || Array.isArray(source)) return null;
-  const rec = source as Record<string, unknown>;
+  const raw = source as Record<string, unknown>;
+  const rec: Record<string, unknown> = { ...raw };
+
+  // Unwrap motion-type nested wrappers (e.g. { target: "runner", translate: { path: "..." } })
+  for (const t of ["translate", "orbit", "spin", "pulse", "fade", "keyframes"]) {
+    if (t in raw && raw[t] && typeof raw[t] === "object") {
+      if (!rec.type) rec.type = t;
+      const sub = raw[t] as Record<string, unknown>;
+      if (Array.isArray(sub)) {
+        if (t === "keyframes") rec.frames = sub;
+      } else {
+        Object.assign(rec, sub);
+      }
+    }
+  }
+
   let type = String(rec.type || "").toLowerCase();
-  if (type === "follow" || type === "along" || type === "animatemotion" || type === "move") type = "translate";
+  if (type === "follow" || type === "along" || type === "animatemotion" || type === "move" || type === "path") type = "translate";
+  if (type === "rotate") type = "spin";
+  if (type === "scale" || type === "grow" || type === "shrink") type = "pulse";
+  if (type === "opacity" || type === "blink") type = "fade";
+
+  // Infer type if omitted based on present fields
+  if (!type) {
+    if (rec.path || rec.d || rec.along || rec.to || (Array.isArray(rec.points) && rec.points.length >= 2)) type = "translate";
+    else if (rec.rx || rec.ry || rec.center) type = "orbit";
+    else if (rec.clockwise !== undefined) type = "spin";
+    else if (rec.frames) type = "keyframes";
+    else if (rec.from !== undefined && typeof rec.from === "number") type = "pulse";
+  }
+
   const motionType = type as AnimationMotion["type"];
-  const target = String(rec.target || "");
+  let target = String(rec.target || rec.id || rec.targetId || "").trim();
+
+  // If target does not match directly, try case-insensitive matching
+  if (!ids.has(target)) {
+    const lower = target.toLowerCase();
+    for (const validId of ids) {
+      if (validId.toLowerCase() === lower) {
+        target = validId;
+        break;
+      }
+    }
+  }
+
+  // If target still not found and only one object exists, default to that object
+  if (!ids.has(target) && ids.size === 1) {
+    target = Array.from(ids)[0];
+  }
+
+  // If target not found, look for common runner/mover/dot names in ids
+  if (!ids.has(target)) {
+    for (const validId of ids) {
+      if (/runner|dot|ball|particle|mover|obj|circle/i.test(validId)) {
+        target = validId;
+        break;
+      }
+    }
+  }
+
   if (!ANIMATION_MOTION_TYPES.has(motionType) || !ids.has(target)) return null;
 
   const base = {
@@ -447,13 +503,16 @@ function normalizeMotion(
   }
 
   if (type === "translate") {
-    const rawPath = rec.path ?? rec.d ?? rec.along;
-    const pathPts =
-      typeof rawPath === "string"
-        ? sampleSvgPath(rawPath, MAX_ANIMATION_PATH_POINTS)
-        : Array.isArray(rawPath)
-          ? (rawPath as unknown[]).map(safePoint).filter((p): p is [number, number] => p !== null).slice(0, MAX_ANIMATION_PATH_POINTS)
-          : null;
+    const rawPath = rec.path ?? rec.d ?? rec.along ?? rec.points;
+    let pathPts: [number, number][] | null = null;
+    if (typeof rawPath === "string") {
+      pathPts = sampleSvgPath(rawPath, MAX_ANIMATION_PATH_POINTS);
+    } else if (Array.isArray(rawPath)) {
+      pathPts = (rawPath as unknown[])
+        .map(safePoint)
+        .filter((p): p is [number, number] => p !== null)
+        .slice(0, MAX_ANIMATION_PATH_POINTS);
+    }
     if (pathPts && pathPts.length >= 2) {
       return { ...base, type: "translate", path: pathPts, alternate: rec.alternate === true };
     }

@@ -658,11 +658,26 @@ function findSceneWidgetMatch(
     if (bestOverlap) return bestOverlap;
   }
 
-  // 4. Proximity to changedBox if only 1 widget exists
-  if (sceneWidgets.length === 1 && changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
-    const w = sceneWidgets[0];
-    const dist = Math.hypot(w.x + w.w / 2 - (changedBox.x + changedBox.w / 2), w.y + w.h / 2 - (changedBox.y + changedBox.h / 2));
-    if (dist < 800) return w;
+  // 4. Overlap with changedBox (fresh ink drawn directly inside/over an existing widget)
+  if (changedBox && changedBox.w > 20 && changedBox.h > 20) {
+    let bestOverlap: { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null = null;
+    let maxIoU = 0;
+    for (const w of sceneWidgets) {
+      const ix = Math.max(0, Math.min(changedBox.x + changedBox.w, w.x + w.w) - Math.max(changedBox.x, w.x));
+      const iy = Math.max(0, Math.min(changedBox.y + changedBox.h, w.y + w.h) - Math.max(changedBox.y, w.y));
+      const intersection = ix * iy;
+      const cArea = changedBox.w * changedBox.h;
+      const containment = cArea > 0 ? intersection / cArea : 0;
+      const union = cArea + w.w * w.h - intersection;
+      const iou = union > 0 ? intersection / union : 0;
+      if (containment >= 0.6 || iou >= 0.35) {
+        if (iou > maxIoU) {
+          maxIoU = iou;
+          bestOverlap = w;
+        }
+      }
+    }
+    if (bestOverlap) return bestOverlap;
   }
 
   return null;
@@ -716,47 +731,28 @@ export function fitWidgetGeometry(
     placement === "left" ||
     placement === "top";
 
-  // Refinement mode: snap to the widget the model actually edited or targeted
+  // Refinement mode: snap ONLY if there is an explicit matched target or widgetEditBox
+  const explicitTarget = matchedTarget || widgetEditBox;
   const snapInPlace =
-    placement === "in_place" ||
-    (planSaysReplace && (matchedTarget !== null || widgetEditBox !== undefined)) ||
-    (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords);
+    explicitTarget !== null &&
+    explicitTarget !== undefined &&
+    explicitTarget.w > 0 &&
+    explicitTarget.h > 0 &&
+    (placement === "in_place" || planSaysReplace || Boolean(cmd.targetId) || (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords));
 
-  if (snapInPlace) {
-    let target = matchedTarget || widgetEditBox;
-    if ((!target || target.w <= 0 || target.h <= 0) && widgetItems.length > 0) {
-      if (changedBox && (changedBox.w > 0 || changedBox.h > 0)) {
-        let closest = widgetItems[0];
-        let minD = Infinity;
-        for (const wItem of widgetItems) {
-          const d = Math.hypot(
-            wItem.x + wItem.w / 2 - (changedBox.x + changedBox.w / 2),
-            wItem.y + wItem.h / 2 - (changedBox.y + changedBox.h / 2)
-          );
-          if (d < minD) {
-            minD = d;
-            closest = wItem;
-          }
-        }
-        target = closest;
-      } else {
-        target = widgetItems[0];
-      }
-    }
-    if (target && target.w > 0 && target.h > 0) {
-      cmd.placement = "in_place";
-      const targetId = ("id" in target && typeof (target as { id?: unknown }).id === "string") ? (target as { id: string }).id : undefined;
-      if (targetId && !cmd.targetId) cmd.targetId = targetId;
-      return sanitizeWidgetGeometry(
-        {
-          x: Math.round(target.x),
-          y: Math.round(target.y),
-          w: Math.round(target.w),
-          h: Math.round(target.h),
-        },
-        widgetGeometry
-      );
-    }
+  if (snapInPlace && explicitTarget) {
+    cmd.placement = "in_place";
+    const targetId = ("id" in explicitTarget && typeof (explicitTarget as { id?: unknown }).id === "string") ? (explicitTarget as { id: string }).id : undefined;
+    if (targetId && !cmd.targetId) cmd.targetId = targetId;
+    return sanitizeWidgetGeometry(
+      {
+        x: Math.round(explicitTarget.x),
+        y: Math.round(explicitTarget.y),
+        w: Math.round(explicitTarget.w),
+        h: Math.round(explicitTarget.h),
+      },
+      widgetGeometry
+    );
   }
 
   let rawW = Number(rawCmdW);
@@ -776,13 +772,16 @@ export function fitWidgetGeometry(
       widgetGeometry
     );
     if (!box) return null;
+    if (isTargetPlacement || placement === "in_place") {
+      return box;
+    }
     return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !snapInPlace, true);
   }
 
   const anchor = placementAnchor(changedBox, visibleRect);
 
   // If user requested targeting the drawn container/sketch
-  if (isTargetPlacement && anchor && changedBox) {
+  if ((isTargetPlacement || placement === "in_place") && anchor && changedBox) {
     const pad = 12;
     const w = Math.max(160, Math.round(changedBox.w - pad * 2));
     const h = Math.max(120, Math.round(changedBox.h - pad * 2));
@@ -829,6 +828,96 @@ export function fitWidgetGeometry(
   }
 
   return sanitizeWidgetGeometry({ x, y, w, h }, widgetGeometry);
+}
+
+function fitAnimationGeometry(
+  c: Record<string, unknown>,
+  ctx: CommandValidationContext
+): Box | null {
+  const placement = String(c.placement || "").toLowerCase();
+  const targetBox = (c.targetBox && typeof c.targetBox === "object"
+    ? c.targetBox
+    : null) as Record<string, unknown> | null;
+
+  const rawX = Number(targetBox && typeof targetBox.x === "number" ? targetBox.x : c.x);
+  const rawY = Number(targetBox && typeof targetBox.y === "number" ? targetBox.y : c.y);
+  let rawW = Number(targetBox && typeof targetBox.w === "number" ? targetBox.w : c.w);
+  let rawH = Number(targetBox && typeof targetBox.h === "number" ? targetBox.h : c.h);
+
+  const hasExplicitCoords = Number.isFinite(rawX) && Number.isFinite(rawY);
+  const isOverlayPlacement =
+    placement === "in_place" ||
+    placement === "inside_target" ||
+    placement === "target_box" ||
+    placement === "at_target" ||
+    placement === "match_sketch" ||
+    placement === "overlay";
+
+  const ANIM_MIN_W = 120;
+  const ANIM_MIN_H = 90;
+  const ANIM_MAX_W = 6000;
+  const ANIM_MAX_H = 6000;
+  const ANIM_DEFAULT_W = 800;
+  const ANIM_DEFAULT_H = 600;
+
+  if (hasExplicitCoords) {
+    if (!Number.isFinite(rawW) || rawW <= 0) rawW = ANIM_DEFAULT_W;
+    if (!Number.isFinite(rawH) || rawH <= 0) rawH = ANIM_DEFAULT_H;
+
+    const w = clampNum(rawW, ANIM_MIN_W, ANIM_MAX_W);
+    const h = clampNum(rawH, ANIM_MIN_H, ANIM_MAX_H);
+    const x = clampNum(rawX, 0, SIZE - w);
+    const y = clampNum(rawY, 0, SIZE - h);
+
+    if (isOverlayPlacement) {
+      return { x, y, w, h };
+    }
+    return rescueCollision(
+      { x, y, w, h },
+      placement,
+      ctx,
+      !ctx.keepPosition,
+      true
+    );
+  }
+
+  const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
+  if (isOverlayPlacement && anchor && ctx.changedBox) {
+    const pad = 8;
+    const w = clampNum(Math.max(ANIM_MIN_W, ctx.changedBox.w + pad * 2), ANIM_MIN_W, ANIM_MAX_W);
+    const h = clampNum(Math.max(ANIM_MIN_H, ctx.changedBox.h + pad * 2), ANIM_MIN_H, ANIM_MAX_H);
+    const x = clampNum(ctx.changedBox.x - pad, 0, SIZE - w);
+    const y = clampNum(ctx.changedBox.y - pad, 0, SIZE - h);
+    return { x, y, w, h };
+  }
+
+  const w = clampNum(Number.isFinite(rawW) && rawW > 0 ? rawW : (anchor && anchor.w > 60 ? anchor.w : ANIM_DEFAULT_W), ANIM_MIN_W, ANIM_MAX_W);
+  const h = clampNum(Number.isFinite(rawH) && rawH > 0 ? rawH : (anchor && anchor.h > 60 ? anchor.h : ANIM_DEFAULT_H), ANIM_MIN_H, ANIM_MAX_H);
+
+  const blockers = occupancy(ctx.changedBox, ctx.sceneItems, ctx.visibleRect);
+  let x: number;
+  let y: number;
+
+  if (anchor && ctx.changedBox) {
+    const preferred = pickPreferredSide(placement, ctx.changedBox, w, h, ctx.visibleRect, blockers, "below");
+    const near = placeAroundAnchor(ctx.changedBox, w, h, ctx.visibleRect, blockers, preferred);
+    x = near.x;
+    y = near.y;
+  } else if (ctx.visibleRect) {
+    const near = placeInVisible(ctx.visibleRect, w, h, blockers);
+    x = near.x;
+    y = near.y;
+  } else {
+    x = 1000;
+    y = 1000;
+  }
+
+  return {
+    x: clampNum(x, 0, SIZE - w),
+    y: clampNum(y, 0, SIZE - h),
+    w,
+    h,
+  };
 }
 
 const PLOT_MIN_W = 240;
@@ -1273,23 +1362,15 @@ export function validateCommand(
       };
     }
     case "animate_scene": {
-      const geom = fitWidgetGeometry(
-        c,
-        ctx.visibleRect,
-        ctx.changedBox,
-        !ctx.keepPosition,
-        ctx.widgetEditBox,
-        ctx.sceneItems,
-        ctx.widgetGeometry,
-        ctx.spatialPlan
-      );
+      const geom = fitAnimationGeometry(c, ctx);
+      if (!geom) return fail("animate_scene.bad-geom");
       const sceneCmd = {
         ...c,
         tool: "animate_scene",
-        x: geom ? geom.x : Number(c.x) || 0,
-        y: geom ? geom.y : Number(c.y) || 0,
-        w: geom ? geom.w : Number(c.w) || 800,
-        h: geom ? geom.h : Number(c.h) || 600,
+        x: geom.x,
+        y: geom.y,
+        w: geom.w,
+        h: geom.h,
       };
       const normalized = normalizeAnimationScene(sceneCmd, SIZE);
       if (!normalized) return fail("animate_scene.invalid");
