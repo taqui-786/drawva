@@ -24,6 +24,7 @@ export type PlacementMode =
   | "target_box"
   | "at_target"
   | "match_sketch"
+  | "overlay"
   | "below"
   | "right"
   | "left"

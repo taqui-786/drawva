@@ -460,7 +460,9 @@ function inferTextPlacement(placement: string, text: string): string {
     placement === "inside_target" ||
     placement === "target_box" ||
     placement === "at_target" ||
-    placement === "match_sketch"
+    placement === "match_sketch" ||
+    placement === "in_place" ||
+    placement === "overlay"
   ) {
     return placement;
   }
@@ -487,6 +489,8 @@ function placeContent(
     placement === "target_box" ||
     placement === "at_target" ||
     placement === "match_sketch" ||
+    placement === "in_place" ||
+    placement === "overlay" ||
     placement === "custom";
   const isRelativeSide =
     placement === "below" ||
@@ -579,7 +583,8 @@ function rescueCollision(
     placement === "inside_target" ||
     placement === "target_box" ||
     placement === "at_target" ||
-    placement === "match_sketch"
+    placement === "match_sketch" ||
+    placement === "overlay"
   ) {
     return box;
   }
@@ -703,7 +708,8 @@ export function fitWidgetGeometry(
     placement === "inside_target" ||
     placement === "target_box" ||
     placement === "at_target" ||
-    placement === "match_sketch";
+    placement === "match_sketch" ||
+    placement === "overlay";
   const isRelativeSide =
     placement === "below" ||
     placement === "right" ||
