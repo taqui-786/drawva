@@ -45,9 +45,10 @@ export async function recordAiUsage(payload: {
       return { success: false }; // Guest user
     }
 
-    // Save snapshotUrl in production only to keep development DB minimal
-    const isProduction = process.env.NODE_ENV === "production";
-    const snapshotUrl = isProduction && payload.snapshotUrl ? payload.snapshotUrl : null;
+    // Only store snapshotUrl if it is a valid HTTP/HTTPS URL (avoid bloating database with large base64 data URIs)
+    const isHttpUrl =
+      typeof payload.snapshotUrl === "string" && /^https?:\/\//i.test(payload.snapshotUrl);
+    const snapshotUrl = isHttpUrl ? payload.snapshotUrl : null;
 
     await db.insert(aiUsage).values({
       id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -65,7 +66,7 @@ export async function recordAiUsage(payload: {
 
     return { success: true };
   } catch (err) {
-    console.error("recordAiUsage error:", err);
+    console.error("[recordAiUsage] Database record insert error:", err);
     return { success: false };
   }
 }

@@ -1,0 +1,13 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787938836349,
+      "tag": "0000_curved_felicia_hardy",
+      "breakpoints": true
+    }
+  ]
+}

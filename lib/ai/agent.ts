@@ -384,8 +384,9 @@ export function parseJsonResponse(raw: string): AgentReply | null {
 function extractTokenUsage(res: unknown): TokenUsage | undefined {
   if (!res || typeof res !== "object") return undefined;
   const obj = res as Record<string, unknown>;
+  const rawObj = (obj.raw && typeof obj.raw === "object" ? obj.raw : undefined) as Record<string, unknown> | undefined;
 
-  const usageMeta = (obj.usage_metadata || (obj.raw as Record<string, unknown> | undefined)?.usage_metadata) as Record<string, unknown> | undefined;
+  const usageMeta = (obj.usage_metadata || rawObj?.usage_metadata) as Record<string, unknown> | undefined;
   if (usageMeta && typeof usageMeta === "object") {
     const inputTokens = Number(usageMeta.input_tokens || usageMeta.prompt_tokens || 0);
     const outputTokens = Number(usageMeta.output_tokens || usageMeta.completion_tokens || 0);
@@ -395,9 +396,9 @@ function extractTokenUsage(res: unknown): TokenUsage | undefined {
     }
   }
 
-  const respMeta = (obj.response_metadata || (obj.raw as Record<string, unknown> | undefined)?.response_metadata) as Record<string, unknown> | undefined;
+  const respMeta = (obj.response_metadata || rawObj?.response_metadata) as Record<string, unknown> | undefined;
   if (respMeta && typeof respMeta === "object") {
-    const tokenUsage = (respMeta.tokenUsage || respMeta.usage) as Record<string, unknown> | undefined;
+    const tokenUsage = (respMeta.tokenUsage || respMeta.usage || respMeta.estimatedTokenUsage) as Record<string, unknown> | undefined;
     if (tokenUsage && typeof tokenUsage === "object") {
       const inputTokens = Number(tokenUsage.promptTokens || tokenUsage.prompt_tokens || tokenUsage.input_tokens || 0);
       const outputTokens = Number(tokenUsage.completionTokens || tokenUsage.completion_tokens || tokenUsage.output_tokens || 0);
@@ -405,6 +406,16 @@ function extractTokenUsage(res: unknown): TokenUsage | undefined {
       if (inputTokens > 0 || outputTokens > 0 || totalTokens > 0) {
         return { inputTokens, outputTokens, totalTokens };
       }
+    }
+  }
+
+  const directUsage = (obj.usage || rawObj?.usage) as Record<string, unknown> | undefined;
+  if (directUsage && typeof directUsage === "object") {
+    const inputTokens = Number(directUsage.promptTokens || directUsage.prompt_tokens || directUsage.input_tokens || directUsage.prompt_token_count || 0);
+    const outputTokens = Number(directUsage.completionTokens || directUsage.completion_tokens || directUsage.output_tokens || directUsage.candidates_token_count || 0);
+    const totalTokens = Number(directUsage.totalTokens || directUsage.total_tokens || inputTokens + outputTokens);
+    if (inputTokens > 0 || outputTokens > 0 || totalTokens > 0) {
+      return { inputTokens, outputTokens, totalTokens };
     }
   }
 
@@ -503,20 +514,23 @@ async function attemptReply(
   // because OpenAI function_calling tools parameter is unsupported on vision endpoints for custom models.
   const isCustomOrNvidia = req.providerType !== "openai";
   const structOpts = isCustomOrNvidia
-    ? { method: "jsonMode" as const, name: "canvas_reply" }
-    : { name: "canvas_reply" };
+    ? { method: "jsonMode" as const, name: "canvas_reply", includeRaw: true as const }
+    : { name: "canvas_reply", includeRaw: true as const };
 
   try {
     if (typeof model.withStructuredOutput === "function") {
       const base = model.withStructuredOutput(AgentReplySchema, structOpts);
-      const res = await base.invoke(messages, { signal: controller.signal });
+      const res = (await base.invoke(messages, { signal: controller.signal })) as
+        | { raw?: unknown; parsed?: AgentReply }
+        | AgentReply;
       usage = extractTokenUsage(res);
+      const parsed = (res && typeof res === "object" && "parsed" in res && res.parsed ? res.parsed : res) as AgentReply;
       response = {
-        intent: res.intent ?? "answer",
-        message: res.message,
-        observedText: res.observedText,
-        spatialPlan: res.spatialPlan,
-        commands: Array.isArray(res.commands) ? res.commands : [],
+        intent: parsed.intent ?? "answer",
+        message: parsed.message,
+        observedText: parsed.observedText,
+        spatialPlan: parsed.spatialPlan,
+        commands: Array.isArray(parsed.commands) ? parsed.commands : [],
       };
     } else {
       throw new Error("Structured output unavailable");

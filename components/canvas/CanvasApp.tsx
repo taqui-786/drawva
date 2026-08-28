@@ -584,18 +584,15 @@ export function CanvasApp() {
     };
 
     const applyReply = async (data: AiReply & { rejected?: string[] }) => {
-      if (data.tokenUsage) {
-        void recordAiUsage({
-          providerType: config.type || "custom",
-          modelId: model,
-          inputTokens: data.tokenUsage.inputTokens,
-          outputTokens: data.tokenUsage.outputTokens,
-          totalTokens: data.tokenUsage.totalTokens,
-          intent: data.intent,
-          userPrompt: payload.userPrompt,
-          snapshotUrl: payload.atlasImage,
-        });
-      }
+      void recordAiUsage({
+        providerType: config.type || "custom",
+        modelId: model,
+        inputTokens: data.tokenUsage?.inputTokens ?? 0,
+        outputTokens: data.tokenUsage?.outputTokens ?? 0,
+        totalTokens: data.tokenUsage?.totalTokens ?? 0,
+        intent: data.intent,
+        userPrompt: payload.userPrompt,
+      });
 
       const logEntry: AiLogEntry = {
         timestamp: reqTimestamp,
