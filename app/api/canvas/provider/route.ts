@@ -6,6 +6,7 @@ import {
 } from "@/lib/ai/provider";
 import type { ModelCapabilities } from "@/lib/ai/capabilities";
 import { inspectModelCapabilities } from "@/lib/ai/modelRegistry";
+import { isCodexAvailable, getCodexModels } from "@/lib/ai/codex";
 
 export const runtime = "nodejs";
 
@@ -16,6 +17,17 @@ interface ProviderRequestBody {
   baseUrl?: unknown;
   apiKey?: unknown;
   customModels?: unknown;
+}
+
+export async function GET() {
+  const codexStatus = isCodexAvailable();
+  const models = codexStatus.available ? getCodexModels() : [];
+  return json({
+    codex: {
+      ...codexStatus,
+      models,
+    },
+  });
 }
 
 export async function POST(req: Request) {
@@ -42,6 +54,27 @@ export async function POST(req: Request) {
   }
 
   const info = PROVIDER_INFOS[providerType];
+
+  if (providerType === "codex") {
+    const status = isCodexAvailable();
+    if (!status.available) {
+      return json(
+        { error: status.reason || "Codex CLI not available. Run `codex login` in terminal." },
+        422,
+      );
+    }
+    const codexModels = getCodexModels();
+    const capabilities: Record<string, ModelCapabilities> = {};
+    for (const m of codexModels) {
+      capabilities[m] = await inspectModelCapabilities(m);
+    }
+    return json({
+      models: codexModels,
+      capabilities,
+      filteredByVision: true,
+      providerType: "codex",
+    });
+  }
   const baseUrl =
     typeof body.baseUrl === "string" && body.baseUrl.trim()
       ? body.baseUrl.trim().replace(/\/+$/, "")

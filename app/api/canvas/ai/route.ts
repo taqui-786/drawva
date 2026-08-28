@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { runAgent } from "@/lib/ai/agent";
+import { runAgent, buildSystemPromptText } from "@/lib/ai/agent";
 import { createChatModel } from "@/lib/ai/model";
+import { runCodexCli, isCodexAvailable } from "@/lib/ai/codex";
 import { AI_TIMEOUT_MS, MAX_BODY_BYTES, MAX_COMMANDS, MAX_DIAGRAM_BYTES, MAX_HTML_BYTES } from "@/lib/ai/prompts";
 import { widgetGeometryForViewport } from "@/lib/ai/geometry";
 import { validateCommands } from "@/lib/canvas/commands";
@@ -109,7 +110,7 @@ export async function POST(req: Request) {
   const apiKey = typeof p.apiKey === "string" ? p.apiKey.trim() : "";
   const modelId = typeof p.model === "string" ? p.model.trim() : "";
 
-  if (!apiKey || !modelId) {
+  if (providerType !== "codex" && (!apiKey || !modelId)) {
     return json({ error: "Missing API key or model. Configure a provider in Settings." }, 400);
   }
   if (providerType === "custom" && !baseUrl) {
@@ -142,6 +143,9 @@ export async function POST(req: Request) {
   const enabledPluginIds = Array.isArray(p.enabledPluginIds) ? p.enabledPluginIds : undefined;
   const enabledPlugins = getEnabledPluginDescriptors(enabledPluginIds);
 
+  const effectiveModelId = modelId || (providerType === "codex" ? "gpt-4o" : "");
+  const effectiveApiKey = apiKey || (providerType === "codex" ? "codex-local" : "");
+
   const aiRequest: AiRequest = {
     requestId,
     atlasImage,
@@ -163,22 +167,14 @@ export async function POST(req: Request) {
     keepPosition: p.keepPosition === true,
     providerType,
     baseUrl,
-    apiKey,
-    model: modelId,
-    tier: getModelTier(modelId),
+    apiKey: effectiveApiKey,
+    model: effectiveModelId,
+    tier: getModelTier(effectiveModelId),
     reasoningEffort: p.reasoningEffort,
     enabledPluginIds,
     enabledPlugins,
   };
 
-  const model = createChatModel({
-    providerType,
-    baseUrl,
-    apiKey,
-    model: modelId,
-    timeoutMs: AI_TIMEOUT_MS,
-    reasoningEffort: p.reasoningEffort,
-  });
   const sceneText = aiRequest.scene || "";
 
   // keepPosition is ONLY the explicit Refine button. A nearby/selected widgetEdit
@@ -186,12 +182,127 @@ export async function POST(req: Request) {
   // the existing box (in_place) or sit a new item beside the ink.
   const keepPosition = p.keepPosition === true;
 
+  if (providerType === "codex") {
+    const status = isCodexAvailable();
+    if (!status.available) {
+      return json({ error: status.reason || "Codex CLI is not available." }, 422);
+    }
+    if (p.stream === true) {
+      return streamCodexReply(aiRequest, sceneText, visibleRect, changedBox, keepPosition, widgetEdit?.box, enabledPlugins);
+    }
+    const systemPrompt = buildSystemPromptText("studio", aiRequest.tier);
+    const userModelInput = {
+      imageScale: aiRequest.imageScale || 0.25,
+      visibleRect: aiRequest.visibleRect,
+      changedBox: aiRequest.changedBox,
+      userPrompt: aiRequest.userPrompt,
+      scene: aiRequest.scene,
+      enabledPlugins: aiRequest.enabledPlugins,
+    };
+    const agentReply = await runCodexCli({
+      systemPrompt,
+      userJson: JSON.stringify(userModelInput, null, 2),
+      imageBase64: aiRequest.atlasImage,
+      model: aiRequest.model,
+      reasoningEffort: aiRequest.reasoningEffort,
+    });
+    const reply: import("@/lib/ai/types").AiReply = {
+      ...agentReply,
+      requestId: aiRequest.requestId,
+      attempts: 1,
+      providerId: "codex",
+    };
+    return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText, enabledPlugins, aiRequest.imageScale));
+  }
+
+  const model = createChatModel({
+    providerType,
+    baseUrl,
+    apiKey: effectiveApiKey,
+    model: effectiveModelId,
+    timeoutMs: AI_TIMEOUT_MS,
+    reasoningEffort: p.reasoningEffort,
+  });
+
   if (p.stream === true) {
     return streamReply(aiRequest, sceneText, model, visibleRect, changedBox, keepPosition, widgetEdit?.box, enabledPlugins);
   }
 
   const reply = await runAgent(aiRequest, sceneText, model);
   return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText, enabledPlugins, aiRequest.imageScale));
+}
+
+function streamCodexReply(
+  aiRequest: AiRequest,
+  sceneText: string,
+  visibleRect: { x: number; y: number; w: number; h: number },
+  changedBox: { x: number; y: number; w: number; h: number },
+  keepPosition = false,
+  widgetEditBox?: { x: number; y: number; w: number; h: number },
+  enabledPlugins: PluginDescriptor[] = []
+): NextResponse {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false;
+      const send = (event: string, data: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(
+            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+          );
+        } catch {
+          closed = true;
+        }
+      };
+      try {
+        send("event", { type: "provider_start", provider: "codex" });
+        const systemPrompt = buildSystemPromptText("studio", aiRequest.tier);
+        const userModelInput = {
+          imageScale: aiRequest.imageScale || 0.25,
+          visibleRect: aiRequest.visibleRect,
+          changedBox: aiRequest.changedBox,
+          userPrompt: aiRequest.userPrompt,
+          scene: aiRequest.scene,
+          enabledPlugins: aiRequest.enabledPlugins,
+        };
+        const agentReply = await runCodexCli({
+          systemPrompt,
+          userJson: JSON.stringify(userModelInput, null, 2),
+          imageBase64: aiRequest.atlasImage,
+          model: aiRequest.model,
+          reasoningEffort: aiRequest.reasoningEffort,
+        });
+        const reply: import("@/lib/ai/types").AiReply = {
+          ...agentReply,
+          requestId: aiRequest.requestId,
+          attempts: 1,
+          providerId: "codex",
+        };
+        const payload = validateReply(reply, visibleRect, changedBox, keepPosition, widgetEditBox, sceneText, enabledPlugins, aiRequest.imageScale);
+        send("result", payload);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        send("error", { error: "Codex CLI generation failed", detail: msg });
+      } finally {
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {}
+        }
+      }
+    },
+  });
+
+  return new NextResponse(stream, {
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  });
 }
 
 function streamReply(

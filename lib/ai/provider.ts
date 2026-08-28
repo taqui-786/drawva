@@ -1,4 +1,4 @@
-export type ProviderType = "openai" | "anthropic" | "gemini" | "nvidia" | "groq" | "custom";
+export type ProviderType = "openai" | "anthropic" | "gemini" | "nvidia" | "groq" | "codex" | "custom";
 
 export interface CustomModel {
   id: string;
@@ -81,6 +81,11 @@ export const PROVIDER_INFOS: Record<ProviderType, ProviderInfo> = {
       "llama-3.3-70b-versatile",
       "llama-3.1-8b-instant",
     ],
+  },
+  codex: {
+    type: "codex",
+    name: "OpenAI Codex CLI",
+    defaultModels: ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1"],
   },
   custom: {
     type: "custom",
@@ -207,7 +212,9 @@ export function setProviderConfig(config: ProviderConfig | null): void {
 
 export function isProviderConfigured(): boolean {
   const cfg = getProviderConfig();
-  if (!cfg || !cfg.apiKey) return false;
+  if (!cfg) return false;
+  if (cfg.type === "codex") return true;
+  if (!cfg.apiKey) return false;
   if (cfg.type === "custom") {
     return Boolean(cfg.baseUrl?.trim());
   }

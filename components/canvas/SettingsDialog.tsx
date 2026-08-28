@@ -96,6 +96,11 @@ const PROVIDER_METADATA: Record<
     apiKeyUrl: "https://console.groq.com/keys",
     keyPlaceholder: "gsk_...",
   },
+  codex: {
+    tagline: "Local CLI Session",
+    apiKeyUrl: "https://github.com/openai/codex",
+    keyPlaceholder: "Local codex session (no key required)",
+  },
   nvidia: {
     tagline: "NVIDIA NIM Cloud Endpoints",
     apiKeyUrl: "https://build.nvidia.com/",
@@ -251,10 +256,25 @@ function ProviderTabContent({
     if (type !== "custom") {
       setBaseUrl(info.defaultBaseUrl || "");
     }
+    if (type === "codex") {
+      setApiKey("codex-local");
+    } else if (apiKey === "codex-local") {
+      setApiKey("");
+    }
   };
 
+  const { data: cliStatus } = useQuery({
+    queryKey: ["cli-status"],
+    queryFn: async () => {
+      const res = await fetch("/api/canvas/provider");
+      if (!res.ok) return null;
+      return (await res.json()) as { codex?: { available: boolean; reason?: string; path?: string } };
+    },
+    enabled: providerType === "codex",
+  });
+
   const verifyAndSave = async () => {
-    if (!apiKey.trim()) {
+    if (providerType !== "codex" && !apiKey.trim()) {
       toast.error("Please enter an API key.");
       return;
     }
@@ -270,7 +290,7 @@ function ProviderTabContent({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           providerType,
-          apiKey: apiKey.trim(),
+          apiKey: apiKey.trim() || (providerType === "codex" ? "codex-local" : ""),
           baseUrl: baseUrl.trim() || undefined,
           customModels,
         }),
@@ -290,7 +310,7 @@ function ProviderTabContent({
 
       const config: ProviderConfig = {
         type: providerType,
-        apiKey: apiKey.trim(),
+        apiKey: apiKey.trim() || (providerType === "codex" ? "codex-local" : ""),
         baseUrl: baseUrl.trim() || undefined,
         customModels: providerType === "custom" ? customModels : undefined,
       };
@@ -362,44 +382,66 @@ function ProviderTabContent({
             <div>
               <CardTitle>{PROVIDER_INFOS[providerType].name} Credentials</CardTitle>
               <CardDescription>
-                Enter your API credentials to connect.
+                {providerType === "codex"
+                  ? "Connect via your authenticated local CLI session."
+                  : "Enter your API credentials to connect."}
               </CardDescription>
             </div>
             {meta.apiKeyUrl && (
               <Button variant="link" size="sm" className="h-auto p-0" render={<a href={meta.apiKeyUrl} target="_blank" rel="noopener noreferrer" />}>
-                Get API key
+                {providerType === "codex" ? "CLI docs" : "Get API key"}
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="api-key">API Key</Label>
-            <div className="relative">
-              <Input
-                id="api-key"
-                type={showApiKey ? "text" : "password"}
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder={meta.keyPlaceholder}
-                autoComplete="off"
-                spellCheck={false}
-                className="pr-10 font-mono"
-              />
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="absolute right-1 top-1/2 -translate-y-1/2"
-                onClick={() => setShowApiKey(!showApiKey)}
-              >
-                <HugeiconsIcon icon={showApiKey ? EyeOffIcon : EyeIcon} />
-                <span className="sr-only">Toggle API key visibility</span>
-              </Button>
+          {providerType === "codex" ? (
+            <div className="rounded-md border border-border/70 bg-muted/40 p-3 text-xs text-muted-foreground flex flex-col gap-1.5">
+              <div className="font-semibold text-foreground flex items-center gap-2">
+                <span className={`inline-block h-2 w-2 rounded-full ${cliStatus?.codex?.available !== false ? "bg-emerald-500" : "bg-destructive"}`} />
+                {cliStatus?.codex?.available !== false ? "Local Codex Session Detected" : "Codex CLI Not Detected"}
+              </div>
+              <p>
+                {cliStatus?.codex?.available !== false ? (
+                  <>
+                    Detected executable at <code className="text-foreground">{cliStatus?.codex?.path || "PATH"}</code> using session in <code className="text-foreground">~/.codex/auth.json</code>. No API key or Base URL required.
+                  </>
+                ) : (
+                  <>
+                    {cliStatus?.codex?.reason || "Install and log in with `codex login` in your terminal."}
+                  </>
+                )}
+              </p>
             </div>
-          </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="api-key">API Key</Label>
+              <div className="relative">
+                <Input
+                  id="api-key"
+                  type={showApiKey ? "text" : "password"}
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder={meta.keyPlaceholder}
+                  autoComplete="off"
+                  spellCheck={false}
+                  className="pr-10 font-mono"
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="absolute right-1 top-1/2 -translate-y-1/2"
+                  onClick={() => setShowApiKey(!showApiKey)}
+                >
+                  <HugeiconsIcon icon={showApiKey ? EyeOffIcon : EyeIcon} />
+                  <span className="sr-only">Toggle API key visibility</span>
+                </Button>
+              </div>
+            </div>
+          )}
 
-          {(providerType === "custom" || baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl) && (
+          {providerType !== "codex" && (providerType === "custom" || (Boolean(PROVIDER_INFOS[providerType].defaultBaseUrl) && baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl)) && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="base-url">Base URL</Label>
