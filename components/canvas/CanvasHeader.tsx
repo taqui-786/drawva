@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,7 +73,14 @@ import {
   PeerToPeer01Icon,
   Wifi01Icon,
   ScreenRotationIcon,
+  Logout01Icon,
+  CloudSyncIcon,
+  CloudSavingDone01Icon,
+  CloudAlertIcon,
+  CloudOffIcon,
 } from "@hugeicons/core-free-icons";
+import { useSession, signOut } from "@/lib/auth-client";
+import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
 import { cn } from "@/lib/utils";
 import type { CanvasMode } from "@/lib/canvas/types";
 import {
@@ -208,6 +216,8 @@ export function CanvasHeader({
   onOpenLogs,
   onOpenManual,
   onTidy,
+  cloudStatus = "idle",
+  onTriggerCloudSync,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
@@ -247,7 +257,11 @@ export function CanvasHeader({
   onOpenLogs?: () => void;
   onOpenManual?: () => void;
   onTidy?: () => void;
+  cloudStatus?: CloudSyncStatus;
+  onTriggerCloudSync?: () => void;
 }) {
+  const router = useRouter();
+  const { data: session } = useSession();
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -397,6 +411,27 @@ export function CanvasHeader({
                 AI Settings & Keys
               </DropdownMenuItem>
             </DropdownMenuGroup>
+            {session?.user && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>Account</DropdownMenuLabel>
+                  <div className="px-2 py-1 text-xs text-muted-foreground truncate max-w-[190px]">
+                    {session.user.email}
+                  </div>
+                  <DropdownMenuItem
+                    onClick={async () => {
+                      await signOut();
+                      router.push("/signin");
+                    }}
+                    className="text-destructive focus:text-destructive"
+                  >
+                    <HugeiconsIcon icon={Logout01Icon} />
+                    Sign Out
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 
@@ -435,6 +470,60 @@ export function CanvasHeader({
           </Tooltip>
         ) : (
           ""
+        )}
+
+        {/* Cloud Sync Status Indicator */}
+        {session?.user && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onTriggerCloudSync}
+                  className="gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                >
+                  {cloudStatus === "syncing" ? (
+                    <>
+                      <HugeiconsIcon icon={CloudSyncIcon} className="size-3.5 animate-spin text-primary" />
+                      <span className="hidden xl:inline text-[11px]">Saving…</span>
+                    </>
+                  ) : cloudStatus === "synced" ? (
+                    <>
+                      <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-emerald-500" />
+                      <span className="hidden xl:inline text-[11px] text-emerald-600 dark:text-emerald-400">Synced</span>
+                    </>
+                  ) : cloudStatus === "error" ? (
+                    <>
+                      <HugeiconsIcon icon={CloudAlertIcon} className="size-3.5 text-destructive" />
+                      <span className="hidden xl:inline text-[11px] text-destructive">Sync retry</span>
+                    </>
+                  ) : cloudStatus === "offline" ? (
+                    <>
+                      <HugeiconsIcon icon={CloudOffIcon} className="size-3.5 text-muted-foreground" />
+                      <span className="hidden xl:inline text-[11px]">Offline</span>
+                    </>
+                  ) : (
+                    <>
+                      <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-muted-foreground/70" />
+                      <span className="hidden xl:inline text-[11px]">Cloud</span>
+                    </>
+                  )}
+                </Button>
+              }
+            />
+            <TooltipContent>
+              {cloudStatus === "syncing"
+                ? "Syncing canvas to Neon Cloud DB…"
+                : cloudStatus === "synced"
+                ? "All changes saved to Neon Cloud DB"
+                : cloudStatus === "error"
+                ? "Cloud sync failed (Click to retry)"
+                : cloudStatus === "offline"
+                ? "Working offline — cached locally in IndexedDB"
+                : "Cloud Sync Active (Click to sync now)"}
+            </TooltipContent>
+          </Tooltip>
         )}
       </div>
 

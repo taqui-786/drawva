@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -43,6 +43,8 @@ import {
   Analytics01Icon,
   Tick02Icon,
 } from "@hugeicons/core-free-icons";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   getProviderConfig,
   getCachedModels,
@@ -53,14 +55,12 @@ import {
   setCachedModels,
   setCachedModelCapabilities,
   setActiveModel,
-  getTokenUsageHistory,
-  clearTokenUsageHistory,
   PROVIDER_INFOS,
   type ProviderType,
   type ProviderConfig,
   type CustomModel,
-  type TokenUsageRecord,
 } from "@/lib/ai/provider";
+import { getRecentAiUsage, clearAiUsage } from "@/lib/actions/usage";
 import type { PluginMetadata } from "@/lib/plugins/registry";
 
 interface SettingsDialogProps {
@@ -662,31 +662,31 @@ function ModelsTabContent({
 }
 
 function UsageTabContent() {
-  const [history, setHistory] = useState<TokenUsageRecord[]>(() => getTokenUsageHistory());
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    const update = () => setHistory(getTokenUsageHistory());
-    window.addEventListener("storage", update);
-    return () => window.removeEventListener("storage", update);
-  }, []);
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ["aiUsage"],
+    queryFn: () => getRecentAiUsage(10),
+  });
 
-  const stats = useMemo(() => {
-    const totalPrompt = history.reduce((acc, curr) => acc + (curr.inputTokens || 0), 0);
-    const totalCompletion = history.reduce((acc, curr) => acc + (curr.outputTokens || 0), 0);
-    const total = history.reduce((acc, curr) => acc + (curr.totalTokens || 0), 0);
-    return {
-      requests: history.length,
-      totalPrompt,
-      totalCompletion,
-      total,
-    };
-  }, [history]);
+  const clearMutation = useMutation({
+    mutationFn: () => clearAiUsage(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["aiUsage"] });
+      toast.success("Usage history cleared.");
+    },
+    onError: () => {
+      toast.error("Failed to clear usage history.");
+    },
+  });
 
-  const handleClear = () => {
-    clearTokenUsageHistory();
-    setHistory([]);
-    toast.success("Usage history cleared.");
+  const stats = data?.stats ?? {
+    requests: 0,
+    totalPrompt: 0,
+    totalCompletion: 0,
+    total: 0,
   };
+  const history = data?.history ?? [];
 
   return (
     <div className="flex flex-col gap-4">
@@ -695,28 +695,44 @@ function UsageTabContent() {
         <Card size="sm">
           <CardHeader>
             <CardDescription>Requests</CardDescription>
-            <CardTitle className="text-lg font-mono">{stats.requests.toLocaleString()}</CardTitle>
+            {isLoading ? (
+              <Skeleton className="h-6 w-16 mt-1" />
+            ) : (
+              <CardTitle className="text-lg font-mono">{stats.requests.toLocaleString()}</CardTitle>
+            )}
           </CardHeader>
         </Card>
 
         <Card size="sm">
           <CardHeader>
             <CardDescription>Prompt</CardDescription>
-            <CardTitle className="text-lg font-mono">{stats.totalPrompt.toLocaleString()}</CardTitle>
+            {isLoading ? (
+              <Skeleton className="h-6 w-20 mt-1" />
+            ) : (
+              <CardTitle className="text-lg font-mono">{stats.totalPrompt.toLocaleString()}</CardTitle>
+            )}
           </CardHeader>
         </Card>
 
         <Card size="sm">
           <CardHeader>
             <CardDescription>Completion</CardDescription>
-            <CardTitle className="text-lg font-mono">{stats.totalCompletion.toLocaleString()}</CardTitle>
+            {isLoading ? (
+              <Skeleton className="h-6 w-20 mt-1" />
+            ) : (
+              <CardTitle className="text-lg font-mono">{stats.totalCompletion.toLocaleString()}</CardTitle>
+            )}
           </CardHeader>
         </Card>
 
         <Card size="sm">
           <CardHeader>
             <CardDescription>Total Tokens</CardDescription>
-            <CardTitle className="text-lg font-mono">{stats.total.toLocaleString()}</CardTitle>
+            {isLoading ? (
+              <Skeleton className="h-6 w-24 mt-1" />
+            ) : (
+              <CardTitle className="text-lg font-mono">{stats.total.toLocaleString()}</CardTitle>
+            )}
           </CardHeader>
         </Card>
       </div>
@@ -728,23 +744,36 @@ function UsageTabContent() {
             <div>
               <CardTitle>Usage History</CardTitle>
               <CardDescription>
-                Recent AI requests and token consumption.
+                Latest 10 AI requests and token consumption from your account.
               </CardDescription>
             </div>
-            {history.length > 0 && (
+            {history.length > 0 && !isLoading && (
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={handleClear}
-                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                onClick={() => clearMutation.mutate()}
+                disabled={clearMutation.isPending}
+                className="text-destructive hover:text-destructive hover:bg-destructive/10 cursor-pointer"
               >
-                Clear
+                {clearMutation.isPending ? "Clearing…" : "Clear"}
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent>
-          {history.length === 0 ? (
+          {isLoading ? (
+            <div className="flex flex-col gap-2 py-2">
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+              <Skeleton className="h-9 w-full" />
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-center justify-center py-8 border border-dashed rounded-lg text-center gap-1">
+              <span className="text-sm font-medium text-destructive">Failed to load usage data</span>
+              <span className="text-xs text-muted-foreground">Please check your connection and try again.</span>
+            </div>
+          ) : history.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 border border-dashed rounded-lg text-center gap-1">
               <span className="text-sm font-medium">No usage recorded</span>
               <span className="text-xs text-muted-foreground">
@@ -760,7 +789,7 @@ function UsageTabContent() {
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     <span className="font-mono text-[10px] text-muted-foreground">
-                      {new Date(item.timestamp).toLocaleTimeString([], {
+                      {new Date(item.createdAt).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}
@@ -771,6 +800,22 @@ function UsageTabContent() {
                     <span className="font-mono font-medium truncate max-w-[140px]">
                       {item.modelId}
                     </span>
+                    {item.intent && (
+                      <span className="text-[10px] text-muted-foreground/80 truncate max-w-[90px] hidden sm:inline">
+                        ({item.intent})
+                      </span>
+                    )}
+                    {item.snapshotUrl && (
+                      <a
+                        href={item.snapshotUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="View snapshot"
+                        className="inline-flex items-center text-primary hover:opacity-80"
+                      >
+                        <HugeiconsIcon icon={EyeIcon} className="size-3" />
+                      </a>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3 font-mono text-[11px] text-muted-foreground">

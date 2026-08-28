@@ -34,6 +34,11 @@ import { unionRect } from "@/lib/canvas/engine";
 import { buildScene } from "@/lib/canvas/scene";
 import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
 import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles } from "@/lib/canvas/persistence";
+import {
+  CloudSyncEngine,
+  fetchCloudCanvas,
+  type CloudSyncStatus,
+} from "@/lib/canvas/cloudSync";
 import { BoardHistory } from "@/lib/canvas/history";
 import { computeTidyMoves } from "@/lib/canvas/tidy";
 import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
@@ -44,13 +49,13 @@ import {
   getCachedModels,
   getProviderConfig,
   setActiveModel,
-  addTokenUsageRecord,
   getEnabledPlugins,
   getReasoningEffort,
   setReasoningEffort,
   getModelCapabilitiesCached,
   type ReasoningEffort,
 } from "@/lib/ai/provider";
+import { recordAiUsage } from "@/lib/actions/usage";
 import { Textarea } from "@/components/ui/textarea";
 import {
   SyncManager,
@@ -265,6 +270,8 @@ export function CanvasApp() {
     peerCount: 0,
   });
   const [connectOpen, setConnectOpen] = useState(false);
+  const cloudSync = useRef<CloudSyncEngine | null>(null);
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>("idle");
 
   const lastMoveSyncRef = useRef<Record<string, number>>({});
   function broadcastMove(kind: "widget" | "object", packet: Extract<import("@/lib/canvas/sync").SyncPacket, { id: string }>): void {
@@ -578,13 +585,15 @@ export function CanvasApp() {
 
     const applyReply = async (data: AiReply & { rejected?: string[] }) => {
       if (data.tokenUsage) {
-        addTokenUsageRecord({
+        void recordAiUsage({
           providerType: config.type || "custom",
           modelId: model,
           inputTokens: data.tokenUsage.inputTokens,
           outputTokens: data.tokenUsage.outputTokens,
           totalTokens: data.tokenUsage.totalTokens,
           intent: data.intent,
+          userPrompt: payload.userPrompt,
+          snapshotUrl: payload.atlasImage,
         });
       }
 
@@ -813,7 +822,11 @@ export function CanvasApp() {
     autosaveTimer.current = setTimeout(() => {
       autosaveTimer.current = null;
       const eng = engine;
-      if (eng) void saveAutosave(serializeSnapshot(eng, widgets.current, objects.current));
+      if (eng) {
+        const snapshot = serializeSnapshot(eng, widgets.current, objects.current);
+        void saveAutosave(snapshot);
+        cloudSync.current?.scheduleCloudSync(snapshot, 2500);
+      }
     }, 800);
   }
   const afterBoardChangeRef = useRef(afterBoardChange);
@@ -1536,6 +1549,9 @@ export function CanvasApp() {
       }
     });
 
+    const cs = new CloudSyncEngine((st) => setCloudStatus(st));
+    cloudSync.current = cs;
+
     return () => {
       unsub();
       unsubRemoteCursors();
@@ -1544,6 +1560,8 @@ export function CanvasApp() {
       draft.setInkListener(null);
       sm.disconnect();
       syncManager.current = null;
+      cs.destroy();
+      cloudSync.current = null;
       engine.setTileWriteHook(null);
       wm.destroy();
       om.destroy();
@@ -1563,10 +1581,33 @@ export function CanvasApp() {
       // (or racing it) leaves peers on divergent boards.
       const session = getStoredP2PSession();
       if (session?.role === "joiner") return;
-      const saved = await loadAutosave();
-      if (saved && !cancelled) {
-        await restoreSnapshot(engine, widgets.current, objects.current, saved);
+
+      // 1. Hot Path: Instant load from local IndexedDB cache
+      const localSaved = await loadAutosave();
+      if (localSaved && !cancelled) {
+        await restoreSnapshot(engine, widgets.current, objects.current, localSaved);
         history.current?.reset();
+      }
+
+      // 2. Cold Path: Asynchronously check and sync with Neon Cloud DB
+      try {
+        const cloudRes = await fetchCloudCanvas();
+        if (cancelled) return;
+        if (cloudRes?.data) {
+          const cloudSavedAt = cloudRes.savedAt || 0;
+          const localSavedAt = localSaved?.savedAt || 0;
+          if (cloudSavedAt > localSavedAt) {
+            await restoreSnapshot(engine, widgets.current, objects.current, cloudRes.data);
+            history.current?.reset();
+            void saveAutosave(cloudRes.data);
+          } else if (localSaved && localSavedAt > cloudSavedAt) {
+            cloudSync.current?.scheduleCloudSync(localSaved, 500);
+          }
+        } else if (localSaved) {
+          cloudSync.current?.scheduleCloudSync(localSaved, 1000);
+        }
+      } catch (err) {
+        console.warn("Cloud sync initial resolution:", err);
       }
     })();
     return () => {
@@ -2181,6 +2222,8 @@ export function CanvasApp() {
         onOpenLogs={() => setLogsOpen(true)}
         onOpenManual={() => setManualOpen(true)}
         onTidy={handleTidy}
+        cloudStatus={cloudStatus}
+        onTriggerCloudSync={() => void cloudSync.current?.flush()}
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">

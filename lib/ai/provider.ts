@@ -109,7 +109,6 @@ const MODELS_KEY = "drawva.aiModels";
 const MODEL_KEY = "drawva.aiModel";
 const MODEL_CAPABILITIES_KEY = "drawva.aiModelCapabilities";
 const REASONING_EFFORT_KEY = "drawva.aiReasoningEffort";
-const TOKEN_USAGE_KEY = "drawva.tokenUsage";
 const PLUGINS_KEY = "drawva.enabledPlugins";
 
 export function getReasoningEffort(): ReasoningEffort {
@@ -273,30 +272,4 @@ export function getModelCapabilitiesCached(modelId: string): ModelCapabilities {
     return cached[modelId];
   }
   return getModelCapabilities(modelId);
-}
-
-export function getTokenUsageHistory(): TokenUsageRecord[] {
-  return read<TokenUsageRecord[]>(TOKEN_USAGE_KEY, []);
-}
-
-export function addTokenUsageRecord(record: Omit<TokenUsageRecord, "id" | "timestamp">): TokenUsageRecord {
-  const history = getTokenUsageHistory();
-  const fullRecord: TokenUsageRecord = {
-    ...record,
-    id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    timestamp: Date.now(),
-  };
-  const updated = [fullRecord, ...history].slice(0, 200);
-  write(TOKEN_USAGE_KEY, updated);
-  notify();
-  return fullRecord;
-}
-
-export function clearTokenUsageHistory(): void {
-  if (typeof window !== "undefined") {
-    try {
-      window.localStorage.removeItem(TOKEN_USAGE_KEY);
-    } catch {}
-  }
-  notify();
 }

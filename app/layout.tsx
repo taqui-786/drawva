@@ -103,6 +103,8 @@ export const metadata: Metadata = {
   category: "developer-tools",
 };
 
+import { QueryProvider } from "@/components/providers/QueryProvider";
+
 export default function RootLayout({
   children,
 }: {
@@ -124,7 +126,9 @@ export default function RootLayout({
         <StructuredData />
       </head>
       <body className="min-h-full antialiased">
-        <TooltipProvider>{children}</TooltipProvider>
+        <QueryProvider>
+          <TooltipProvider>{children}</TooltipProvider>
+        </QueryProvider>
         <Toaster richColors position="bottom-right" />
       </body>
     </html>

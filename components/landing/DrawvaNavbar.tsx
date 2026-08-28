@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { HugeiconsIcon } from "@hugeicons/react";
-import { GithubIcon, SparklesIcon } from "@hugeicons/core-free-icons";
+import { GithubIcon, SparklesIcon, Logout01Icon } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
+import { useSession, signOut } from "@/lib/auth-client";
 
 export function DrawvaNavbar() {
+  const { data: session } = useSession();
+
   return (
     <header className="relative z-30 w-full font-body">
       <nav
@@ -23,8 +26,8 @@ export function DrawvaNavbar() {
           </span>
         </Link>
 
-        {/* Right: Nav Links (GitHub + About) + Launch Canvas CTA */}
-        <div className="flex items-center gap-8">
+        {/* Right: Nav Links + Auth/Launch CTA */}
+        <div className="flex items-center gap-6 md:gap-8">
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-muted-foreground">
             <Link
               href="/manual"
@@ -51,14 +54,46 @@ export function DrawvaNavbar() {
             </a>
           </div>
 
-          <Button
-            size="sm"
-            render={<Link href="/canvas" />}
-            className="gap-2 rounded-full px-5 py-2 text-sm font-medium shadow-sm transition-all hover:scale-[1.02] active:scale-95 bg-primary text-primary-foreground hover:bg-primary/90"
-          >
-            <HugeiconsIcon icon={SparklesIcon} className="h-3.5 w-3.5" />
-            <span>Launch Canvas</span>
-          </Button>
+          <div className="flex items-center gap-3">
+            {session?.user ? (
+              <div className="flex items-center gap-3">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => signOut()}
+                  className="text-xs text-muted-foreground hover:text-foreground gap-1.5 hidden sm:flex"
+                >
+                  <HugeiconsIcon icon={Logout01Icon} className="h-3.5 w-3.5" />
+                  <span>Sign Out</span>
+                </Button>
+                <Button
+                  size="sm"
+                  render={<Link href="/canvas" />}
+                  className="gap-2 rounded-full px-5 py-2 text-sm font-medium shadow-sm transition-all hover:scale-[1.02] active:scale-95 bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <HugeiconsIcon icon={SparklesIcon} className="h-3.5 w-3.5" />
+                  <span>Open Studio</span>
+                </Button>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <Link
+                  href="/signin"
+                  className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-2 py-1"
+                >
+                  Sign In
+                </Link>
+                <Button
+                  size="sm"
+                  render={<Link href="/canvas" />}
+                  className="gap-2 rounded-full px-5 py-2 text-sm font-medium shadow-sm transition-all hover:scale-[1.02] active:scale-95 bg-primary text-primary-foreground hover:bg-primary/90"
+                >
+                  <HugeiconsIcon icon={SparklesIcon} className="h-3.5 w-3.5" />
+                  <span>Launch Canvas</span>
+                </Button>
+              </div>
+            )}
+          </div>
         </div>
       </nav>
     </header>
