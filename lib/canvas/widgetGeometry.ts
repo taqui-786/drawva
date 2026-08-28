@@ -52,14 +52,18 @@ export function resizeWidgetGeometry(item: WidgetGeometry, mode: WidgetResizeMod
 
   if (mode === "horizontal") {
     const displayScale = start.h / contentH;
-    const w = clamp(requestedW, MIN_WIDGET_W, SIZE - start.x);
+    const minimum = Math.max(MIN_WIDGET_W, MIN_WIDGET_W * displayScale);
+    const maximum = SIZE - start.x;
+    const w = clamp(requestedW, minimum, maximum);
     const nextContentW = clamp(w / displayScale, 80, MAX_CONTENT_W);
     return normalizeWidgetGeometry({ ...start, w, contentW: nextContentW, resizeMode: mode, userResized: true });
   }
 
   if (mode === "vertical") {
     const displayScale = start.w / contentW;
-    const h = clamp(requestedH, MIN_WIDGET_H, SIZE - start.y);
+    const minimum = Math.max(MIN_WIDGET_H, MIN_WIDGET_H * displayScale);
+    const maximum = SIZE - start.y;
+    const h = clamp(requestedH, minimum, maximum);
     const nextContentH = clamp(h / displayScale, 60, MAX_CONTENT_H);
     return normalizeWidgetGeometry({ ...start, h, contentH: nextContentH, resizeMode: mode, userResized: true });
   }

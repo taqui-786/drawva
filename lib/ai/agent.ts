@@ -8,6 +8,7 @@ import {
   FEWSHOT_SMALL_MODEL_PROMPT,
   PLUGIN_ROUTING_PROMPT,
   WIDGET_SYSTEM_PROMPT,
+  WIDGET_RENDERING_POLICY,
   THEME_PERSONAS,
   MANDATORY_VISIBLE_RESPONSE,
   RETRY_INSTRUCTION,
@@ -88,19 +89,18 @@ export async function runAgent(
 
 /**
  * Builds the stable system prompt.
- * Order: identity/rules -> persona -> routing/tool selection -> widget system -> (micro fewshot if not frontier) -> mandatory fallback -> JSON schema.
+ * Order: identity/rules -> persona -> routing/tool selection -> widget system -> widget rendering policy -> (micro fewshot if not frontier) -> mandatory fallback -> JSON schema.
  * Note: A stable prefix maximizes provider prompt caching; never interpolate volatile per-request data into system blocks.
  */
-export function buildSystemPromptText(uiTheme?: string, pluginsEnabled = false, tier?: ModelTier): string {
+export function buildSystemPromptText(uiTheme?: string, tier?: ModelTier): string {
   const persona = THEME_PERSONAS[uiTheme || "studio"] || THEME_PERSONAS.studio;
   const sections = [
     SYSTEM_PROMPT,
     `Persona Focus: ${persona}`,
+    PLUGIN_ROUTING_PROMPT,
+    WIDGET_SYSTEM_PROMPT,
+    WIDGET_RENDERING_POLICY,
   ];
-
-  if (pluginsEnabled) {
-    sections.push(PLUGIN_ROUTING_PROMPT, WIDGET_SYSTEM_PROMPT);
-  }
 
   if (tier && tier !== "frontier") {
     sections.push(FEWSHOT_SMALL_MODEL_PROMPT);
@@ -490,11 +490,10 @@ async function attemptReply(
   isRetry: boolean,
   lastRejectReasons?: string[]
 ): Promise<AgentReply> {
-  const pluginsEnabled = Array.isArray(req.enabledPlugins) && req.enabledPlugins.length > 0;
   const tier = req.tier ?? getModelTier(req.model);
   const system = isRetry
-    ? `${buildSystemPromptText(req.uiTheme, pluginsEnabled, tier)}\n\n${buildRetryInstruction(lastRejectReasons)}`
-    : buildSystemPromptText(req.uiTheme, pluginsEnabled, tier);
+    ? `${buildSystemPromptText(req.uiTheme, tier)}\n\n${buildRetryInstruction(lastRejectReasons)}`
+    : buildSystemPromptText(req.uiTheme, tier);
 
   const textContent = userMessageText(req, sceneText);
   const contentParts: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [

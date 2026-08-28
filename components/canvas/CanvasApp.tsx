@@ -41,6 +41,7 @@ import {
 } from "@/lib/canvas/cloudSync";
 import { BoardHistory } from "@/lib/canvas/history";
 import { computeTidyMoves } from "@/lib/canvas/tidy";
+import { resizeWidgetGeometry } from "@/lib/canvas/widgetGeometry";
 import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
 import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
@@ -255,7 +256,12 @@ export function CanvasApp() {
   const objects = useRef<ObjectManager | null>(null);
   const history = useRef<BoardHistory | null>(null);
   const widgetDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
-  const widgetResize = useRef<{ id: string; mode: import("@/lib/canvas/widgetGeometry").WidgetResizeMode; last: { x: number; y: number } } | null>(null);
+  const widgetResize = useRef<{
+    id: string;
+    mode: import("@/lib/canvas/widgetGeometry").WidgetResizeMode;
+    startPoint: { x: number; y: number };
+    startLayout: import("@/lib/canvas/widgets").WidgetItem;
+  } | null>(null);
   const objectDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
   const objectResize = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
   const syncManager = useRef<SyncManager | null>(null);
@@ -937,16 +943,25 @@ export function CanvasApp() {
           afterBoardChangeRef.current();
         },
         onResizeStart: (id, mode, e) => {
-          widgetResize.current = { id, mode, last: { x: e.clientX, y: e.clientY } };
+          const item = wm.get(id);
+          if (!item) return;
+          widgetResize.current = {
+            id,
+            mode,
+            startPoint: { x: e.clientX, y: e.clientY },
+            startLayout: { ...item },
+          };
         },
         onResizeMove: (id, _mode, e) => {
           const g = widgetResize.current;
-          if (!g || g.id !== id) return;
+          if (!g || g.id !== id || !g.startLayout) return;
           history.current?.recordWidgets();
-          const item = wm.get(id);
-          if (!item) return;
-          wm.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale, undefined, undefined, true, g.mode);
-          g.last = { x: e.clientX, y: e.clientY };
+          const dx = (e.clientX - g.startPoint.x) / engine.camera.scale;
+          const dy = (e.clientY - g.startPoint.y) / engine.camera.scale;
+          const requestedW = g.startLayout.w + dx;
+          const requestedH = g.startLayout.h + dy;
+          const next = resizeWidgetGeometry(g.startLayout, g.mode, requestedW, requestedH);
+          wm.resize(id, next.w, next.h, next.contentW, next.contentH, true, g.mode);
           const resized = wm.get(id);
           if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h, contentW: resized.contentW, contentH: resized.contentH, userResized: resized.userResized, resizeMode: resized.resizeMode });
         },
