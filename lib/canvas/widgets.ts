@@ -181,13 +181,14 @@ export class WidgetManager {
       }
       .drawva-widget-shell[data-narrow="true"] .drawva-widget-side-actions {
         position: absolute;
-        left: calc(100% + 8px);
+        left: 0;
         top: 0;
         display: none;
         flex-direction: column;
         gap: 6px;
         pointer-events: auto;
         z-index: 10;
+        transform-origin: 0 0;
       }
       .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell[data-narrow="true"]:hover .drawva-widget-side-actions,
       .drawva-widget-shell[data-narrow="true"][data-selected="true"] .drawva-widget-side-actions,
@@ -681,7 +682,7 @@ export class WidgetManager {
     const chrome = document.createElement("div");
     chrome.className = "drawva-widget-chrome";
     chrome.style.cssText =
-      "position:absolute;left:0;right:0;top:-38px;height:32px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;touch-action:none;";
+      "position:absolute;left:0;top:0;height:32px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;touch-action:none;transform-origin:0 0;";
 
     const leftGroup = document.createElement("div");
     leftGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
@@ -751,6 +752,8 @@ export class WidgetManager {
 
     const sideActions = document.createElement("div");
     sideActions.className = "drawva-widget-side-actions";
+    sideActions.style.cssText =
+      "position:absolute;left:0;top:0;display:none;flex-direction:column;gap:6px;pointer-events:auto;z-index:10;transform-origin:0 0;";
     sideActions.append(copyBtnSide);
 
     const resizeHandle = document.createElement("div");
@@ -758,21 +761,21 @@ export class WidgetManager {
     resizeHandle.innerHTML = RESIZE_SVG;
     resizeHandle.title = "Resize widget (scale content)";
     resizeHandle.style.cssText =
-      "position:absolute;right:-8px;bottom:-8px;width:28px;height:28px;cursor:nwse-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;";
+      "position:absolute;left:0;top:0;width:28px;height:28px;cursor:nwse-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;transform-origin:0 0;";
 
     const resizeWidth = document.createElement("div");
     resizeWidth.className = "drawva-widget-resize drawva-widget-resize-width";
     resizeWidth.title = "Resize width (trim empty horizontal space / reflow)";
     resizeWidth.innerHTML = RESIZE_WIDTH_SVG;
     resizeWidth.style.cssText =
-      "position:absolute;right:-14px;top:50%;width:28px;height:40px;transform:translateY(-50%);cursor:ew-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;";
+      "position:absolute;left:0;top:0;width:28px;height:40px;cursor:ew-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;transform-origin:0 0;";
     
     const resizeHeight = document.createElement("div");
     resizeHeight.className = "drawva-widget-resize drawva-widget-resize-height";
     resizeHeight.title = "Resize height (trim empty vertical space)";
     resizeHeight.innerHTML = RESIZE_HEIGHT_SVG;
     resizeHeight.style.cssText =
-      "position:absolute;bottom:-14px;left:50%;width:40px;height:28px;transform:translateX(-50%);cursor:ns-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;";
+      "position:absolute;left:0;top:0;width:40px;height:28px;cursor:ns-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;transform-origin:0 0;";
 
     shell.append(body, chrome, sideActions, resizeHandle, resizeWidth, resizeHeight);
 
@@ -875,12 +878,40 @@ export class WidgetManager {
     const scaleX = (cam.scale * widget.w) / contentW;
     const scaleY = (cam.scale * widget.h) / contentH;
 
-    const isNarrow = contentW < 360;
+    const invScaleX = 1 / (scaleX || 1);
+    const invScaleY = 1 / (scaleY || 1);
+
+    const renderedW = contentW * scaleX;
+    const isNarrow = renderedW < 340;
     shell.dataset.narrow = isNarrow ? "true" : "false";
 
     shell.style.width = `${contentW}px`;
     shell.style.height = `${contentH}px`;
     shell.style.transform = `translate3d(${screenX}px,${screenY}px,0) scale(${scaleX},${scaleY})`;
+
+    const tb = this.toolbars.get(widget.id);
+    if (tb) {
+      const { chrome, sideActions, resizeHandle, resizeWidth, resizeHeight } = tb;
+      const chromeW = Math.max(110, renderedW);
+      const chromeLeftScreen = (renderedW - chromeW) / 2;
+      chrome.style.width = `${chromeW}px`;
+      chrome.style.transform = `translate3d(${chromeLeftScreen * invScaleX}px,${-38 * invScaleY}px,0) scale(${invScaleX},${invScaleY})`;
+
+      if (sideActions) {
+        sideActions.style.transform = `translate3d(${contentW + 8 * invScaleX}px,0,0) scale(${invScaleX},${invScaleY})`;
+      }
+
+      if (resizeHandle) {
+        resizeHandle.style.transform = `translate3d(${contentW}px,${contentH}px,0) scale(${invScaleX},${invScaleY}) translate(-50%, -50%)`;
+      }
+      if (resizeWidth) {
+        resizeWidth.style.transform = `translate3d(${contentW}px,${contentH / 2}px,0) scale(${invScaleX},${invScaleY}) translate(-50%, -50%)`;
+      }
+      if (resizeHeight) {
+        resizeHeight.style.transform = `translate3d(${contentW / 2}px,${contentH}px,0) scale(${invScaleX},${invScaleY}) translate(-50%, -50%)`;
+      }
+    }
+
     const frame = shell.querySelector("iframe");
     const sizeKey = `${contentW}x${contentH}`;
     if (frame?.contentWindow && this.lastLayoutSize.get(widget.id) !== sizeKey) {

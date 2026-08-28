@@ -1,4 +1,4 @@
-export type ProviderType = "openai" | "anthropic" | "gemini" | "nvidia" | "groq" | "codex" | "custom";
+export type ProviderType = "openai" | "anthropic" | "gemini" | "nvidia" | "groq" | "codex" | "antigravity" | "custom";
 
 export interface CustomModel {
   id: string;
@@ -86,6 +86,19 @@ export const PROVIDER_INFOS: Record<ProviderType, ProviderInfo> = {
     type: "codex",
     name: "OpenAI Codex CLI",
     defaultModels: ["gpt-4o", "gpt-4o-mini", "o3-mini", "o1"],
+  },
+  antigravity: {
+    type: "antigravity",
+    name: "Antigravity CLI",
+    defaultModels: [
+      "gemini-3.7-flash-high",
+      "gemini-3.7-flash-medium",
+      "gemini-3.6-flash-high",
+      "gemini-3.5-flash-high",
+      "gemini-3.1-pro-high",
+      "claude-sonnet-4-6",
+      "claude-opus-4-6-thinking",
+    ],
   },
   custom: {
     type: "custom",
@@ -213,7 +226,7 @@ export function setProviderConfig(config: ProviderConfig | null): void {
 export function isProviderConfigured(): boolean {
   const cfg = getProviderConfig();
   if (!cfg) return false;
-  if (cfg.type === "codex") return true;
+  if (cfg.type === "codex" || cfg.type === "antigravity") return true;
   if (!cfg.apiKey) return false;
   if (cfg.type === "custom") {
     return Boolean(cfg.baseUrl?.trim());

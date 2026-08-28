@@ -101,6 +101,11 @@ const PROVIDER_METADATA: Record<
     apiKeyUrl: "https://github.com/openai/codex",
     keyPlaceholder: "Local codex session (no key required)",
   },
+  antigravity: {
+    tagline: "Local CLI Session (agy)",
+    apiKeyUrl: "https://antigravity.google.com",
+    keyPlaceholder: "Local antigravity session (no key required)",
+  },
   nvidia: {
     tagline: "NVIDIA NIM Cloud Endpoints",
     apiKeyUrl: "https://build.nvidia.com/",
@@ -256,25 +261,30 @@ function ProviderTabContent({
     if (type !== "custom") {
       setBaseUrl(info.defaultBaseUrl || "");
     }
-    if (type === "codex") {
-      setApiKey("codex-local");
-    } else if (apiKey === "codex-local") {
+    if (type === "codex" || type === "antigravity") {
+      setApiKey(`${type}-local`);
+    } else if (apiKey === "codex-local" || apiKey === "antigravity-local") {
       setApiKey("");
     }
   };
+
+  const isLocalCli = providerType === "codex" || providerType === "antigravity";
 
   const { data: cliStatus } = useQuery({
     queryKey: ["cli-status"],
     queryFn: async () => {
       const res = await fetch("/api/canvas/provider");
       if (!res.ok) return null;
-      return (await res.json()) as { codex?: { available: boolean; reason?: string; path?: string } };
+      return (await res.json()) as {
+        codex?: { available: boolean; reason?: string; path?: string; models?: string[] };
+        antigravity?: { available: boolean; reason?: string; path?: string; models?: string[] };
+      };
     },
-    enabled: providerType === "codex",
+    enabled: isLocalCli,
   });
 
   const verifyAndSave = async () => {
-    if (providerType !== "codex" && !apiKey.trim()) {
+    if (!isLocalCli && !apiKey.trim()) {
       toast.error("Please enter an API key.");
       return;
     }
@@ -290,7 +300,7 @@ function ProviderTabContent({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           providerType,
-          apiKey: apiKey.trim() || (providerType === "codex" ? "codex-local" : ""),
+          apiKey: apiKey.trim() || (isLocalCli ? `${providerType}-local` : ""),
           baseUrl: baseUrl.trim() || undefined,
           customModels,
         }),
@@ -310,7 +320,7 @@ function ProviderTabContent({
 
       const config: ProviderConfig = {
         type: providerType,
-        apiKey: apiKey.trim() || (providerType === "codex" ? "codex-local" : ""),
+        apiKey: apiKey.trim() || (isLocalCli ? `${providerType}-local` : ""),
         baseUrl: baseUrl.trim() || undefined,
         customModels: providerType === "custom" ? customModels : undefined,
       };
@@ -382,34 +392,52 @@ function ProviderTabContent({
             <div>
               <CardTitle>{PROVIDER_INFOS[providerType].name} Credentials</CardTitle>
               <CardDescription>
-                {providerType === "codex"
+                {isLocalCli
                   ? "Connect via your authenticated local CLI session."
                   : "Enter your API credentials to connect."}
               </CardDescription>
             </div>
             {meta.apiKeyUrl && (
               <Button variant="link" size="sm" className="h-auto p-0" render={<a href={meta.apiKeyUrl} target="_blank" rel="noopener noreferrer" />}>
-                {providerType === "codex" ? "CLI docs" : "Get API key"}
+                {isLocalCli ? "CLI docs" : "Get API key"}
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {providerType === "codex" ? (
+          {isLocalCli ? (
             <div className="rounded-md border border-border/70 bg-muted/40 p-3 text-xs text-muted-foreground flex flex-col gap-1.5">
               <div className="font-semibold text-foreground flex items-center gap-2">
-                <span className={`inline-block h-2 w-2 rounded-full ${cliStatus?.codex?.available !== false ? "bg-emerald-500" : "bg-destructive"}`} />
-                {cliStatus?.codex?.available !== false ? "Local Codex Session Detected" : "Codex CLI Not Detected"}
+                <span
+                  className={`inline-block h-2 w-2 rounded-full ${
+                    (providerType === "codex" ? cliStatus?.codex?.available : cliStatus?.antigravity?.available) !== false
+                      ? "bg-emerald-500"
+                      : "bg-destructive"
+                  }`}
+                />
+                {providerType === "codex"
+                  ? cliStatus?.codex?.available !== false
+                    ? "Local Codex Session Detected"
+                    : "Codex CLI Not Detected"
+                  : cliStatus?.antigravity?.available !== false
+                  ? "Local Antigravity Session Detected"
+                  : "Antigravity CLI (agy) Not Detected"}
               </div>
               <p>
-                {cliStatus?.codex?.available !== false ? (
+                {providerType === "codex" ? (
+                  cliStatus?.codex?.available !== false ? (
+                    <>
+                      Detected executable at <code className="text-foreground">{cliStatus?.codex?.path || "PATH"}</code> using session in <code className="text-foreground">~/.codex/auth.json</code>. No API key or Base URL required.
+                    </>
+                  ) : (
+                    <>{cliStatus?.codex?.reason || "Install and log in with `codex login` in your terminal."}</>
+                  )
+                ) : cliStatus?.antigravity?.available !== false ? (
                   <>
-                    Detected executable at <code className="text-foreground">{cliStatus?.codex?.path || "PATH"}</code> using session in <code className="text-foreground">~/.codex/auth.json</code>. No API key or Base URL required.
+                    Detected executable at <code className="text-foreground">{cliStatus?.antigravity?.path || "PATH"}</code> using session in <code className="text-foreground">~/.gemini/antigravity-cli</code>. No API key or Base URL required.
                   </>
                 ) : (
-                  <>
-                    {cliStatus?.codex?.reason || "Install and log in with `codex login` in your terminal."}
-                  </>
+                  <>{cliStatus?.antigravity?.reason || "Antigravity CLI binary (agy) not found on PATH."}</>
                 )}
               </p>
             </div>
@@ -441,7 +469,7 @@ function ProviderTabContent({
             </div>
           )}
 
-          {providerType !== "codex" && (providerType === "custom" || (Boolean(PROVIDER_INFOS[providerType].defaultBaseUrl) && baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl)) && (
+          {!isLocalCli && (providerType === "custom" || (Boolean(PROVIDER_INFOS[providerType].defaultBaseUrl) && baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl)) && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="base-url">Base URL</Label>

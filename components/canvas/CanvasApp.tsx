@@ -263,7 +263,11 @@ export function CanvasApp() {
     startLayout: import("@/lib/canvas/widgets").WidgetItem;
   } | null>(null);
   const objectDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
-  const objectResize = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
+  const objectResize = useRef<{
+    id: string;
+    mode: import("@/lib/canvas/objects").ObjectResizeMode;
+    last: { x: number; y: number };
+  } | null>(null);
   const syncManager = useRef<SyncManager | null>(null);
   const [syncState, setSyncState] = useState<{
     status: SyncStatus;
@@ -1035,16 +1039,21 @@ export function CanvasApp() {
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
           afterBoardChangeRef.current();
         },
-        onResizeStart: (id, e) => {
-          objectResize.current = { id, last: { x: e.clientX, y: e.clientY } };
+        onResizeStart: (id, mode, e) => {
+          objectResize.current = { id, mode, last: { x: e.clientX, y: e.clientY } };
         },
-        onResizeMove: (id, e) => {
+        onResizeMove: (id, mode, e) => {
           const g = objectResize.current;
           if (!g || g.id !== id) return;
           history.current?.recordObjects();
           const item = om.get(id);
           if (!item) return;
-          om.resize(id, item.w + (e.clientX - g.last.x) / engine.camera.scale, item.h + (e.clientY - g.last.y) / engine.camera.scale);
+          const dx = (e.clientX - g.last.x) / engine.camera.scale;
+          const dy = (e.clientY - g.last.y) / engine.camera.scale;
+          const effectiveMode = g.mode || mode;
+          const newW = effectiveMode === "vertical" ? item.w : item.w + dx;
+          const newH = effectiveMode === "horizontal" ? item.h : item.h + dy;
+          om.resize(id, newW, newH);
           g.last = { x: e.clientX, y: e.clientY };
           const resized = om.get(id);
           if (resized) broadcastMove("object", { type: "SYNC_OBJECT_RESIZE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h });
@@ -1762,10 +1771,10 @@ export function CanvasApp() {
   const commitText = useCallback(() => {
     if (engine && textAnchor && textValue.trim()) {
       const scale = Math.max(0.01, engine.camera.scale);
-      const screenFontSize = Math.max(16, pen * 4);
+      const screenFontSize = 18;
       const fontSize = Math.max(12, Math.round(screenFontSize / scale));
-      const screenMaxWidth = 600;
-      const maxWidth = Math.max(100, Math.round(screenMaxWidth / scale));
+      const screenMaxWidth = 540;
+      const maxWidth = Math.max(fontSize * 4, Math.round(screenMaxWidth / scale));
       const block = renderTextBlock(textValue, color, fontSize, maxWidth);
       addObject({
         id: `text-${Date.now()}`,
@@ -1797,7 +1806,7 @@ export function CanvasApp() {
     setTextOpen(false);
     setTextValue("");
     setTextAnchor(null);
-  }, [engine, textAnchor, textValue, color, pen, addObject]);
+  }, [engine, textAnchor, textValue, color, addObject]);
 
   const isTidyingRef = useRef(false);
 
@@ -2279,11 +2288,13 @@ export function CanvasApp() {
               }
             }}
             placeholder="Type text…"
-            className="absolute z-30 min-w-56 max-w-2xl resize border-2 border-primary/50 bg-background/95 shadow-md"
+            className="absolute z-30 min-w-72 max-w-xl resize border-2 border-primary/60 bg-background/95 shadow-lg rounded-lg p-3"
             style={{
               left: anchorCss.x,
               top: anchorCss.y,
-              fontSize: Math.max(12, pen * 4),
+              fontSize: 18,
+              lineHeight: 1.4,
+              color,
             }}
           />
         )}

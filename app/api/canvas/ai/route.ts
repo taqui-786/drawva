@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runAgent, buildSystemPromptText } from "@/lib/ai/agent";
 import { createChatModel } from "@/lib/ai/model";
 import { runCodexCli, isCodexAvailable } from "@/lib/ai/codex";
+import { runAntigravityCli, isAntigravityAvailable } from "@/lib/ai/antigravity";
 import { AI_TIMEOUT_MS, MAX_BODY_BYTES, MAX_COMMANDS, MAX_DIAGRAM_BYTES, MAX_HTML_BYTES } from "@/lib/ai/prompts";
 import { widgetGeometryForViewport } from "@/lib/ai/geometry";
 import { validateCommands } from "@/lib/canvas/commands";
@@ -49,7 +50,7 @@ function parseSceneItems(scene?: string): Array<{ id?: string; kind: string; x: 
 }
 
 function validateReply(
-  reply: Awaited<ReturnType<typeof runAgent>>,
+  reply: import("@/lib/ai/types").AiReply,
   visibleRect: { x: number; y: number; w: number; h: number },
   changedBox: { x: number; y: number; w: number; h: number },
   keepPosition = false,
@@ -110,7 +111,8 @@ export async function POST(req: Request) {
   const apiKey = typeof p.apiKey === "string" ? p.apiKey.trim() : "";
   const modelId = typeof p.model === "string" ? p.model.trim() : "";
 
-  if (providerType !== "codex" && (!apiKey || !modelId)) {
+  const isLocalCli = providerType === "codex" || providerType === "antigravity";
+  if (!isLocalCli && (!apiKey || !modelId)) {
     return json({ error: "Missing API key or model. Configure a provider in Settings." }, 400);
   }
   if (providerType === "custom" && !baseUrl) {
@@ -143,8 +145,8 @@ export async function POST(req: Request) {
   const enabledPluginIds = Array.isArray(p.enabledPluginIds) ? p.enabledPluginIds : undefined;
   const enabledPlugins = getEnabledPluginDescriptors(enabledPluginIds);
 
-  const effectiveModelId = modelId || (providerType === "codex" ? "gpt-4o" : "");
-  const effectiveApiKey = apiKey || (providerType === "codex" ? "codex-local" : "");
+  const effectiveModelId = modelId || (providerType === "codex" ? "gpt-4o" : providerType === "antigravity" ? "gemini-3.7-flash-high" : "");
+  const effectiveApiKey = apiKey || (isLocalCli ? `${providerType}-local` : "");
 
   const aiRequest: AiRequest = {
     requestId,
@@ -211,6 +213,39 @@ export async function POST(req: Request) {
       requestId: aiRequest.requestId,
       attempts: 1,
       providerId: "codex",
+    };
+    return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText, enabledPlugins, aiRequest.imageScale));
+  }
+
+  if (providerType === "antigravity") {
+    const status = isAntigravityAvailable();
+    if (!status.available) {
+      return json({ error: status.reason || "Antigravity CLI is not available." }, 422);
+    }
+    if (p.stream === true) {
+      return streamAntigravityReply(aiRequest, sceneText, visibleRect, changedBox, keepPosition, widgetEdit?.box, enabledPlugins);
+    }
+    const systemPrompt = buildSystemPromptText("studio", aiRequest.tier);
+    const userModelInput = {
+      imageScale: aiRequest.imageScale || 0.25,
+      visibleRect: aiRequest.visibleRect,
+      changedBox: aiRequest.changedBox,
+      userPrompt: aiRequest.userPrompt,
+      scene: aiRequest.scene,
+      enabledPlugins: aiRequest.enabledPlugins,
+    };
+    const agentReply = await runAntigravityCli({
+      systemPrompt,
+      userJson: JSON.stringify(userModelInput, null, 2),
+      imageBase64: aiRequest.atlasImage,
+      model: aiRequest.model,
+      reasoningEffort: aiRequest.reasoningEffort,
+    });
+    const reply: import("@/lib/ai/types").AiReply = {
+      ...agentReply,
+      requestId: aiRequest.requestId,
+      attempts: 1,
+      providerId: "antigravity",
     };
     return json(validateReply(reply, visibleRect, changedBox, keepPosition, widgetEdit?.box, sceneText, enabledPlugins, aiRequest.imageScale));
   }
@@ -284,6 +319,79 @@ function streamCodexReply(
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         send("error", { error: "Codex CLI generation failed", detail: msg });
+      } finally {
+        if (!closed) {
+          closed = true;
+          try {
+            controller.close();
+          } catch {}
+        }
+      }
+    },
+  });
+
+  return new NextResponse(stream, {
+    status: 200,
+    headers: {
+      "content-type": "text/event-stream",
+      "cache-control": "no-cache",
+      connection: "keep-alive",
+    },
+  });
+}
+
+function streamAntigravityReply(
+  aiRequest: AiRequest,
+  sceneText: string,
+  visibleRect: { x: number; y: number; w: number; h: number },
+  changedBox: { x: number; y: number; w: number; h: number },
+  keepPosition = false,
+  widgetEditBox?: { x: number; y: number; w: number; h: number },
+  enabledPlugins: PluginDescriptor[] = []
+): NextResponse {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      let closed = false;
+      const send = (event: string, data: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(
+            encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+          );
+        } catch {
+          closed = true;
+        }
+      };
+      try {
+        send("event", { type: "provider_start", provider: "antigravity" });
+        const systemPrompt = buildSystemPromptText("studio", aiRequest.tier);
+        const userModelInput = {
+          imageScale: aiRequest.imageScale || 0.25,
+          visibleRect: aiRequest.visibleRect,
+          changedBox: aiRequest.changedBox,
+          userPrompt: aiRequest.userPrompt,
+          scene: aiRequest.scene,
+          enabledPlugins: aiRequest.enabledPlugins,
+        };
+        const agentReply = await runAntigravityCli({
+          systemPrompt,
+          userJson: JSON.stringify(userModelInput, null, 2),
+          imageBase64: aiRequest.atlasImage,
+          model: aiRequest.model,
+          reasoningEffort: aiRequest.reasoningEffort,
+        });
+        const reply: import("@/lib/ai/types").AiReply = {
+          ...agentReply,
+          requestId: aiRequest.requestId,
+          attempts: 1,
+          providerId: "antigravity",
+        };
+        const payload = validateReply(reply, visibleRect, changedBox, keepPosition, widgetEditBox, sceneText, enabledPlugins, aiRequest.imageScale);
+        send("result", payload);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        send("error", { error: "Antigravity CLI generation failed", detail: msg });
       } finally {
         if (!closed) {
           closed = true;

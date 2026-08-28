@@ -7,6 +7,7 @@ import {
 import type { ModelCapabilities } from "@/lib/ai/capabilities";
 import { inspectModelCapabilities } from "@/lib/ai/modelRegistry";
 import { isCodexAvailable, getCodexModels } from "@/lib/ai/codex";
+import { isAntigravityAvailable, getAntigravityModels } from "@/lib/ai/antigravity";
 
 export const runtime = "nodejs";
 
@@ -21,11 +22,17 @@ interface ProviderRequestBody {
 
 export async function GET() {
   const codexStatus = isCodexAvailable();
-  const models = codexStatus.available ? getCodexModels() : [];
+  const codexModels = codexStatus.available ? getCodexModels() : [];
+  const agyStatus = isAntigravityAvailable();
+  const agyModels = agyStatus.available ? getAntigravityModels() : [];
   return json({
     codex: {
       ...codexStatus,
-      models,
+      models: codexModels,
+    },
+    antigravity: {
+      ...agyStatus,
+      models: agyModels,
     },
   });
 }
@@ -73,6 +80,27 @@ export async function POST(req: Request) {
       capabilities,
       filteredByVision: true,
       providerType: "codex",
+    });
+  }
+
+  if (providerType === "antigravity") {
+    const status = isAntigravityAvailable();
+    if (!status.available) {
+      return json(
+        { error: status.reason || "Antigravity CLI (agy) not found." },
+        422,
+      );
+    }
+    const agyModels = getAntigravityModels();
+    const capabilities: Record<string, ModelCapabilities> = {};
+    for (const m of agyModels) {
+      capabilities[m] = await inspectModelCapabilities(m);
+    }
+    return json({
+      models: agyModels,
+      capabilities,
+      filteredByVision: true,
+      providerType: "antigravity",
     });
   }
   const baseUrl =
