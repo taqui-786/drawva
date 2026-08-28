@@ -4,8 +4,6 @@ import type { CanvasMode, Point } from "./types";
 import {
   MAX_CONTENT_H,
   MAX_CONTENT_W,
-  MIN_WIDGET_H,
-  MIN_WIDGET_W,
   normalizeWidgetGeometry,
   resizeWidgetGeometry,
   settleWidgetContent,
@@ -445,11 +443,9 @@ export class WidgetManager {
   }
 
   /**
-   * Fit the widget frame to the measured content so nothing is ever cropped
-   * and there is no dead space: grow when the host reports clipped overflow
-   * (cropping is never acceptable), shrink when the frame has dead space.
-   * Epsilon-guarded, and growth is capped so the measure -> relayout ->
-   * measure feedback loop cannot oscillate.
+   * Fit the widget frame when measured content overflows the frame
+   * so nothing is ever cropped. Cropping is never acceptable on the canvas.
+   * Growth is capped so the measure -> relayout feedback loop cannot oscillate.
    */
   private autoFitContent(id: string, measuredW: number, measuredH: number): void {
     const widget = this.widgets.get(id);
@@ -460,14 +456,10 @@ export class WidgetManager {
     const curH = applied?.h ?? widget.h;
     let nextW = curW;
     let nextH = curH;
-    if (measuredW < curW - 8) {
-      nextW = Math.max(MIN_WIDGET_W, Math.round(measuredW));
-    } else if (measuredW > curW + 8 && grows < MAX_CONTENT_FIT_GROWS) {
+    if (measuredW > curW + 8 && grows < MAX_CONTENT_FIT_GROWS) {
       nextW = Math.min(MAX_CONTENT_W, Math.round(measuredW));
     }
-    if (measuredH < curH - 8) {
-      nextH = Math.max(MIN_WIDGET_H, Math.round(measuredH));
-    } else if (measuredH > curH + 8 && grows < MAX_CONTENT_FIT_GROWS) {
+    if (measuredH > curH + 8 && grows < MAX_CONTENT_FIT_GROWS) {
       nextH = Math.min(MAX_CONTENT_H, Math.round(measuredH));
     }
     if (nextW === curW && nextH === curH) return;

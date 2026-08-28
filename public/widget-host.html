@@ -159,33 +159,46 @@
         function postContentSize() {
           try {
             var de = document.documentElement;
+            var body = document.body;
             var vw = Math.max(1, de.clientWidth);
             var vh = Math.max(1, de.clientHeight);
-            var b = contentBBox();
-            var w = 0, h = 0;
-            if (b) { w = Math.ceil(b.w) + 2; h = Math.ceil(b.h) + 2; }
-            // scroll sizes reveal content clipped by overflow:hidden that the
-            // painted bbox of laid-out children may miss.
-            var sw = Math.ceil(Math.max(de.scrollWidth, document.body ? document.body.scrollWidth : 0));
-            var sh = Math.ceil(Math.max(de.scrollHeight, document.body ? document.body.scrollHeight : 0));
-            if (sw > vw + 4 || sh > vh + 4) {
-              // Content is being cropped: report the full needed size so the
-              // widget frame can grow. Cropping is never acceptable.
+
+            var neededW = Math.max(vw, de.scrollWidth, body ? body.scrollWidth : 0);
+            var neededH = Math.max(vh, de.scrollHeight, body ? body.scrollHeight : 0);
+
+            var nodes = body ? body.querySelectorAll('*') : [];
+            for (var i = 0; i < nodes.length; i++) {
+              var el = nodes[i];
+              var tag = el.tagName;
+              if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK') continue;
+              if (isInsideSvg(el)) continue;
+              var style = window.getComputedStyle(el);
+              if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) continue;
+
+              var r = el.getBoundingClientRect();
+              if (r.width > 0 && r.height > 0) {
+                if (r.right > neededW) neededW = Math.ceil(r.right);
+                if (r.bottom > neededH) neededH = Math.ceil(r.bottom);
+              }
+
+              // Check if any subcontainer has scrollable overflow (e.g. flex: 1; overflow-y: auto)
+              if (el.scrollHeight > el.clientHeight + 2) {
+                var overflowH = vh + (el.scrollHeight - el.clientHeight);
+                if (overflowH > neededH) neededH = Math.ceil(overflowH);
+              }
+              if (el.scrollWidth > el.clientWidth + 2) {
+                var overflowW = vw + (el.scrollWidth - el.clientWidth);
+                if (overflowW > neededW) neededW = Math.ceil(overflowW);
+              }
+            }
+
+            if (neededW > vw + 4 || neededH > vh + 4) {
               window.parent.postMessage({
                 type: 'drawva-widget-inner-content-size',
-                width: Math.max(w, sw),
-                height: Math.max(h, sh)
+                width: Math.max(vw, neededW),
+                height: Math.max(vh, neededH)
               }, '*');
-              return;
             }
-            if (!b) return;
-            // Content fits; only report when there is meaningful dead space to trim.
-            if (w >= vw * 0.98 && h >= vh * 0.98) return;
-            window.parent.postMessage({
-              type: 'drawva-widget-inner-content-size',
-              width: w,
-              height: h
-            }, '*');
           } catch (e) {}
         }
         function scheduleContentSize() {
@@ -349,6 +362,8 @@
         window.addEventListener('message', function(ev) {
           if (ev.data && ev.data.type === 'drawva-widget-snapshot-request') {
             postSnapshot(ev.data.reqId);
+          } else if (ev.data && ev.data.type === 'drawva-widget-check-size') {
+            postContentSize();
           } else if (ev.data && ev.data.type === 'drawva-widget-layout-size') {
             const w = Number(ev.data.width), h = Number(ev.data.height);
             if (w >= 80 && w <= 3200 && h >= 60 && h <= 6000) {
@@ -385,7 +400,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html,body{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%;height:100%;min-width:0;min-height:0;touch-action:none!important;overscroll-behavior:contain!important}body:not(:has(#stage)){padding:0!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%;height:100%;}body{background:transparent!important;margin:0;width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;
@@ -431,6 +446,7 @@
     } else if (data.type === "drawva-widget-updated") {
       if (!fromInner) return;
       forward({ type: "drawva-widget-updated" });
+      inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-check-size" }, "*");
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: "updated" }, "*");
     } else if (data.type === "drawva-widget-snapshot-request") {
       if (!fromParent) return;
