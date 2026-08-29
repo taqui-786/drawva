@@ -71,42 +71,11 @@ function findInPlaceWidget(
   wm: WidgetManager,
   opts: {
     targetId: string | null;
-    title?: string;
-    kind?: WidgetItem["kind"];
     lockTarget?: boolean;
-    cmdX?: number;
-    cmdY?: number;
   }
 ): WidgetItem | null {
-  const byId = opts.targetId ? wm.get(opts.targetId) ?? null : null;
-  if (opts.lockTarget && byId) return byId;
-
-  if (opts.title) {
-    const needle = opts.title.toLowerCase().trim();
-    const matches: WidgetItem[] = [];
-    for (const w of wm.all()) {
-      if (opts.kind && w.kind !== opts.kind) continue;
-      const wTitle = (w.title || "").toLowerCase();
-      if (wTitle && (needle.includes(wTitle) || wTitle.includes(needle))) matches.push(w);
-    }
-    if (matches.length === 1) return matches[0];
-  }
-
-  if (byId) return byId;
-
-  let closest: WidgetItem | null = null;
-  let minD = Infinity;
-  const cx = opts.cmdX ?? 0;
-  const cy = opts.cmdY ?? 0;
-  for (const w of wm.all()) {
-    if (opts.kind && w.kind !== opts.kind) continue;
-    const d = Math.hypot(w.x - cx, w.y - cy);
-    if (d < 600 && d < minD) {
-      minD = d;
-      closest = w;
-    }
-  }
-  return closest;
+  if (!opts.targetId) return null;
+  return wm.get(opts.targetId) ?? null;
 }
 
 export function CanvasApp() {
@@ -820,14 +789,10 @@ export function CanvasApp() {
       activeEditTargetRef.current = null;
       const lockTarget = lockEditTargetRef.current;
       lockEditTargetRef.current = false;
-      const isInPlace = (cmd as { placement?: string }).placement === "in_place" || Boolean((cmd as { targetId?: string }).targetId);
-      const oldWidget = isInPlace
+      const oldWidget = targetId
         ? findInPlaceWidget(wm, {
             targetId,
-            title: cmd.title,
             lockTarget,
-            cmdX: cmd.x,
-            cmdY: cmd.y,
           })
         : null;
       if (oldWidget) {
@@ -956,15 +921,10 @@ export function CanvasApp() {
       activeEditTargetRef.current = null;
       const lockTarget = lockEditTargetRef.current;
       lockEditTargetRef.current = false;
-      const isInPlace = (cmd as { placement?: string }).placement === "in_place" || Boolean((cmd as { targetId?: string }).targetId);
-      const oldWidget = isInPlace
+      const oldWidget = targetId
         ? findInPlaceWidget(wm, {
             targetId,
-            title: cmd.title,
-            kind: "diagram",
             lockTarget,
-            cmdX: cmd.x,
-            cmdY: cmd.y,
           })
         : null;
       if (oldWidget) {

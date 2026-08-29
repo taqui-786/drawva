@@ -6,7 +6,7 @@ export type AiStatus = "idle" | "thinking" | "done" | "error";
 export const appState = proxy({
   mode: "hand" as CanvasMode,
   color: "#111111",
-  pen: 3,
+  pen: 4,
   zoom: 100,
   center: { x: 0, y: 0 },
   aiStatus: "idle" as AiStatus,

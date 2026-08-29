@@ -281,7 +281,6 @@ const NEW_FILES = [
   "lib/ai/conductor.ts",
   "lib/ai/conductorTools.ts",
   "lib/canvas/widgetPatch.ts",
-  "components/canvas/AgentPanel.tsx",
   "app/api/canvas/agent/step/route.ts",
   "app/api/canvas/agent/compact/route.ts",
 ];
@@ -308,6 +307,38 @@ await test("D3 step route never reads client prompt text", () => {
   const src = fs.readFileSync(path.join(ROOT, "app/api/canvas/agent/step/route.ts"), "utf8");
   assert.ok(/"systemPrompt" in body/.test(src)); // rejected explicitly
   assert.ok(!/body\.systemPrompt/.test(src)); // never used as prompt input
+});
+
+await test("D4 new widget creation without targetId never overwrites or adopts existing scene widgets", async () => {
+  const { validateCommands } = await import("../lib/canvas/commands");
+  const sceneItems = [
+    { id: "widget-1788027425209", kind: "html", x: 8093, y: 8900, w: 1052, h: 1115, title: "Visual Widget" },
+  ];
+  const validationCtx = {
+    aiColor: "#2679b8",
+    scale: 1,
+    widgetSlots: 8,
+    plugins: new Set(["general"]),
+    visibleRect: { x: 5704, y: 6232, w: 4868, h: 2230 },
+    changedBox: { x: 6983, y: 6835, w: 645, h: 643 },
+    sceneItems,
+  };
+  const rawCommand = {
+    tool: "html_widget",
+    html: "<div class=\"cb\"><h3>Cube</h3><canvas id=\"cv\"></canvas></div>",
+    placement: "in_place",
+    x: 6983,
+    y: 6835,
+    w: 645,
+    h: 643,
+  };
+  const { commands, rejected } = validateCommands([rawCommand], validationCtx);
+  assert.equal(rejected.length, 0);
+  assert.equal(commands.length, 1);
+  const validated = commands[0] as { targetId?: string; x: number; y: number };
+  assert.equal(validated.targetId, undefined, "New widget command must NOT adopt existing widget targetId");
+  assert.equal(validated.x, 6983);
+  assert.equal(validated.y, 6835);
 });
 
 // ---------------------------------------------------------------------------

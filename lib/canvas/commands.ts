@@ -601,83 +601,17 @@ function rescueCollision(
   };
 }
 
-function uniqueSceneWidgetByTitle(
-  title: unknown,
-  widgetItems: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>
-): { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null {
-  const cmdTitle = typeof title === "string" ? title.toLowerCase().trim() : "";
-  if (!cmdTitle || widgetItems.length === 0) return null;
-  const matched = widgetItems.filter((w) => {
-    const wTitle = (w.title || "").toLowerCase().trim();
-    return wTitle.length > 0 && (cmdTitle.includes(wTitle) || wTitle.includes(cmdTitle));
-  });
-  return matched.length === 1 ? matched[0] : null;
-}
-
 function findSceneWidgetMatch(
   cmd: { title?: unknown; targetId?: unknown; x?: unknown; y?: unknown; w?: unknown; h?: unknown },
-  sceneWidgets: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>,
-  changedBox?: Box
+  sceneWidgets: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>
 ): { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null {
   if (sceneWidgets.length === 0) return null;
 
-  // 1. Match by explicit targetId
+  // Match ONLY by explicit targetId
   const targetId = typeof cmd.targetId === "string" ? cmd.targetId.trim() : "";
   if (targetId) {
     const byId = sceneWidgets.find((w) => w.id === targetId);
     if (byId) return byId;
-  }
-
-  // 2. Match by unique title
-  const titled = uniqueSceneWidgetByTitle(cmd.title, sceneWidgets);
-  if (titled) return titled;
-
-  // 3. Match by spatial overlap (IoU / Center proximity)
-  const cx = Number(cmd.x);
-  const cy = Number(cmd.y);
-  const cw = Number(cmd.w) || DEFAULT_WIDGET_WIDTH;
-  const ch = Number(cmd.h) || DEFAULT_WIDGET_HEIGHT;
-  if (Number.isFinite(cx) && Number.isFinite(cy)) {
-    const cmdBox: Box = { x: cx, y: cy, w: cw, h: ch };
-    let bestOverlap: { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null = null;
-    let maxIoU = 0;
-    for (const w of sceneWidgets) {
-      const ix = Math.max(0, Math.min(cmdBox.x + cmdBox.w, w.x + w.w) - Math.max(cmdBox.x, w.x));
-      const iy = Math.max(0, Math.min(cmdBox.y + cmdBox.h, w.y + w.h) - Math.max(cmdBox.y, w.y));
-      const intersection = ix * iy;
-      const union = cmdBox.w * cmdBox.h + w.w * w.h - intersection;
-      const iou = union > 0 ? intersection / union : 0;
-      const centerDist = Math.hypot(cmdBox.x + cmdBox.w / 2 - (w.x + w.w / 2), cmdBox.y + cmdBox.h / 2 - (w.y + w.h / 2));
-      if (iou >= 0.35 || (centerDist < 200 && iou > 0.1)) {
-        if (iou > maxIoU) {
-          maxIoU = iou;
-          bestOverlap = w;
-        }
-      }
-    }
-    if (bestOverlap) return bestOverlap;
-  }
-
-  // 4. Overlap with changedBox (fresh ink drawn directly inside/over an existing widget)
-  if (changedBox && changedBox.w > 20 && changedBox.h > 20) {
-    let bestOverlap: { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null = null;
-    let maxIoU = 0;
-    for (const w of sceneWidgets) {
-      const ix = Math.max(0, Math.min(changedBox.x + changedBox.w, w.x + w.w) - Math.max(changedBox.x, w.x));
-      const iy = Math.max(0, Math.min(changedBox.y + changedBox.h, w.y + w.h) - Math.max(changedBox.y, w.y));
-      const intersection = ix * iy;
-      const cArea = changedBox.w * changedBox.h;
-      const containment = cArea > 0 ? intersection / cArea : 0;
-      const union = cArea + w.w * w.h - intersection;
-      const iou = union > 0 ? intersection / union : 0;
-      if (containment >= 0.6 || iou >= 0.35) {
-        if (iou > maxIoU) {
-          maxIoU = iou;
-          bestOverlap = w;
-        }
-      }
-    }
-    if (bestOverlap) return bestOverlap;
   }
 
   return null;
@@ -699,15 +633,13 @@ export function fitWidgetGeometry(
   reposition = true,
   widgetEditBox?: Box,
   sceneItems?: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>,
-  widgetGeometry?: { max?: { w?: number; h?: number } } | null,
-  spatialPlan?: string
+  widgetGeometry?: { max?: { w?: number; h?: number } } | null
 ): Box | null {
   const placement = String(cmd.placement || "").toLowerCase();
-  const planSaysReplace = typeof spatialPlan === "string" && /\b(replace|in[-_]place|refine|update|modify|convert|functional)\b/i.test(spatialPlan);
   const widgetItems = Array.isArray(sceneItems)
     ? sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html")
     : [];
-  const matchedTarget = findSceneWidgetMatch(cmd, widgetItems, changedBox);
+  const matchedTarget = findSceneWidgetMatch(cmd, widgetItems);
 
   const targetBox = (cmd.targetBox && typeof cmd.targetBox === "object"
     ? cmd.targetBox
@@ -725,31 +657,12 @@ export function fitWidgetGeometry(
     placement === "at_target" ||
     placement === "match_sketch" ||
     placement === "overlay";
-  const isRelativeSide =
-    placement === "below" ||
-    placement === "right" ||
-    placement === "left" ||
-    placement === "top";
 
   // Refinement mode: snap ONLY if there is an explicit matched target or widgetEditBox
   const explicitTarget = matchedTarget || widgetEditBox;
-  const isSpatialMatch = Boolean(
-    matchedTarget &&
-    !isRelativeSide &&
-    (
-      Boolean(cmd.targetId) ||
-      (typeof cmd.title === "string" && matchedTarget.title && cmd.title.toLowerCase().trim() === matchedTarget.title.toLowerCase().trim()) ||
-      (hasExplicitCoords && Math.hypot(Number(rawCmdX) - matchedTarget.x, Number(rawCmdY) - matchedTarget.y) < 200)
-    )
-  );
-  const snapInPlace =
-    explicitTarget !== null &&
-    explicitTarget !== undefined &&
-    explicitTarget.w > 0 &&
-    explicitTarget.h > 0 &&
-    (placement === "in_place" || planSaysReplace || Boolean(cmd.targetId) || isSpatialMatch || (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords));
+  const isTargetExplicit = Boolean(cmd.targetId) || Boolean(widgetEditBox);
 
-  if (snapInPlace && explicitTarget) {
+  if (isTargetExplicit && explicitTarget && explicitTarget.w > 0 && explicitTarget.h > 0) {
     cmd.placement = "in_place";
     const targetId = ("id" in explicitTarget && typeof (explicitTarget as { id?: unknown }).id === "string") ? (explicitTarget as { id: string }).id : undefined;
     if (targetId && !cmd.targetId) cmd.targetId = targetId;
@@ -784,7 +697,7 @@ export function fitWidgetGeometry(
     if (isTargetPlacement || placement === "in_place") {
       return box;
     }
-    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !snapInPlace, true);
+    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !isTargetExplicit, true);
   }
 
   const anchor = placementAnchor(changedBox, visibleRect);
@@ -1409,7 +1322,7 @@ export function validateCommand(
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim().slice(0, 80) : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim().slice(0, 80) : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim().slice(0, 120) : "";
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry, ctx.spatialPlan);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       const rawTitle = typeof c.title === "string" ? (c.title as string).trim().slice(0, 120) : "";
       const title = rawTitle || diagramKind || (sourceFormat ? `${sourceFormat} Diagram` : "Visual Widget");
       const refreshSeconds = Number.isFinite(Number(c.refreshSeconds)) ? Math.max(0, Math.min(86400, Math.round(Number(c.refreshSeconds)))) : 0;
@@ -1453,7 +1366,7 @@ export function validateCommand(
       if (ctx.plugins && !ctx.plugins.has("flowchart")) {
         return fail("diagram_source.plugin-disabled");
       }
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry, ctx.spatialPlan);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       const rawFormat = typeof c.sourceFormat === "string" ? c.sourceFormat : "";
       const rawSource = extractDiagramSource(c.source ?? c.code ?? c.content ?? c.diagram ?? c.text ?? c.body ?? c.spec ?? c.data ?? c);
       const source = rawSource.trim();
