@@ -529,7 +529,7 @@ export function CanvasHeader({
         )}
       </div>
 
-      <Separator orientation="vertical" className="mx-1 h-6 hidden sm:block" />
+      <Separator orientation="vertical" className="mx-1 h-5 hidden sm:block self-center" />
 
       {/* ── Center: Handy Drawing Tools ────────────────────────────── */}
       <div className="flex items-center gap-0.5 sm:gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5 px-0.5">
@@ -631,7 +631,7 @@ export function CanvasHeader({
 
         {/* Undo / Redo / Clear */}
         <div className="hidden md:flex items-center gap-0.5">
-          <Separator orientation="vertical" className="mx-1 h-6" />
+          <Separator orientation="vertical" className="mx-1 h-5 self-center" />
           <Tooltip>
             <TooltipTrigger
               render={
@@ -754,7 +754,7 @@ export function CanvasHeader({
         </div>
       </div>
 
-      <Separator orientation="vertical" className="mx-1 h-6 hidden lg:block" />
+      <Separator orientation="vertical" className="mx-1 h-5 hidden lg:block self-center" />
 
       {/* ── Right: AI Assistant & Settings ────────────────────────── */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">

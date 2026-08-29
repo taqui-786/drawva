@@ -15,7 +15,7 @@ export interface RoseTwoLoaderProps {
  * y(t) = 50 + sin t · r(t) · 3.25
  */
 export function RoseTwoLoader({
-  size = 20,
+  size = 24,
   className = "",
   particleCount = 28,
 }: RoseTwoLoaderProps) {
@@ -26,7 +26,7 @@ export function RoseTwoLoader({
   useEffect(() => {
     let animId: number;
     const startedAt = performance.now();
-    const trailSpan = 0.3;
+    const trailSpan = 0.32;
     const durationMs = 5200;
     const rotationDurationMs = 28000;
     const pulseDurationMs = 4300;
@@ -81,8 +81,8 @@ export function RoseTwoLoader({
         const tailOffset = i / (count - 1 || 1);
         const pt = getPoint(normalizeProgress(progress - tailOffset * trailSpan), detailScale);
         const fade = Math.pow(1 - tailOffset, 0.56);
-        const radius = 0.9 + fade * 2.8;
-        const opacity = 0.04 + fade * 0.96;
+        const radius = 1.2 + fade * 3.4;
+        const opacity = 0.08 + fade * 0.92;
 
         node.setAttribute("cx", pt.x.toFixed(1));
         node.setAttribute("cy", pt.y.toFixed(1));
@@ -111,8 +111,8 @@ export function RoseTwoLoader({
           stroke="currentColor"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="3.6"
-          className="text-muted-foreground/30 dark:text-muted-foreground/40"
+          strokeWidth="4.2"
+          className="text-muted-foreground/35 dark:text-muted-foreground/45"
         />
         {Array.from({ length: particleCount }).map((_, idx) => (
           <circle

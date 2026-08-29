@@ -95,15 +95,15 @@ export function CanvasFooter({
               title="Click to inspect full AI Request Logs"
             >
               {tickerState.status === "running" ? (
-                <RoseTwoLoader size={20} className="shrink-0" />
+                <RoseTwoLoader size={24} className="shrink-0" />
               ) : tickerState.status === "done" ? (
                 <span className="size-2 rounded-full bg-emerald-500 shrink-0 shadow-xs shadow-emerald-500/50" />
               ) : (
                 <span className="size-2 rounded-full bg-destructive shrink-0 shadow-xs shadow-destructive/50" />
               )}
 
-              {/* Fixed-width ticker container with vertical conveyor/stack animation */}
-              <div className="w-48 sm:w-64 md:w-80 h-4 overflow-hidden relative flex items-center text-left">
+              {/* Flexible ticker container with vertical conveyor/stack animation */}
+              <div className="min-w-0 flex-1 w-full max-w-70 sm:max-w-110 md:max-w-145 lg:max-w-190 h-4 overflow-hidden relative flex items-center text-left">
                 <AnimatePresence mode="popLayout" initial={false}>
                   <motion.div
                     key={tickerState.messageId}
@@ -118,7 +118,7 @@ export function CanvasFooter({
                 </AnimatePresence>
               </div>
 
-              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity shrink-0 font-mono">
+              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity shrink-0 font-mono ml-1">
                 <HugeiconsIcon icon={TerminalIcon} className="size-3" />
                 <span>Logs</span>
               </span>
