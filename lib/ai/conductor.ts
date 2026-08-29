@@ -445,7 +445,7 @@ export class Conductor {
       imageScale: atlasMeta?.imageScale || 1,
       canvasSize: SIZE,
       selectedIds: selected,
-      attentionBox: ink,
+      newestInkBox: ink,
       scene,
     });
   }
@@ -605,7 +605,8 @@ export class Conductor {
 }
 
 export function estimateTokens(messages: StepMessage[]): number {
-  return Math.ceil(JSON.stringify(messages).length / 4);
+  const stripped = stripImages(messages);
+  return Math.ceil(JSON.stringify(stripped).length / 4);
 }
 
 function getConversationKey(canvasId?: string): string {

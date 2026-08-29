@@ -192,42 +192,60 @@ export function createChatModel({
       }
       const isReasoning = isReasoningModelId(model);
       const isOpenRouter = cleanBaseUrl.includes("openrouter.ai");
-
       const isAgentRouter = cleanBaseUrl.includes("agentrouter.org");
 
-      const agentRouterFetch = isAgentRouter
-        ? async (input: RequestInfo | URL, init?: RequestInit) => {
-            const headers = new Headers(init?.headers);
-            headers.set("user-agent", "claude-cli/0.2.29 (external, cli)");
-            headers.set("User-Agent", "claude-cli/0.2.29 (external, cli)");
-            headers.set("X-Stainless-Lang", "js");
-            headers.set("X-Stainless-Package-Version", "0.2.29");
-            headers.set("X-Stainless-OS", "MacOS");
-            headers.set("X-Stainless-Arch", "arm64");
-            headers.set("X-Stainless-Runtime", "node");
-            headers.set("X-Stainless-Runtime-Version", "v20.10.0");
-            const res = await fetch(input, { ...init, headers });
-            const ctype = res.headers.get("content-type") || "";
-            if (ctype.includes("text/plain")) {
-              const body = await res.text();
-              const newHeaders = new Headers(res.headers);
-              newHeaders.set("content-type", "application/json; charset=utf-8");
-              return new Response(body, {
-                status: res.status,
-                statusText: res.statusText,
-                headers: newHeaders,
-              });
-            }
-            return res;
+      const customFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+        const headers = new Headers(init?.headers);
+        if (isAgentRouter) {
+          headers.set("user-agent", "claude-cli/0.2.29 (external, cli)");
+          headers.set("User-Agent", "claude-cli/0.2.29 (external, cli)");
+          headers.set("X-Stainless-Lang", "js");
+          headers.set("X-Stainless-Package-Version", "0.2.29");
+          headers.set("X-Stainless-OS", "MacOS");
+          headers.set("X-Stainless-Arch", "arm64");
+          headers.set("X-Stainless-Runtime", "node");
+          headers.set("X-Stainless-Runtime-Version", "v20.10.0");
+        }
+        const res = await fetch(input, { ...init, headers });
+        const ctype = res.headers.get("content-type") || "";
+        if (!res.ok) {
+          if (!ctype.includes("application/json")) {
+            const bodyText = await res.text();
+            const msg = bodyText.trim() || res.statusText || `HTTP ${res.status}`;
+            const errPayload = JSON.stringify({
+              error: {
+                message: msg,
+                type: "provider_error",
+                code: res.status,
+              },
+            });
+            const newHeaders = new Headers(res.headers);
+            newHeaders.set("content-type", "application/json; charset=utf-8");
+            return new Response(errPayload, {
+              status: res.status,
+              statusText: res.statusText,
+              headers: newHeaders,
+            });
           }
-        : undefined;
+        } else if (ctype.includes("text/plain")) {
+          const body = await res.text();
+          const newHeaders = new Headers(res.headers);
+          newHeaders.set("content-type", "application/json; charset=utf-8");
+          return new Response(body, {
+            status: res.status,
+            statusText: res.statusText,
+            headers: newHeaders,
+          });
+        }
+        return res;
+      };
 
       return new ChatOpenAI({
         model,
         apiKey,
         configuration: {
           baseURL: cleanBaseUrl,
-          ...(agentRouterFetch ? { fetch: agentRouterFetch } : {}),
+          fetch: customFetch,
         },
         temperature,
         timeout: timeoutMs,

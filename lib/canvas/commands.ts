@@ -292,12 +292,6 @@ function viewOverlapRatio(box: Box, view?: Box): number {
   return (ix * iy) / Math.max(1, box.w * box.h);
 }
 
-/** Fraction of `box` that lies inside `outer`. */
-function containmentRatio(box: Box, outer: Box): number {
-  const ix = Math.max(0, Math.min(box.x + box.w, outer.x + outer.w) - Math.max(box.x, outer.x));
-  const iy = Math.max(0, Math.min(box.y + box.h, outer.y + outer.h) - Math.max(box.y, outer.y));
-  return (ix * iy) / Math.max(1, box.w * box.h);
-}
 
 function slotFor(anchor: Box, w: number, h: number, dir: Side, gap = PLACE_GAP): { x: number; y: number } {
   if (dir === "right") return { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) };
@@ -511,8 +505,7 @@ function placeContent(
       },
       placement,
       ctx,
-      !ctx.keepPosition,
-      false
+      !ctx.keepPosition
     );
   }
 
@@ -573,8 +566,7 @@ function rescueCollision(
   box: Box,
   placement: string,
   source: Pick<CommandValidationContext, "changedBox" | "visibleRect" | "sceneItems">,
-  allowMove: boolean,
-  allowInsideAnchor: boolean
+  allowMove: boolean
 ): Box {
   const anchor = placementAnchor(source.changedBox, source.visibleRect);
   if (!allowMove || !anchor) return box;
@@ -589,7 +581,6 @@ function rescueCollision(
     return box;
   }
   if (!overlaps(box, anchor, 4)) return box;
-  if (allowInsideAnchor && containmentRatio(box, anchor) >= 0.6) return box;
   const blockers = occupancy(source.changedBox, source.sceneItems, source.visibleRect);
   const preferred = pickPreferredSide(placement, anchor, box.w, box.h, source.visibleRect, blockers, "below");
   const near = placeAroundAnchor(anchor, box.w, box.h, source.visibleRect, blockers, preferred);
@@ -697,7 +688,7 @@ export function fitWidgetGeometry(
     if (isTargetPlacement || placement === "in_place") {
       return box;
     }
-    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !isTargetExplicit, true);
+    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !isTargetExplicit);
   }
 
   const anchor = placementAnchor(changedBox, visibleRect);
@@ -798,8 +789,7 @@ function fitAnimationGeometry(
       { x, y, w, h },
       placement,
       ctx,
-      !ctx.keepPosition,
-      true
+      !ctx.keepPosition
     );
   }
 
@@ -894,7 +884,6 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
       { x: clampNum(rawX, 0, SIZE - w), y: clampNum(rawY, 0, SIZE - h), w, h },
       String(c.placement || "").toLowerCase(),
       ctx,
-      true,
       true
     );
     x = rescued.x;

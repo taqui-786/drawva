@@ -225,9 +225,9 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
   }
 
   const bound =
-    providerType === "anthropic" || providerType === "gemini"
-      ? model.bindTools(AGENT_TOOL_DEFS)
-      : model.bindTools(AGENT_TOOL_DEFS, { parallel_tool_calls: false } as never);
+    providerType === "openai"
+      ? model.bindTools(AGENT_TOOL_DEFS, { parallel_tool_calls: false } as never)
+      : model.bindTools(AGENT_TOOL_DEFS);
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
@@ -409,7 +409,7 @@ function toLangChainMessages(
             content: m.text || "",
             tool_calls: [
               {
-                id: m.toolCall.id,
+                id: m.toolCall.id || `call-${Date.now()}`,
                 name: m.toolCall.name,
                 args: asArgs(m.toolCall.args),
                 type: "tool_call",
@@ -424,7 +424,7 @@ function toLangChainMessages(
       out.push(
         new ToolMessage({
           content: stringifyResult(m.result),
-          tool_call_id: m.toolCallId,
+          tool_call_id: m.toolCallId || "call-1",
           name: m.name,
           status: m.isError ? "error" : "success",
         })
@@ -437,10 +437,10 @@ function toLangChainMessages(
 
 function humanWithImages(text: string, images?: { id: string; dataUrl: string }[]): HumanMessage {
   if (!images?.length) return new HumanMessage(text);
-  const content: Array<{ type: string; text?: string; image_url?: { url: string; detail: string } }> = [];
+  const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
   if (text) content.push({ type: "text", text });
   for (const img of images) {
-    content.push({ type: "image_url", image_url: { url: img.dataUrl, detail: "high" } });
+    content.push({ type: "image_url", image_url: { url: img.dataUrl } });
   }
   return new HumanMessage({ content });
 }
