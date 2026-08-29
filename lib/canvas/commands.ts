@@ -1512,7 +1512,7 @@ export function validateCommand(
         if (Math.max(...xs) - Math.min(...xs) > 3000 || Math.max(...ys) - Math.min(...ys) > 3000) return fail("erase.path.span");
         return { tool: "erase", mode: "path", points: c.points as [number, number][], size };
       }
-      if (!n(c.x) || !n(c.y) || !n(c.w, 1, 2000) || !n(c.h, 1, 2000) || (c.x as number) + (c.w as number) > SIZE || (c.y as number) + (c.h as number) > SIZE) {
+      if (!n(c.x) || !n(c.y) || !n(c.w, 1, SIZE) || !n(c.h, 1, SIZE) || (c.x as number) + (c.w as number) > SIZE || (c.y as number) + (c.h as number) > SIZE) {
         return fail("erase.rect.bad");
       }
       return { tool: "erase", mode: "rect", x: c.x as number, y: c.y as number, w: c.w as number, h: c.h as number };
