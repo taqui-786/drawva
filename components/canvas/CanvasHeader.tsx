@@ -62,9 +62,9 @@ import {
   PencilIcon,
   RedoIcon,
   Settings01Icon,
-  AiEditingIcon,
   AiBrain01Icon,
   AiChipIcon,
+  SparklesIcon,
   SquareIcon,
   TextIcon,
   TerminalIcon,
@@ -203,6 +203,7 @@ export function CanvasHeader({
   autoOn,
   onAutoChange,
   onAskAi,
+  agentRunning = false,
   models,
   activeModel,
   reasoningEffort = "default",
@@ -242,7 +243,8 @@ export function CanvasHeader({
   aiRun: AiRunState;
   autoOn: boolean;
   onAutoChange: (v: boolean) => void;
-  onAskAi: () => void;
+  onAskAi?: () => void;
+  agentRunning?: boolean;
   models: string[];
   activeModel: string | null;
   onModelChange?: (model: string | null) => void;
@@ -397,7 +399,7 @@ export function CanvasHeader({
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLabel>AI Intelligence</DropdownMenuLabel>
-              <DropdownMenuItem onClick={onOpenModelSelect}>
+              <DropdownMenuItem onClick={onOpenModelSelect} disabled={agentRunning}>
                 <HugeiconsIcon icon={AiChipIcon} />
                 <div className="flex flex-col text-left">
                   <span>Select AI Model</span>
@@ -755,65 +757,71 @@ export function CanvasHeader({
       <Separator orientation="vertical" className="mx-1 h-6 hidden lg:block" />
 
       {/* ── Right: AI Assistant & Settings ────────────────────────── */}
-      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">
         <AnimatePresence mode="wait">
-          {aiStatus === "thinking" ? (() => {
-            const stage = aiRun?.durationStage || "normal";
-            const barColorClass =
-              stage === "critical"
-                ? "bg-rose-500 transition-colors duration-500"
-                : stage === "slow"
-                ? "bg-amber-500 transition-colors duration-500"
-                : "bg-primary transition-colors duration-500";
-            const containerBorderClass =
-              stage === "critical"
-                ? "border-rose-500/50 shadow-rose-500/10"
-                : stage === "slow"
-                ? "border-amber-500/50 shadow-amber-500/10"
-                : "border-primary/40";
-
-            return (
-              <motion.div
-                key="bars-loader"
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                transition={{ duration: 0.2, ease: "easeOut" }}
-                className="flex items-center"
-              >
-                <style>{`
-                  @keyframes bars-fill {
-                    0% { opacity: 0.2; }
-                    50% { opacity: 1; }
-                    100% { opacity: 0.2; }
-                  }
-                `}</style>
-                <div
-                  className={cn(
-                    "flex gap-0.5 sm:gap-1 rounded-sm border p-0.5 sm:p-1 bg-background/90 shadow-xs transition-colors duration-500 shrink-0",
-                    containerBorderClass
-                  )}
-                >
-                  {Array.from({ length: 8 }).map((_, index) => (
-                    <div
-                      key={index}
-                      className={cn("h-3.5 sm:h-4 w-1.5 sm:w-2 rounded-[1px]", barColorClass)}
-                      style={{
-                        animation: "bars-fill 1s ease-in-out infinite",
-                        animationDelay: `${index * 0.08}s`,
-                      }}
-                    />
-                  ))}
-                </div>
-              </motion.div>
-            );
-          })() : (
+          {agentRunning || aiStatus === "thinking" ? (
             <motion.div
-              key="standard-controls"
+              key="ai-generating-loader"
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              transition={{ duration: 0.2 }}
+              className="flex items-center"
+            >
+              {(() => {
+                const stage = aiRun?.durationStage || "normal";
+                const barColorClass =
+                  stage === "critical"
+                    ? "bg-rose-500 transition-colors duration-500"
+                    : stage === "slow"
+                    ? "bg-amber-500 transition-colors duration-500"
+                    : "bg-primary transition-colors duration-500";
+                const containerBorderClass =
+                  stage === "critical"
+                    ? "border-rose-500/50 shadow-rose-500/10"
+                    : stage === "slow"
+                    ? "border-amber-500/50 shadow-amber-500/10"
+                    : "border-primary/40";
+
+                return (
+                  <>
+                    <style>{`
+                      @keyframes bars-fill {
+                        0% { opacity: 0.2; }
+                        50% { opacity: 1; }
+                        100% { opacity: 0.2; }
+                      }
+                    `}</style>
+                    <div
+                      className={cn(
+                        "flex gap-1 border p-1 rounded-sm bg-background/90 shadow-xs transition-colors duration-500 shrink-0",
+                        containerBorderClass
+                      )}
+                      title="Drawva AI is thinking and generating..."
+                    >
+                      {Array.from({ length: 12 }).map((_, index) => (
+                        <div
+                          key={index}
+                          className={cn(
+                            "h-5 w-2 sm:w-2.5 rounded-[1px] [animation:bars-fill_1s_ease-in-out_infinite]",
+                            barColorClass
+                          )}
+                          style={{ animationDelay: `${index * 0.08}s` }}
+                        />
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
+            </motion.div>
+          ) : (
+            <motion.div
+              key="ai-standard-controls"
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="flex items-center gap-1 sm:gap-1.5 shrink-0 ml-auto"
+              transition={{ duration: 0.15 }}
+              className="flex items-center gap-1 sm:gap-1.5"
             >
               {aiStatus === "done" && (
                 <motion.div
@@ -821,10 +829,10 @@ export function CanvasHeader({
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
                   transition={{ duration: 0.15 }}
-                  className="inline-flex items-center gap-1 sm:gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 sm:px-2 py-0.5 text-[11px] font-mono text-emerald-700 dark:text-emerald-300 select-none shrink-0"
+                  className="hidden sm:inline-flex items-center gap-1 sm:gap-1.5 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-1.5 sm:px-2 py-0.5 text-[11px] font-mono text-emerald-700 dark:text-emerald-300 select-none shrink-0"
                 >
                   <span className="size-1.5 rounded-full bg-emerald-500 shrink-0 animate-pulse" />
-                  <span className="hidden sm:inline">Ready</span>
+                  <span>Ready</span>
                 </motion.div>
               )}
 
@@ -833,10 +841,10 @@ export function CanvasHeader({
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.95 }}
-                  className="inline-flex items-center gap-1 sm:gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-1.5 sm:px-2 py-0.5 text-[11px] font-mono text-destructive select-none shrink-0"
+                  className="hidden sm:inline-flex items-center gap-1 sm:gap-1.5 rounded-md border border-destructive/30 bg-destructive/10 px-1.5 sm:px-2 py-0.5 text-[11px] font-mono text-destructive select-none shrink-0"
                 >
                   <span className="size-1.5 rounded-full bg-destructive shrink-0" />
-                  <span className="hidden sm:inline">Failed</span>
+                  <span>Failed</span>
                 </motion.div>
               )}
 
@@ -848,6 +856,7 @@ export function CanvasHeader({
                       size="sm"
                       variant="outline"
                       onClick={onOpenModelSelect}
+                      disabled={agentRunning}
                       className="hidden md:inline-flex h-7 gap-1.5 px-2 font-mono text-xs max-w-[130px] lg:max-w-[180px] truncate shadow-2xs hover:border-primary/40 shrink-0"
                       aria-label="Select AI Model"
                     >
@@ -899,15 +908,27 @@ export function CanvasHeader({
                 Auto
               </label>
 
-              {!autoOn && (
-                <Button
-                  size="sm"
-                  onClick={onAskAi}
-                  className="gap-1 px-2 sm:px-2.5 h-8 text-xs shrink-0 font-medium"
-                >
-                  <HugeiconsIcon icon={AiEditingIcon} className="size-3.5 shrink-0" />
-                  <span className="hidden xl:inline">Ask AI</span>
-                </Button>
+              {onAskAi && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={onAskAi}
+                        disabled={agentRunning}
+                        aria-label="Ask AI"
+                        className="gap-1.5 px-2.5 sm:px-3.5 h-8 text-xs shrink-0 font-medium shadow-2xs bg-primary text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer"
+                      >
+                        <HugeiconsIcon icon={SparklesIcon} className="size-3.5 shrink-0" />
+                        <span>Ask AI</span>
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    Ask AI to observe the canvas and generate answers or widgets
+                  </TooltipContent>
+                </Tooltip>
               )}
 
               <Tooltip>

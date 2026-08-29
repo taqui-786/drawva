@@ -458,19 +458,24 @@ export function latestInputMetadata(
 
 
 function visibleInkBounds(engine: CanvasEngine, visible: Rect): Rect | null {
+  const maxIdx = Math.ceil(SIZE / TILE) - 1;
+  const x0 = Math.max(0, Math.floor(visible.x / TILE));
+  const y0 = Math.max(0, Math.floor(visible.y / TILE));
+  const x1 = Math.min(maxIdx, Math.floor((visible.x + visible.w) / TILE));
+  const y1 = Math.min(maxIdx, Math.floor((visible.y + visible.h) / TILE));
+
   let bounds: Rect | null = null;
-  for (const key of engine.tiles.keys()) {
-    const [tx, ty] = key.split(",").map(Number);
-    const tileBox = { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE };
-    const part = intersect(tileBox, visible);
-    if (part.w <= 0 || part.h <= 0) continue;
-    const canvas = engine.tiles.get(tx, ty);
-    if (!canvas) continue;
-    const ink = tileInkBox(canvas);
-    if (!ink) continue;
-    const found = intersect({ x: tileBox.x + ink.x, y: tileBox.y + ink.y, w: ink.w, h: ink.h }, visible);
-    if (found.w <= 0 || found.h <= 0) continue;
-    bounds = bounds ? union(bounds, found) : found;
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const canvas = engine.tiles.get(tx, ty);
+      if (!canvas) continue;
+      const tileBox = { x: tx * TILE, y: ty * TILE, w: TILE, h: TILE };
+      const ink = tileInkBox(canvas);
+      if (!ink) continue;
+      const found = intersect({ x: tileBox.x + ink.x, y: tileBox.y + ink.y, w: ink.w, h: ink.h }, visible);
+      if (found.w <= 0 || found.h <= 0) continue;
+      bounds = bounds ? union(bounds, found) : found;
+    }
   }
   return bounds;
 }

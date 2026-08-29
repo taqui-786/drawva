@@ -113,11 +113,25 @@ export interface AiReply {
   observedText?: string;
   spatialPlan?: string;
   commands: unknown[];
+  toolCall?: { id?: string; name: string; args: Record<string, unknown> };
   attempts: number;
   requestId: string;
   providerId?: string;
   tokenUsage?: TokenUsage;
   debug?: AiDebugInfo;
+}
+
+export type AgentReply = AiReply;
+
+export interface AiLogStep {
+  stepNumber: number;
+  tool?: string;
+  args?: unknown;
+  result?: unknown;
+  isError?: boolean;
+  summary?: string;
+  text?: string;
+  durationMs?: number;
 }
 
 export interface AiLogEntry {
@@ -135,6 +149,7 @@ export interface AiLogEntry {
   userPromptRaw?: string;
   sceneJson?: string;
   tokenUsage?: TokenUsage;
+  steps?: AiLogStep[];
   response?: {
     intent?: AiIntent;
     message?: string;

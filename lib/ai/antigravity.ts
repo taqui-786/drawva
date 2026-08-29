@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import type { AgentReply } from "./agent";
+import type { AgentReply } from "./types";
 import type { ReasoningEffort } from "./provider";
 
 export interface AntigravityRunOptions {
@@ -182,21 +182,54 @@ export async function runAntigravityCli(opts: AntigravityRunOptions): Promise<Ag
       rawResponse = stdout;
     }
 
-    // Extract JSON from response
+    // Extract JSON from response if available, or treat plain text as answer
+    let parsed: Record<string, unknown> = {};
     const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      throw new Error(`Antigravity CLI did not return a valid JSON object. Response: ${rawResponse.slice(0, 300)}`);
+    if (jsonMatch) {
+      try {
+        parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+      } catch {
+        parsed = { message: rawResponse.trim(), commands: [] };
+      }
+    } else {
+      parsed = { message: rawResponse.trim(), commands: [] };
     }
 
-    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+    let toolCall: AgentReply["toolCall"] | undefined;
+    if (parsed.type === "tool_call" || (typeof parsed.name === "string" && parsed.name)) {
+      const name = String(parsed.name || "");
+      let args: Record<string, unknown> = {};
+      if (parsed.arguments && typeof parsed.arguments === "object") {
+        args = parsed.arguments as Record<string, unknown>;
+      } else if (typeof parsed.arguments === "string") {
+        try {
+          args = JSON.parse(parsed.arguments);
+        } catch {}
+      } else if (parsed.args && typeof parsed.args === "object") {
+        args = parsed.args as Record<string, unknown>;
+      }
+      toolCall = { name, args };
+    }
+
     const rawCommands = Array.isArray(parsed.commands) ? parsed.commands : [];
+    const message =
+      typeof parsed.text === "string"
+        ? parsed.text
+        : typeof parsed.message === "string"
+        ? parsed.message
+        : toolCall
+        ? undefined
+        : rawResponse.trim();
 
     return {
       intent: (parsed.intent as AgentReply["intent"]) || "answer",
       observedText: typeof parsed.observedText === "string" ? parsed.observedText : undefined,
       spatialPlan: typeof parsed.spatialPlan === "string" ? parsed.spatialPlan : undefined,
-      message: typeof parsed.message === "string" ? parsed.message : undefined,
+      message,
       commands: rawCommands as Array<Record<string, unknown>>,
+      toolCall,
+      attempts: 1,
+      requestId: `antigravity-${Date.now()}`,
       tokenUsage,
     };
   } finally {

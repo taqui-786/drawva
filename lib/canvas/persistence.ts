@@ -20,6 +20,61 @@ const DB_NAME = "drawva-canvas-db";
 const STORE = "documents";
 const KEY = "autosave";
 
+export function computeSnapshotHash(snapshot: ProjectSnapshot | null): string {
+  if (!snapshot) return "empty";
+  let hash = 2166136261;
+  const mix = (str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      hash ^= str.charCodeAt(i);
+      hash = Math.imul(hash, 16777619);
+    }
+  };
+
+  const tileKeys = Object.keys(snapshot.tiles || {}).sort();
+  mix(`tiles:${tileKeys.length}`);
+  for (const k of tileKeys) {
+    const data = snapshot.tiles[k] || "";
+    mix(k);
+    mix(String(data.length));
+    if (data.length > 64) {
+      mix(data.slice(0, 32));
+      mix(data.slice(-32));
+    } else {
+      mix(data);
+    }
+  }
+
+  const widgets = snapshot.widgets || [];
+  mix(`w:${widgets.length}`);
+  for (const w of widgets) {
+    mix(`${w.id}:${w.kind}:${Math.round(w.x)}:${Math.round(w.y)}:${Math.round(w.w)}:${Math.round(w.h)}:${w.title || ""}`);
+    const content = w.html || w.copyText || "";
+    mix(String(content.length));
+    if (content.length > 64) {
+      mix(content.slice(0, 32));
+      mix(content.slice(-32));
+    } else {
+      mix(content);
+    }
+  }
+
+  const objects = snapshot.objects || [];
+  mix(`o:${objects.length}`);
+  for (const o of objects) {
+    mix(`${o.id}:${o.kind}:${Math.round(o.x)}:${Math.round(o.y)}:${Math.round(o.w)}:${Math.round(o.h)}:${o.color || ""}`);
+    const src = o.source || "";
+    mix(String(src.length));
+    if (src.length > 64) {
+      mix(src.slice(0, 32));
+      mix(src.slice(-32));
+    } else {
+      mix(src);
+    }
+  }
+
+  return (hash >>> 0).toString(16);
+}
+
 export function serializeSnapshot(
   engine: CanvasEngine,
   widgets: WidgetManager | null,
@@ -27,11 +82,9 @@ export function serializeSnapshot(
 ): ProjectSnapshot {
   const tiles: Record<string, string> = {};
   for (const k of engine.tiles.keys()) {
-    const c = engine.tiles.get(...parseKey(k));
-    if (c) {
-      try {
-        tiles[k] = c.toDataURL("image/png");
-      } catch {}
+    const dataUrl = engine.tiles.getDataUrl(k);
+    if (dataUrl) {
+      tiles[k] = dataUrl;
     }
   }
   return {
@@ -73,6 +126,7 @@ export async function applyTiles(engine: CanvasEngine, tiles: Record<string, str
     if (!ctx) continue;
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.drawImage(img, 0, 0);
+    engine.tiles.set(k, c, dataUrl);
   }
   engine.requestRender();
 }
@@ -95,6 +149,7 @@ export async function restoreSnapshot(
     img.src = dataUrl;
     await img.decode();
     c.getContext("2d")!.drawImage(img, 0, 0);
+    engine.tiles.set(k, c, dataUrl);
   }
   for (const w of snapshot.widgets || []) {
     widgets?.add({ ...w });

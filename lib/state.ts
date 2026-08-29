@@ -10,7 +10,7 @@ export const appState = proxy({
   zoom: 100,
   center: { x: 0, y: 0 },
   aiStatus: "idle" as AiStatus,
-  autoOn: true,
+  autoOn: false,
 });
 
 export function setMode(mode: CanvasMode): void {

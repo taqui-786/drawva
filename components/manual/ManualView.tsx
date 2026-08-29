@@ -11,6 +11,7 @@ import {
   PeerToPeer01Icon,
   Analytics01Icon,
   Link01Icon,
+  BotIcon,
 } from "@hugeicons/core-free-icons";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -53,6 +54,7 @@ const NAV_GROUPS: { group: string; items: { id: string; label: string }[] }[] = 
       { id: "providers", label: "Provider Setup" },
       { id: "local-models", label: "Local Models (Ollama)" },
       { id: "modes", label: "Generation Modes" },
+      { id: "agent", label: "Drawva Agent" },
       { id: "plugins", label: "Capability Plugins" },
       { id: "usage", label: "Token Usage" },
     ],
@@ -125,15 +127,15 @@ const FORMATS = [
 const FAQS = [
   {
     q: "Where are my API keys stored?",
-    a: "Only in your browser's localStorage. Keys are never logged, never persisted server-side, and never leave your machine except to call the provider you configured. Canvas AI requests go directly from your browser to your provider; the server only helps fetch the model list when you press Connect.",
+    a: "Only in your browser's localStorage. Keys are never logged or persisted by Drawva. Canvas AI and Drawva Agent requests use the provider you configured; the server route forwards the request to that provider without storing the key.",
   },
   {
     q: "Which model should I pick?",
-    a: "Any vision-capable (multimodal) model. Drawva photographs your canvas and sends the image with every request, so text-only models cannot perceive your ink. If your provider declares vision capabilities (like OpenRouter), the Connect flow filters the model list automatically.",
+    a: "Choose a vision-capable (multimodal) model with tool-calling support. One-shot Canvas AI sends a canvas image and structured commands. Drawva Agent also needs tool calling so it can scan, read, snapshot, and apply changes step by step. If your provider declares vision capabilities, the Connect flow can filter the model list automatically.",
   },
   {
     q: "The AI replied but nothing was drawn. Why?",
-    a: "Every AI command passes strict validators: allowed-tools checks against your enabled plugins, coordinate clamping, size limits, and placement rules. Failed commands are dropped. Open Menu → AI Request Logs to see the exact rejection reason, then try sketching a clearer intent.",
+    a: "Every one-shot AI command and Agent canvas change passes strict validators: allowed-tool checks, coordinate limits, size limits, placement rules, and revision checks. Failed commands are rejected or returned as feedback. Open Menu → AI Request Logs for one-shot details, or inspect the tool status in the Drawva Agent panel.",
   },
   {
     q: "Does P2P sync send my canvas through a server?",
@@ -141,7 +143,7 @@ const FAQS = [
   },
   {
     q: "What does disabling a plugin do?",
-    a: "Disabled plugins are removed from the AI's prompt, so the model never sees them. Even if it tries, the validator drops commands using disabled plugins. Widgets already on your canvas stay untouched. Fewer plugins means a smaller, faster, cheaper prompt.",
+    a: "Disabled plugins are removed from the AI's available capability list. The one-shot AI will not receive their cards, and Drawva Agent cannot load them with load_plugin. Validators also reject commands that use disabled plugins. Widgets already on your canvas stay untouched. Agent plugin cards are loaded only when needed.",
   },
   {
     q: "Is Drawva free?",
@@ -500,9 +502,9 @@ export function ManualView() {
 
             <Alert>
               <HugeiconsIcon icon={Shield02Icon} />
-              <AlertTitle>Your key never leaves your browser</AlertTitle>
+              <AlertTitle>Your key is not stored by Drawva</AlertTitle>
               <AlertDescription>
-                Credentials are stored only in this browser&apos;s localStorage. Canvas requests go directly from your browser to the provider. The server is involved only when you press <strong>Connect</strong>, to fetch the model list — keys are never logged or persisted there.
+                Credentials are stored in this browser&apos;s localStorage and sent only with the AI request to the server route, which forwards the request to your configured provider. Drawva does not log or persist the key on the server. Keep using HTTPS when the server is not local.
               </AlertDescription>
             </Alert>
           </Section>
@@ -573,7 +575,7 @@ ollama serve               # default port 11434`}
             id="modes"
             eyebrow="AI"
             title="Generation modes"
-            lead="Two ways to invoke the perception agent: automatically while you sketch, or on demand."
+            lead="Use fast one-shot generation while you sketch, or open Drawva Agent when a task needs several steps and verification."
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <Card>
@@ -618,10 +620,11 @@ ollama serve               # default port 11434`}
               <CardContent>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {[
-                    { title: "Accept or discard", desc: "New widgets start as drafts with an action bar. Keep them with the check, drop them with the cross." },
+                    { title: "One-shot drafts", desc: "One-shot AI widgets start as drafts with an action bar. Keep them with the check, or drop them with the cross." },
+                    { title: "Agent changes", desc: "Drawva Agent applies validated changes immediately, one history step at a time. Use the normal Undo shortcut if needed." },
                     { title: "Fullscreen & resize", desc: "Expand to fullscreen or drag the corner to resize — content reflows automatically." },
                     { title: "Copy source", desc: "Grab the clean source (Mermaid code, Vega-Lite JSON, HTML…) with one click." },
-                    { title: "Refine by drawing", desc: "Draw or write near a widget and hit Ask AI — the agent reads it and updates that widget in place." },
+                    { title: "Refine by drawing", desc: "Draw or write near a widget and hit Ask AI — one-shot AI reads it and updates that widget in place. For a chat task, use Drawva Agent." },
                   ].map((item) => (
                     <div key={item.title} className="flex flex-col gap-1 rounded-lg border bg-card/60 p-3">
                       <span className="text-xs font-semibold">{item.title}</span>
@@ -632,6 +635,116 @@ ollama serve               # default port 11434`}
               </CardContent>
             </Card>
           </Section>
+
+          {/* ── Drawva Agent ──────────────────────────────────────────── */}
+          <Section
+            id="agent"
+            eyebrow="AI"
+            title="Drawva Agent"
+            lead="Use the Agent button for multi-step work. The Agent can inspect your canvas, use your enabled plugin capabilities, make changes, check the result, and continue until the task is complete."
+          >
+            <Alert>
+              <HugeiconsIcon icon={BotIcon} />
+              <AlertTitle>The Agent needs an API provider</AlertTitle>
+              <AlertDescription>
+                Select an API connection with a vision-capable model first. Codex and Antigravity are available for one-shot Ask AI, but are not used by Drawva Agent.
+              </AlertDescription>
+            </Alert>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Start a task</CardTitle>
+                <CardDescription>Open the chat and workflow panel from the canvas header.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
+                <ol className="flex list-decimal flex-col gap-2 pl-5 leading-relaxed">
+                  <li>Open the canvas and choose an API provider and model in AI Settings.</li>
+                  <li>Click <strong>Agent</strong> in the header. The panel opens on the right and can be resized from its left edge.</li>
+                  <li>Type a request such as <em>&quot;Create a clean summary card below my drawing.&quot;</em> You can attach up to five images.</li>
+                  <li>Use <strong>Steer</strong> to add a requirement while the Agent is working, or use <strong>Stop</strong> to cancel the current turn.</li>
+                </ol>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">How an Agent turn works</CardTitle>
+                <CardDescription>The Agent works in small steps instead of returning one large command list.</CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 text-sm text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-2 font-mono text-xs">
+                  {["Message", "Inspect", "Use a tool", "Read result", "Verify", "Answer"].map((step, i, arr) => (
+                    <span key={step} className="flex items-center gap-2">
+                      <Badge variant="secondary" className="font-mono text-[11px]">
+                        {i + 1}. {step}
+                      </Badge>
+                      {i < arr.length - 1 && <span aria-hidden>→</span>}
+                    </span>
+                  ))}
+                </div>
+                <p className="leading-relaxed">
+                  The browser canvas remains the source of truth. The server sends one model step at a time, while the browser runs the canvas tool locally and sends the result back to the next step. This lets the Agent correct its plan when the canvas changes.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">The Agent&apos;s tools</CardTitle>
+                <CardDescription>Each step uses at most one tool. Changes are validated before they reach the canvas.</CardDescription>
+              </CardHeader>
+              <CardContent className="pt-0 pb-0">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-44">Tool</TableHead>
+                      <TableHead>Purpose</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {[
+                      { name: "canvas_scan", desc: "List objects, widgets, boxes, and the current canvas revision." },
+                      { name: "canvas_read", desc: "Read the content or source of one text object or widget." },
+                      { name: "canvas_snapshot", desc: "Capture the canvas or a region. Coordinate labels help the Agent place content accurately." },
+                      { name: "canvas_apply", desc: "Apply validated text, formulas, plots, drawings, widgets, diagrams, or erasures in one history step." },
+                      { name: "canvas_patch_widget", desc: "Make a small unified-diff edit to widget.html or widget.source instead of resending the full widget." },
+                      { name: "canvas_focus", desc: "Move the camera to the canvas, an object, or a region without changing content." },
+                      { name: "canvas_undo", desc: "Undo one recent canvas history step when the Agent needs to recover." },
+                      { name: "load_plugin", desc: "Load one enabled plugin card only when the task needs that capability." },
+                    ].map((tool) => (
+                      <TableRow key={tool.name}>
+                        <TableCell className="font-mono text-xs font-medium">{tool.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{tool.desc}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              {[
+                { title: "Accurate placement", desc: "Snapshots include global coordinate labels and scale information. The Agent can capture its result and correct overlap or clipping." },
+                { title: "Safe changes", desc: "Every mutation uses a revision number and the existing command validators. If you edit during a turn, the Agent must read the newer canvas state first." },
+                { title: "Lower token cost", desc: "Plugin cards load only when needed, old images become small notes, and widget patches send changed lines instead of full HTML." },
+              ].map((item) => (
+                <div key={item.title} className="flex flex-col gap-1 rounded-lg border bg-card/60 p-3">
+                  <span className="text-xs font-semibold">{item.title}</span>
+                  <span className="text-xs text-muted-foreground leading-relaxed">{item.desc}</span>
+                </div>
+              ))}
+            </div>
+
+            <Alert>
+              <HugeiconsIcon icon={Shield02Icon} />
+              <AlertTitle>Conversation storage</AlertTitle>
+              <AlertDescription>
+                The active Agent conversation is kept in this browser under <InlineCode>drawva.agent.conversation</InlineCode> so it can survive a refresh. Images are not saved in the conversation. Start <strong>New conversation</strong> to clear it. The conversation is separate from your canvas snapshot.
+              </AlertDescription>
+            </Alert>
+          </Section>
+
+          <Separator />
 
           {/* ── Plugins ──────────────────────────────────────────────── */}
           <Section
@@ -661,7 +774,7 @@ ollama serve               # default port 11434`}
             id="usage"
             eyebrow="AI"
             title="Token usage"
-            lead="Every AI request reports its token consumption, and Drawva keeps a local audit trail so you always know what a session costs."
+            lead="Every one-shot request and Drawva Agent step reports token consumption, and Drawva keeps a local audit trail so you can see what a session costs."
           >
             <div className="grid gap-3 sm:grid-cols-2">
               <Card>
@@ -676,7 +789,7 @@ ollama serve               # default port 11434`}
                     <MenuPath path="Menu → AI Settings & Keys → Usage" />
                   </p>
                   <p>
-                    Four live counters — <strong>Requests</strong>, <strong>Prompt</strong>, <strong>Completion</strong>, and <strong>Total Tokens</strong> — plus a per-request history showing time, provider, model, and in/out/total tokens. A <strong>Clear</strong> button resets the trail.
+                    Four live counters — <strong>Requests</strong>, <strong>Prompt</strong>, <strong>Completion</strong>, and <strong>Total Tokens</strong> — plus a per-request history showing time, provider, model, and in/out/total tokens. Agent turns can contain several model steps, so one task may use several requests. A <strong>Clear</strong> button resets the trail.
                   </p>
                 </CardContent>
               </Card>
@@ -689,7 +802,7 @@ ollama serve               # default port 11434`}
                     <MenuPath path="Menu → AI Request Logs" />
                   </p>
                   <p>
-                    The full debug view: every request with its prompt, the model&apos;s reply, and the token usage line (<InlineCode>in / out / total</InlineCode>). If something failed validation, the reason shows up here.
+                    The full debug view: one-shot requests with their prompt, model reply, and token usage line (<InlineCode>in / out / total</InlineCode>). Agent activity is shown in the Agent panel with tool status and cumulative turn tokens.
                   </p>
                 </CardContent>
               </Card>

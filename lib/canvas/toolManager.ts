@@ -56,6 +56,17 @@ export class ToolManager {
     this.picker = picker;
   }
 
+  get isInteracting(): boolean {
+    return (
+      this.pan !== null ||
+      this.nodeDrag !== null ||
+      this.selection.isMoving ||
+      this.selection.isInteracting ||
+      this.shapes.isDrawing ||
+      this.strokes.drawing
+    );
+  }
+
   setMode(mode: CanvasMode): void {
     this.shapes.cancel();
     this.selection.clearSelection();

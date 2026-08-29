@@ -4,6 +4,7 @@ import { tileKey } from "./types";
 
 export class TileCache {
   private tiles = new Map<string, HTMLCanvasElement>();
+  private dataUrlCache = new Map<string, string>();
 
   tile(tx: number, ty: number, create = true): HTMLCanvasElement | null {
     const k = tileKey(tx, ty);
@@ -12,8 +13,32 @@ export class TileCache {
       c.width = TILE;
       c.height = TILE;
       this.tiles.set(k, c);
+      this.dataUrlCache.delete(k);
     }
     return this.tiles.get(k) ?? null;
+  }
+
+  markDirty(tx: number, ty: number): void {
+    this.dataUrlCache.delete(tileKey(tx, ty));
+  }
+
+  markDirtyKey(k: string): void {
+    this.dataUrlCache.delete(k);
+  }
+
+  getDataUrl(k: string): string | null {
+    const cached = this.dataUrlCache.get(k);
+    if (cached !== undefined) return cached;
+    const [tx, ty] = k.split(",").map(Number);
+    const c = this.get(tx, ty);
+    if (!c) return null;
+    try {
+      const url = c.toDataURL("image/png");
+      this.dataUrlCache.set(k, url);
+      return url;
+    } catch {
+      return null;
+    }
   }
 
   get(tx: number, ty: number): HTMLCanvasElement | null {
@@ -24,16 +49,23 @@ export class TileCache {
     return [...this.tiles.keys()];
   }
 
-  set(key: string, canvas: HTMLCanvasElement): void {
+  set(key: string, canvas: HTMLCanvasElement, dataUrl?: string): void {
     this.tiles.set(key, canvas);
+    if (dataUrl) {
+      this.dataUrlCache.set(key, dataUrl);
+    } else {
+      this.dataUrlCache.delete(key);
+    }
   }
 
   delete(key: string): void {
     this.tiles.delete(key);
+    this.dataUrlCache.delete(key);
   }
 
   clear(): void {
     this.tiles.clear();
+    this.dataUrlCache.clear();
   }
 
   forTiles(

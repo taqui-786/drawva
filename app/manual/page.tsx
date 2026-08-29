@@ -4,12 +4,12 @@ import { ManualView } from "@/components/manual/ManualView";
 export const metadata: Metadata = {
   title: "User Manual",
   description:
-    "Complete documentation for Drawva — canvas tools and shortcuts, AI provider setup (OpenAI, Anthropic, Gemini, Groq, NVIDIA, Ollama, LM Studio, OpenRouter), token usage monitoring, real-time P2P collaboration, diagram formats, plugins, and saving.",
+    "Complete documentation for Drawva — canvas tools and shortcuts, one-shot Canvas AI, the multi-step Drawva Agent, provider setup, token usage, plugins, real-time P2P collaboration, diagram formats, and saving.",
   alternates: { canonical: "/manual" },
   openGraph: {
     title: "Drawva User Manual",
     description:
-      "Tools, AI provider setup, token usage, P2P collaboration, and everything else you need to master the Drawva AI canvas.",
+      "Canvas tools, one-shot AI, the multi-step Drawva Agent, provider setup, token usage, P2P collaboration, plugins, and everything else you need to master Drawva.",
     url: "/manual",
   },
 };

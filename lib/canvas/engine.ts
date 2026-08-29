@@ -104,6 +104,7 @@ export class CanvasEngine {
   }
 
   noteTileWrite(tx: number, ty: number): void {
+    this.tiles.markDirty(tx, ty);
     this.onTileWrite?.(tx, ty);
   }
 

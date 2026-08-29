@@ -427,6 +427,10 @@ export class SelectionController {
     this.clearSelection();
   }
 
+  get isInteracting(): boolean {
+    return this.moving !== null || this.marquering !== null;
+  }
+
   clearSelection(): void {
     this.selection = null;
     this.moving = null;

@@ -19,31 +19,30 @@ import { DraftManager } from "@/lib/canvas/draftStore";
 import { rasterizeText, renderTextBlock } from "@/lib/canvas/textTool";
 import { placeImageAt } from "@/lib/canvas/images";
 import { CanvasHeader, type AiRunState } from "./CanvasHeader";
+import { Conductor, type ConductorEvent } from "@/lib/ai/conductor";
 import { SettingsDialog } from "./SettingsDialog";
 import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
 import { UserManualDialog } from "./UserManualDialog";
-import { CanvasFooter } from "./CanvasFooter";
+import { CanvasFooter, type GenerationTickerState } from "./CanvasFooter";
 import { WidgetManager, type WidgetItem, extractHtmlDimensions } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
-import { diagramDocument, copyLabel, detectDiagramFormat, normalizeFormat } from "@/lib/canvas/diagram";
+import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
-import { buildAtlas } from "@/lib/canvas/atlas";
 import { unionRect } from "@/lib/canvas/engine";
-import { buildScene } from "@/lib/canvas/scene";
-import { SIZE as CANVAS_SIZE } from "@/lib/canvas/constants";
-import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles } from "@/lib/canvas/persistence";
+import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles, computeSnapshotHash } from "@/lib/canvas/persistence";
 import {
   CloudSyncEngine,
   fetchCloudCanvas,
   type CloudSyncStatus,
 } from "@/lib/canvas/cloudSync";
+import { useSession } from "@/lib/auth-client";
 import { BoardHistory } from "@/lib/canvas/history";
 import { computeTidyMoves } from "@/lib/canvas/tidy";
 import { resizeWidgetGeometry } from "@/lib/canvas/widgetGeometry";
-import type { AiReply, AiRequest, AgentEvent, AiLogEntry } from "@/lib/ai/types";
-import type { CanvasCommand, PlotFunctionCommand } from "@/lib/canvas/commands";
+import type { AiLogEntry } from "@/lib/ai/types";
+import type { PlotFunctionCommand } from "@/lib/canvas/commands";
 import type { Point, Rect } from "@/lib/canvas/types";
 import {
   getActiveModel,
@@ -53,10 +52,8 @@ import {
   getEnabledPlugins,
   getReasoningEffort,
   setReasoningEffort,
-  getModelCapabilitiesCached,
   type ReasoningEffort,
 } from "@/lib/ai/provider";
-import { recordAiUsage } from "@/lib/actions/usage";
 import { Textarea } from "@/components/ui/textarea";
 import {
   SyncManager,
@@ -69,96 +66,6 @@ import { ConnectDialog } from "./ConnectDialog";
 import { MobileOrientationPrompt } from "./MobileOrientationPrompt";
 import { strokeSegment } from "@/lib/canvas/strokes";
 import { eraseRegion, pasteDataUrl } from "@/lib/canvas/selection";
-
-function parseCleanErrorMessage(raw: string): string {
-  if (!raw) return "AI request failed";
-  let clean = raw.trim();
-
-  const jsonBraceIndex = clean.indexOf("{");
-  if (jsonBraceIndex >= 0) {
-    try {
-      const jsonStr = clean.slice(jsonBraceIndex);
-      const parsed = JSON.parse(jsonStr) as { error?: { message?: string } | string; message?: string };
-      if (typeof parsed.error === "object" && parsed.error?.message) {
-        return parsed.error.message;
-      }
-      if (typeof parsed.error === "string") {
-        return parsed.error;
-      }
-      if (typeof parsed.message === "string") {
-        return parsed.message;
-      }
-    } catch {}
-  }
-
-  clean = clean.replace(/^\d{3}\s*/, "");
-  return clean || "AI request failed";
-}
-
-function distanceBetweenRects(a: Rect, b: { x: number; y: number; w: number; h: number }): number {
-  const dx = a.x + a.w < b.x ? b.x - (a.x + a.w) : a.x > b.x + b.w ? a.x - (b.x + b.w) : 0;
-  const dy = a.y + a.h < b.y ? b.y - (a.y + a.h) : a.y > b.y + b.h ? a.y - (b.y + b.h) : 0;
-  return Math.hypot(dx, dy);
-}
-
-function rectsOverlap(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number }
-): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
-
-function overlapArea(
-  a: { x: number; y: number; w: number; h: number },
-  b: { x: number; y: number; w: number; h: number }
-): number {
-  const left = Math.max(a.x, b.x);
-  const top = Math.max(a.y, b.y);
-  const right = Math.min(a.x + a.w, b.x + b.w);
-  const bottom = Math.min(a.y + a.h, b.y + b.h);
-  return Math.max(0, right - left) * Math.max(0, bottom - top);
-}
-
-function widgetEditFromItem(item: WidgetItem): import("@/lib/ai/types").WidgetEditContext {
-  const detectedFormat =
-    item.kind === "diagram"
-      ? item.sourceFormat
-        ? normalizeFormat(item.sourceFormat) || item.sourceFormat
-        : detectDiagramFormat(item.pluginId, item.copyText, item.title)
-      : undefined;
-  return {
-    id: item.id,
-    pluginId: item.pluginId || (item.kind === "diagram" ? "flowchart" : "general"),
-    widgetType: item.kind === "diagram" ? "diagram_source" : "html_widget",
-    title: item.title,
-    sourceFormat: detectedFormat,
-    source: item.copyText,
-    html: item.html,
-    box: { x: item.x, y: item.y, w: item.w, h: item.h },
-  };
-}
-
-function pickProminentVisibleWidget(
-  wm: WidgetManager,
-  sourceRect: { x: number; y: number; w: number; h: number }
-): WidgetItem | null {
-  const cx = sourceRect.x + sourceRect.w / 2;
-  const cy = sourceRect.y + sourceRect.h / 2;
-  let best: WidgetItem | null = null;
-  let bestArea = -1;
-  let bestD = Infinity;
-  for (const w of wm.all()) {
-    if (!rectsOverlap(w, sourceRect)) continue;
-    const area = overlapArea(w, sourceRect);
-    const d = Math.hypot(w.x + w.w / 2 - cx, w.y + w.h / 2 - cy);
-    if (area > bestArea || (area === bestArea && d < bestD)) {
-      best = w;
-      bestArea = area;
-      bestD = d;
-    }
-  }
-  return best;
-}
 
 function findInPlaceWidget(
   wm: WidgetManager,
@@ -202,49 +109,6 @@ function findInPlaceWidget(
   return closest;
 }
 
-
-async function readSse(
-  res: Response,
-  onEvent: (e: AgentEvent) => void
-): Promise<AiReply & { rejected?: string[] }> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let result: (AiReply & { rejected?: string[] }) | null = null;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let sep = buffer.indexOf("\n\n");
-    while (sep >= 0) {
-      const block = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      const eventName = /^event: (.+)$/m.exec(block)?.[1] ?? "message";
-      const dataLine = /^data: (.+)$/m.exec(block)?.[1] ?? "";
-      if (dataLine) {
-        let data: unknown;
-        try {
-          data = JSON.parse(dataLine);
-        } catch {
-          data = null;
-        }
-        if (data) {
-          if (eventName === "event") onEvent(data as AgentEvent);
-          else if (eventName === "result") result = data as AiReply & { rejected?: string[] };
-          else if (eventName === "error") {
-            const errData = data as { error?: string; detail?: string };
-            const rawErr = errData.error || errData.detail || "AI request failed";
-            throw new Error(parseCleanErrorMessage(rawErr));
-          }
-        }
-      }
-      sep = buffer.indexOf("\n\n");
-    }
-  }
-  if (!result) throw new Error("AI stream ended without a result");
-  return result;
-}
-
 export function CanvasApp() {
   const { engine, mountRef } = useCanvas();
   const { mode, color, pen, aiStatus, autoOn } = useSnapshot(appState);
@@ -280,8 +144,16 @@ export function CanvasApp() {
     peerCount: 0,
   });
   const [connectOpen, setConnectOpen] = useState(false);
+  const { data: session } = useSession();
+  const isAuthenticated = !!session?.user;
+  const isAuthenticatedRef = useRef(isAuthenticated);
   const cloudSync = useRef<CloudSyncEngine | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>("idle");
+
+  useEffect(() => {
+    isAuthenticatedRef.current = isAuthenticated;
+    cloudSync.current?.setAuthenticated(isAuthenticated);
+  }, [isAuthenticated]);
 
   const lastMoveSyncRef = useRef<Record<string, number>>({});
   function broadcastMove(kind: "widget" | "object", packet: Extract<import("@/lib/canvas/sync").SyncPacket, { id: string }>): void {
@@ -322,35 +194,22 @@ export function CanvasApp() {
     afterBoardChangeRef.current();
   }
 
+  const addObjectRef = useRef(addObject);
+  const mergeObjectToInkRef = useRef(mergeObjectToInk);
+  useEffect(() => {
+    addObjectRef.current = addObject;
+    mergeObjectToInkRef.current = mergeObjectToInk;
+  });
+
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const aiAbort = useRef<AbortController | null>(null);
-  const aiSlowTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const aiCriticalTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const aiSeq = useRef(0);
-  const aiRevision = useRef(0);
+  const boardRevisionRef = useRef(0);
+  const conductorRef = useRef<Conductor | null>(null);
+  const [agentRunning, setAgentRunning] = useState(false);
   const inkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
   const lastStrokeTimeRef = useRef<number>(0);
-  const refineFocusRef = useRef<{ rect: Rect; widgetId: string } | null>(null);
   const activeEditTargetRef = useRef<string | null>(null);
   const lockEditTargetRef = useRef(false);
-
-  const clearAiMilestoneTimers = useCallback(() => {
-    if (aiSlowTimer.current) {
-      clearTimeout(aiSlowTimer.current);
-      aiSlowTimer.current = null;
-    }
-    if (aiCriticalTimer.current) {
-      clearTimeout(aiCriticalTimer.current);
-      aiCriticalTimer.current = null;
-    }
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      clearAiMilestoneTimers();
-    };
-  }, [clearAiMilestoneTimers]);
 
   const activePointersRef = useRef<Map<number, Point>>(new Map());
   const pinchRef = useRef<{
@@ -380,7 +239,12 @@ export function CanvasApp() {
   const [modelSelectOpen, setModelSelectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
-  const [latestLog, setLatestLog] = useState<AiLogEntry | null>(null);
+  const [logs, setLogs] = useState<AiLogEntry[]>([]);
+  const [tickerState, setTickerState] = useState<GenerationTickerState>({
+    status: "idle",
+    currentMessage: "",
+    messageId: 0,
+  });
   const [manualOpen, setManualOpen] = useState(() => {
     if (typeof window === "undefined") return false;
     try {
@@ -402,7 +266,11 @@ export function CanvasApp() {
         }
         return nextModels;
       });
-      const nextActive = getActiveModel();
+      let nextActive = getActiveModel();
+      if (!nextActive && nextModels.length > 0) {
+        nextActive = nextModels[0];
+        setActiveModel(nextActive);
+      }
       setActiveModelState((prev) => (prev === nextActive ? prev : nextActive));
       const nextEffort = getReasoningEffort();
       setReasoningEffortState((prev) => (prev === nextEffort ? prev : nextEffort));
@@ -428,387 +296,180 @@ export function CanvasApp() {
     doneProvider: null,
   });
 
-  const handleAiEvent = (ev: AgentEvent) => {
-    setAiRun((prev) => {
-      switch (ev.type) {
-        case "provider_start":
-          return { ...prev, phase: "running", activeProvider: ev.provider };
-        case "provider_failed":
-          return { ...prev, activeProvider: null };
-        case "provider_done":
-          return { ...prev, activeProvider: null, doneProvider: ev.provider };
-        default:
-          return prev;
-      }
-    });
-  };
-
-  const fireAi = useCallback(async (box: Rect, userPrompt?: string) => {
-    const engineAtCall = engine;
-    const wm = widgets.current;
-    const draft = drafts.current;
-    if (!engineAtCall || !draft) return;
-
-    const config = getProviderConfig();
-    const model = getActiveModel() || models[0] || null;
-    if (!config) {
-      toast("Set up an AI provider", {
-        description: "Connect your provider to use Ask AI or Auto AI.",
-        action: {
-          label: "Open settings",
-          onClick: () => setSettingsOpen(true),
-        },
-      });
-      return;
-    }
-    if (!model) {
-      toast("Select a model", {
-        description: "Pick one of the models fetched from your provider.",
-        action: {
-          label: "Open settings",
-          onClick: () => setSettingsOpen(true),
-        },
-      });
-      return;
-    }
-
-    const caps = getModelCapabilitiesCached(model);
-    if (!caps.vision && caps.status === "verified_no_vision") {
-      toast.error("Vision Input Required", {
-        description: `Selected model "${model}" is a text-only model and cannot process canvas drawings. Drawva requires a vision-capable model.`,
-        action: {
-          label: "Choose Model",
-          onClick: () => setModelSelectOpen(true),
-        },
-      });
-      return;
-    }
-
-    clearAiMilestoneTimers();
-    setAiStatus("thinking");
-    aiAbort.current?.abort();
-    const controller = new AbortController();
-    aiAbort.current = controller;
-    const requestId = ++aiSeq.current;
-    const revision = aiRevision.current;
-
-    const viewport = engineAtCall.camera.visibleWorldRect();
-    const scene = buildScene(wm, objects.current);
-
-    const explicitRefine = Boolean(refineFocusRef.current);
-    const boxIsDump = box.w >= viewport.w * 0.75 && box.h >= viewport.h * 0.75;
-    let widgetEditTarget: import("@/lib/ai/types").WidgetEditContext | undefined = undefined;
-    if (explicitRefine && wm && refineFocusRef.current) {
-      const targetItem = wm.get(refineFocusRef.current.widgetId);
-      if (targetItem) widgetEditTarget = widgetEditFromItem(targetItem);
-    } else if (wm && !boxIsDump && box.w > 0 && box.h > 0) {
-      // Annotation proximity only: leftover selection of a distant widget must
-      // not turn an independent "Draw …" request into an in-place refine.
-      // Off-screen ink must not lock onto a widget the snapshot will not show.
-      const ANNOTATION_PX = 400;
-      const inkInView = rectsOverlap(box, viewport);
-      const selectedId = wm.getSelectedId();
-      let targetWidget: WidgetItem | null = null;
-      const selected = selectedId ? wm.get(selectedId) ?? null : null;
-      if (selected && distanceBetweenRects(box, selected) <= ANNOTATION_PX && (inkInView || rectsOverlap(selected, viewport))) {
-        targetWidget = selected;
-      } else {
-        let closestWidget: WidgetItem | null = null;
-        let minDistance = Infinity;
-        for (const w of wm.all()) {
-          if (!inkInView && !rectsOverlap(w, viewport)) continue;
-          const dist = distanceBetweenRects(box, w);
-          if (dist <= ANNOTATION_PX && dist < minDistance) {
-            minDistance = dist;
-            closestWidget = w;
-          }
-        }
-        targetWidget = closestWidget;
-      }
-      if (targetWidget) widgetEditTarget = widgetEditFromItem(targetWidget);
-    }
-
-    lockEditTargetRef.current = explicitRefine;
-
-    let effectiveBox = { ...box };
-    const boxMargin = 20;
-    if (objects.current && box.w > 0 && box.h > 0) {
-      for (const o of objects.current.all()) {
-        const isNear =
-          box.x < o.x + o.w + boxMargin &&
-          box.x + box.w > o.x - boxMargin &&
-          box.y < o.y + o.h + boxMargin &&
-          box.y + box.h > o.y - boxMargin;
-        if (isNear) {
-          effectiveBox = unionRect(effectiveBox, { x: o.x, y: o.y, w: o.w, h: o.h });
-        }
-      }
-    }
-
-    const atlas = await buildAtlas(engineAtCall, viewport, effectiveBox, wm, objects.current);
-
-    // widgetEdit must describe a widget the model can actually see. Off-screen
-    // leftover ink used to attach the wrong flowchart while the snapshot showed
-    // a different one; in_place then overwrote the neighbor.
-    if (!explicitRefine && wm) {
-      const editVisible = widgetEditTarget && rectsOverlap(widgetEditTarget.box, atlas.sourceRect);
-      const inkInSnapshot = rectsOverlap(box, atlas.sourceRect);
-      if (widgetEditTarget && !editVisible) {
-        const visible = pickProminentVisibleWidget(wm, atlas.sourceRect);
-        widgetEditTarget = visible ? widgetEditFromItem(visible) : undefined;
-      } else if (!widgetEditTarget && !inkInSnapshot) {
-        const visible = pickProminentVisibleWidget(wm, atlas.sourceRect);
-        if (visible) widgetEditTarget = widgetEditFromItem(visible);
-      }
-    }
-    activeEditTargetRef.current = widgetEditTarget?.id ?? null;
-
-    const reqTimestamp = Date.now();
-    // Placement anchors to the handwriting, not the capture/viewport. Atlas may
-    // expand changedBox to the full snapshot; that dump is what parked new
-    // widgets on top of older ones after the first generation.
-    const inkIsTight = !boxIsDump && box.w > 4 && box.h > 4;
-    const placementBox = inkIsTight ? { x: box.x, y: box.y, w: box.w, h: box.h } : atlas.changedBox;
-    const payload: AiRequest = {
-      requestId: `req-${requestId}`,
-      atlasImage: atlas.atlasImage,
-      focusInset: atlas.focusInset,
-      visibleRect: atlas.visibleRect,
-      captureRect: atlas.captureRect,
-      sourceRect: atlas.sourceRect,
-      changedBox: placementBox,
-      imageSize: atlas.imageSize,
-      imageScale: atlas.imageScale,
-      latestInput: atlas.latestInput,
-      userPrompt,
-      scene: JSON.stringify(scene),
-      trigger: userPrompt ? "manual" : "user_paused",
-      ...(widgetEditTarget ? { widgetEdit: widgetEditTarget } : {}),
-      ...(explicitRefine ? { keepPosition: true } : {}),
-      providerType: config.type,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      model,
-      reasoningEffort: getReasoningEffort(),
-      enabledPluginIds: getEnabledPlugins(),
-    };
-
-    const applyReply = async (data: AiReply & { rejected?: string[] }) => {
-      void recordAiUsage({
-        providerType: config.type || "custom",
-        modelId: model,
-        inputTokens: data.tokenUsage?.inputTokens ?? 0,
-        outputTokens: data.tokenUsage?.outputTokens ?? 0,
-        totalTokens: data.tokenUsage?.totalTokens ?? 0,
-        intent: data.intent,
-        userPrompt: payload.userPrompt,
-      });
-
-      const logEntry: AiLogEntry = {
-        timestamp: reqTimestamp,
-        requestId: payload.requestId,
-        model: payload.model || "Unknown",
-        providerType: payload.providerType,
-        attempts: data.attempts || 1,
-        status: "success",
-        atlasImage: payload.atlasImage,
-        focusInset: payload.focusInset,
-        systemPrompt: data.debug?.systemPrompt || "",
-        userPromptText: data.debug?.userPromptText || "",
-        userPromptRaw: payload.userPrompt,
-        sceneJson: payload.scene,
-        tokenUsage: data.tokenUsage,
-        response: {
-          intent: data.intent,
-          message: data.message,
-          observedText: data.observedText,
-          commands: data.commands,
-          rejected: data.rejected,
-          raw: data.debug?.rawResponse || data,
-        },
-      };
-      setLatestLog(logEntry);
-
-      if (Array.isArray(data.commands) && data.commands.length) {
-        history.current?.recordObjects();
-        history.current?.recordWidgets();
-        draft.setPending(data.commands as CanvasCommand[]);
-        await draft.accept(engineAtCall);
-        inkBoxRef.current = null;
-        afterBoardChange();
-      } else if (data.message && data.message.trim()) {
-        // Every command was rejected client-side — still honor the mandatory
-        // visible response by writing the model's message beside the input ink
-        // instead of silently showing nothing.
-        const fallback: CanvasCommand = {
-          tool: "write_text",
-          x: Math.max(0, Math.round(box.x)),
-          y: Math.max(0, Math.round(box.y + box.h + 24)),
-          text: data.message.trim().slice(0, 800),
-          fontSize: 42,
-          maxWidth: 1200,
-          lineHeight: 1.35,
-          color: "#2679b8",
-        };
-        history.current?.recordObjects();
-        draft.setPending([fallback]);
-        await draft.accept(engineAtCall);
-        afterBoardChange();
-      }
-      clearAiMilestoneTimers();
-      setAiStatus("done");
-      setAiRun((prev) => ({
-        phase: "done",
-        activeProvider: null,
-        doneProvider: prev.doneProvider,
+  const handleConductorEvent = useCallback((e: ConductorEvent) => {
+    if (e.kind === "turn_start") {
+      setAgentRunning(true);
+      setAiStatus("thinking");
+      setAiRun({
+        phase: "running",
+        activeProvider: getActiveModel(),
+        doneProvider: null,
         durationStage: "normal",
+      });
+      setTickerState((prev) => ({
+        status: "running",
+        currentMessage: "Observing canvas & handwriting…",
+        messageId: prev.messageId + 1,
       }));
-      // Auto-revert "done" badge after 3 seconds to un-clutter header and prevent overflow
-      setTimeout(() => {
-        setAiStatus("idle");
-        setAiRun((prev) => (prev.phase === "done" ? { ...prev, phase: "idle" } : prev));
-      }, 3000);
-    };
-
-    setAiStatus("thinking");
-    setAiRun({ phase: "running", activeProvider: null, doneProvider: null, durationStage: "normal" });
-
-    aiSlowTimer.current = setTimeout(() => {
-      toast.warning("Be patient, your provider is too slow, it may take time");
-      setAiRun((prev) => (prev.phase === "running" ? { ...prev, durationStage: "slow" } : prev));
-    }, 50_000);
-
-    aiCriticalTimer.current = setTimeout(() => {
-      toast.warning("Due to high traffic on your provider, it is taking a lot of time, wait for a couple of seconds");
-      setAiRun((prev) => (prev.phase === "running" ? { ...prev, durationStage: "critical" } : prev));
-    }, 105_000);
-
-    try {
-      const res = await fetch("/api/canvas/ai", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...payload, stream: true }),
-        signal: controller.signal,
-      });
-      const isStream = (res.headers.get("content-type") ?? "").includes("text/event-stream");
-      if (!res.ok || !res.body) {
-        let msg = "AI request failed";
-        try {
-          const d = await res.json();
-          msg = d.detail || d.error || msg;
-        } catch {}
-        throw new Error(parseCleanErrorMessage(msg));
+    } else if (e.kind === "step_start") {
+      setAiStatus("thinking");
+      setTickerState((prev) => ({
+        status: "running",
+        currentMessage: `Reasoning step #${e.stepNumber}…`,
+        messageId: prev.messageId + 1,
+      }));
+    } else if (e.kind === "tool_start") {
+      setAiStatus("thinking");
+      let label = `Executing ${e.name}…`;
+      if (e.name === "canvas_apply") {
+        label = e.argsSummary ? `Applying: ${e.argsSummary}` : "Applying canvas items…";
+      } else if (e.name === "canvas_snapshot") {
+        label = "Capturing canvas snapshot…";
+      } else if (e.name === "canvas_read") {
+        label = e.argsSummary ? `Reading: ${e.argsSummary}` : "Reading widget source…";
+      } else if (e.name === "canvas_patch_widget") {
+        label = "Patching widget diff…";
+      } else if (e.name === "canvas_scan") {
+        label = "Scanning canvas items…";
+      } else if (e.name === "load_plugin") {
+        label = e.argsSummary ? `Loading plugin: ${e.argsSummary}` : "Loading plugin…";
       }
-      if (requestId !== aiSeq.current) return;
-      if (aiRevision.current !== revision) return;
-      if (isStream) {
-        await applyReply(await readSse(res, handleAiEvent));
+      setTickerState((prev) => ({
+        status: "running",
+        currentMessage: label,
+        messageId: prev.messageId + 1,
+      }));
+    } else if (e.kind === "tool_end") {
+      const summaryText = e.ok ? `Done: ${e.summary || e.name}` : `Failed: ${e.name}`;
+      setTickerState((prev) => ({
+        status: "running",
+        currentMessage: summaryText,
+        messageId: prev.messageId + 1,
+      }));
+    } else if (e.kind === "text_delta") {
+      setTickerState((prev) => {
+        if (prev.currentMessage === "Composing response…") return prev;
+        return {
+          status: "running",
+          currentMessage: "Composing response…",
+          messageId: prev.messageId + 1,
+        };
+      });
+    } else if (e.kind === "log") {
+      setLogs((prev) => [e.entry, ...prev.slice(0, 19)]);
+    } else if (e.kind === "turn_end") {
+      setAgentRunning(false);
+      if (e.reason === "done") {
+        setAiStatus("done");
+        setAiRun({
+          phase: "done",
+          activeProvider: null,
+          doneProvider: getActiveModel(),
+          durationStage: "normal",
+        });
+        setTickerState((prev) => ({
+          status: "done",
+          currentMessage: "AI generation complete",
+          messageId: prev.messageId + 1,
+        }));
+        setTimeout(() => {
+          setAiStatus("idle");
+          setAiRun((prev) => (prev.phase === "done" ? { ...prev, phase: "idle" } : prev));
+          setTickerState((prev) => (prev.status === "done" ? { ...prev, status: "idle" } : prev));
+        }, 3500);
+      } else if (e.reason === "error") {
+        setAiStatus("error");
+        setAiRun({
+          phase: "error",
+          activeProvider: null,
+          doneProvider: null,
+          durationStage: "normal",
+        });
+        setTickerState((prev) => ({
+          status: "error",
+          currentMessage: e.error ? `Error: ${e.error}` : "Generation failed",
+          messageId: prev.messageId + 1,
+        }));
+        toast.error(e.error || "Agent turn failed.");
+        setTimeout(() => {
+          setAiStatus("idle");
+          setAiRun((prev) => (prev.phase === "error" ? { ...prev, phase: "idle" } : prev));
+          setTickerState((prev) => (prev.status === "error" ? { ...prev, status: "idle" } : prev));
+        }, 5000);
       } else {
-        const data = (await res.json()) as AiReply & { rejected?: string[] };
-        await applyReply(data);
-      }
-    } catch (err) {
-      clearAiMilestoneTimers();
-      if (controller.signal.aborted) return;
-      setAiStatus("error");
-      setAiRun((prev) => ({ ...prev, phase: "error", durationStage: "normal" }));
-      setTimeout(() => {
         setAiStatus("idle");
-        setAiRun((prev) => (prev.phase === "error" ? { ...prev, phase: "idle" } : prev));
-      }, 4000);
-      const desc = err instanceof Error ? parseCleanErrorMessage(err.message) : "AI request failed";
-
-      const logEntry: AiLogEntry = {
-        timestamp: reqTimestamp,
-        requestId: payload.requestId,
-        model: payload.model || "Unknown",
-        providerType: payload.providerType,
-        attempts: 3,
-        status: "error",
-        errorMessage: desc,
-        atlasImage: payload.atlasImage,
-        focusInset: payload.focusInset,
-        systemPrompt: "",
-        userPromptText: payload.userPrompt || "",
-        userPromptRaw: payload.userPrompt,
-        sceneJson: payload.scene,
-      };
-      setLatestLog(logEntry);
-
-      toast.error("Generation failed after 3 attempts", {
-        description: desc,
-      });
-      console.error("AI request failed:", err);
-    } finally {
-      clearAiMilestoneTimers();
-      if (aiAbort.current === controller) aiAbort.current = null;
-      refineFocusRef.current = null;
+        setAiRun({
+          phase: "idle",
+          activeProvider: null,
+          doneProvider: null,
+          durationStage: "normal",
+        });
+        setTickerState((prev) => ({ ...prev, status: "idle" }));
+      }
     }
-  }, [engine, models, clearAiMilestoneTimers]);
+  }, []);
 
-  function scheduleAi(box: Rect, userPrompt?: string) {
+  const handleConductorEventRef = useRef(handleConductorEvent);
+  useEffect(() => {
+    handleConductorEventRef.current = handleConductorEvent;
+  });
+
+  const handleAskAi = useCallback(() => {
+    const agent = conductorRef.current;
+    if (!agent) {
+      toast.error("AI Conductor is initializing, please wait a moment.");
+      return;
+    }
+    // Cancel and defer cloud sync so AI generation has 100% network bandwidth and 0 latency
+    cloudSync.current?.cancel();
+    const config = getProviderConfig();
+    const model = getActiveModel();
+    const isCli = config?.type === "codex" || config?.type === "antigravity";
+    if (!config || !model || (!isCli && !config.apiKey)) {
+      setSettingsOpen(true);
+      toast.info("Please configure an AI provider and select a model.");
+      return;
+    }
+
+    // Set immediate loading state for instant visual feedback on header and footer
+    setAgentRunning(true);
+    setAiStatus("thinking");
+    setAiRun({
+      phase: "running",
+      activeProvider: model,
+      doneProvider: null,
+      durationStage: "normal",
+    });
+    setTickerState((prev) => ({
+      status: "running",
+      currentMessage: "Observing canvas & handwriting…",
+      messageId: prev.messageId + 1,
+    }));
+
+    const prompt =
+      "Observe the canvas handwriting, formulas, diagrams, questions, and drawings. Provide the appropriate continuation, solution, calculation, diagram, or interactive widget.";
+    void agent.send(prompt);
+  }, []);
+
+  const scheduleAi = useCallback((_box: Rect | null, userPrompt?: string) => {
     if (aiTimer.current) clearTimeout(aiTimer.current);
     aiTimer.current = setTimeout(() => {
       aiTimer.current = null;
-      void fireAi(box, userPrompt);
+      const agent = conductorRef.current;
+      if (!agent) return;
+      cloudSync.current?.cancel();
+      const config = getProviderConfig();
+      const model = getActiveModel();
+      const isCli = config?.type === "codex" || config?.type === "antigravity";
+      if (!config || !model || (!isCli && !config.apiKey)) {
+        return;
+      }
+      const prompt =
+        userPrompt ||
+        "Observe the new drawing or ink on the canvas and generate the appropriate continuation, answer, formula, diagram, or widget.";
+      void agent.send(prompt, undefined, { headless: !userPrompt });
     }, 1200);
-  }
-
-  function askAi() {
-    const marquee = tools.current?.selection.hasSelection ? tools.current.selection.rect : null;
-    const selected = objects.current?.getSelectedGeometry() || widgets.current?.getSelectedGeometry();
-    const recentInk =
-      inkBoxRef.current &&
-      Date.now() - lastStrokeTimeRef.current < 60000 &&
-      inkBoxRef.current.w > 4 &&
-      inkBoxRef.current.h > 4;
-    // Recent handwriting wins over a leftover widget selection so Ask AI on
-    // "Draw …" below an older diagram does not treat that diagram as the box.
-    let box = marquee
-      ? { x: marquee.x, y: marquee.y, w: marquee.w, h: marquee.h }
-      : recentInk && inkBoxRef.current
-      ? { ...inkBoxRef.current }
-      : selected
-      ? { x: selected.x, y: selected.y, w: selected.w, h: selected.h }
-      : inkBoxRef.current;
-    if ((!box || box.w <= 0 || box.h <= 0) && engine) {
-      const view = engine.camera.visibleWorldRect();
-      const cx = view.x + view.w / 2;
-      const cy = view.y + view.h / 2;
-      let best: { x: number; y: number; w: number; h: number } | null = null;
-      let bestD = Infinity;
-      for (const o of objects.current?.all() ?? []) {
-        if (o.x + o.w < view.x || o.x > view.x + view.w || o.y + o.h < view.y || o.y > view.y + view.h) continue;
-        const d = Math.hypot(o.x + o.w / 2 - cx, o.y + o.h / 2 - cy);
-        if (d < bestD) {
-          bestD = d;
-          best = o;
-        }
-      }
-      if (best) box = { x: best.x, y: best.y, w: best.w, h: best.h };
-    }
-    if (!box || box.w <= 0 || box.h <= 0) {
-      const visible = engine?.camera.visibleWorldRect();
-      if (visible && engine) {
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        engine.tiles.forTiles(visible, (_canvas, tx, ty) => {
-          minX = Math.min(minX, tx * 512);
-          minY = Math.min(minY, ty * 512);
-          maxX = Math.max(maxX, (tx + 1) * 512);
-          maxY = Math.max(maxY, (ty + 1) * 512);
-        }, false);
-        if (minX !== Infinity && maxX > minX && maxY > minY) {
-          box = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
-        } else {
-          const center = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
-          box = { x: Math.round(center.x - 300), y: Math.round(center.y - 200), w: 600, h: 400 };
-        }
-      } else {
-        box = { x: 0, y: 0, w: 600, h: 400 };
-      }
-    }
-    void fireAi(box, undefined);
-  }
+  }, []);
 
   const undoRef = useRef<() => void>(() => {});
   const redoRef = useRef<() => void>(() => {});
@@ -822,19 +483,47 @@ export function CanvasApp() {
     setCanRedo(!!h && h.canRedo);
   }
 
-  function afterBoardChange() {
-    history.current?.commit();
-    syncHistoryButtons();
+  function bumpRevision() {
+    boardRevisionRef.current += 1;
+  }
+
+  const isCanvasBusy = useCallback((): boolean => {
+    if (activePointersRef.current.size > 0) return true;
+    if (tools.current?.isInteracting) return true;
+    if (conductorRef.current?.isRunning() ?? false) return true;
+    if (drafts.current?.hasPending) return true;
+    return false;
+  }, []);
+
+  const isCanvasBusyRef = useRef(isCanvasBusy);
+  useEffect(() => {
+    isCanvasBusyRef.current = isCanvasBusy;
+  });
+
+  function scheduleSave() {
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
     autosaveTimer.current = setTimeout(() => {
       autosaveTimer.current = null;
+      if (isCanvasBusyRef.current()) {
+        scheduleSave();
+        return;
+      }
       const eng = engine;
       if (eng) {
         const snapshot = serializeSnapshot(eng, widgets.current, objects.current);
         void saveAutosave(snapshot);
-        cloudSync.current?.scheduleCloudSync(snapshot, 2500);
+        if (isAuthenticated) {
+          cloudSync.current?.scheduleCloudSync(snapshot, 4000);
+        }
       }
-    }, 800);
+    }, 1200);
+  }
+
+  function afterBoardChange() {
+    bumpRevision();
+    history.current?.commit();
+    syncHistoryButtons();
+    scheduleSave();
   }
   const afterBoardChangeRef = useRef(afterBoardChange);
   useEffect(() => {
@@ -847,6 +536,7 @@ export function CanvasApp() {
     const h = history.current;
     if (!h || !h.canUndo) return;
     await h.undo();
+    bumpRevision();
     syncHistoryButtons();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
@@ -860,6 +550,7 @@ export function CanvasApp() {
     const h = history.current;
     if (!h || !h.canRedo) return;
     await h.redo();
+    bumpRevision();
     syncHistoryButtons();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
@@ -880,9 +571,7 @@ export function CanvasApp() {
     widgets.current?.clear();
     objects.current?.clear();
     inkBoxRef.current = null;
-    aiRevision.current++;
-    clearAiMilestoneTimers();
-    aiAbort.current?.abort();
+    conductorRef.current?.cancel();
     setAiStatus("idle");
     setAiRun({ phase: "idle", activeProvider: null, doneProvider: null, durationStage: "normal" });
     syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
@@ -995,17 +684,9 @@ export function CanvasApp() {
         },
         onAiRefine: (id) => {
           const item = wm.get(id);
-          if (!item || !engine) return;
-          const margin = 600;
-          const focused: Rect = {
-            x: Math.max(0, item.x - margin),
-            y: Math.max(0, item.y - margin),
-            w: Math.min(CANVAS_SIZE, item.w + margin * 2),
-            h: Math.min(CANVAS_SIZE, item.h + margin * 2),
-          };
-          refineFocusRef.current = { rect: focused, widgetId: item.id };
-          setAiStatus("thinking");
-          void fireAi(focused, `Refine the widget titled "${item.title}" using any marks around it.`);
+          if (!item) return;
+          const prompt = `Refine the widget titled "${item.title}" (ID: ${item.id}) using any surrounding marks, notes, or instructions around it.`;
+          void conductorRef.current?.send(prompt);
           setAutoOn(false);
         },
       },
@@ -1081,7 +762,7 @@ export function CanvasApp() {
           }
           afterBoardChangeRef.current();
         },
-        onMerge: (id) => mergeObjectToInk(id),
+        onMerge: (id) => mergeObjectToInkRef.current(id),
       },
     });
     objects.current = om;
@@ -1184,7 +865,7 @@ export function CanvasApp() {
     draft.setRenderer("write_text", (_eng, cmd) => {
       if (cmd.tool !== "write_text") return;
       const block = renderTextBlock(cmd.text, cmd.color, cmd.fontSize, cmd.maxWidth);
-      addObject({
+      addObjectRef.current({
         id: `text-${Date.now()}`,
         kind: "text",
         x: cmd.x,
@@ -1206,7 +887,7 @@ export function CanvasApp() {
       if (cmd.tool !== "draw_formula") return;
       const rendered = await renderFormula(cmd.latex, cmd.fontSize, cmd.color);
       if (rendered.canvas.width > 0 && rendered.canvas.height > 0) {
-        addObject({
+        addObjectRef.current({
           id: `formula-${Date.now()}`,
           kind: "formula",
           x: cmd.x,
@@ -1228,7 +909,7 @@ export function CanvasApp() {
       if (cmd.tool !== "plot_function") return;
       const canvas = bakePlotObject(cmd);
       if (canvas.width > 0 && canvas.height > 0) {
-        addObject({
+        addObjectRef.current({
           id: `plot-${Date.now()}`,
           kind: "plot",
           x: cmd.x,
@@ -1249,7 +930,7 @@ export function CanvasApp() {
     draft.setRenderer("animate_scene", (_eng, cmd) => {
       if (cmd.tool !== "animate_scene") return;
       const scene = (cmd as { scene?: import("@/lib/canvas/animation").AnimationScene }).scene;
-      addObject({
+      addObjectRef.current({
         id: `animation-${Date.now()}`,
         kind: "animation",
         x: cmd.x,
@@ -1320,6 +1001,22 @@ export function CanvasApp() {
       setMode("select");
     });
     drafts.current = draft;
+
+    const agent = new Conductor({
+      engine,
+      widgets: wm,
+      objects: om,
+      history: boardHistory,
+      draft,
+      camera: engine.camera,
+      provider: () => getProviderConfig(),
+      getRevision: () => boardRevisionRef.current,
+      onEvent: (e) => handleConductorEventRef.current(e),
+      enabledPluginIds: () => getEnabledPlugins(),
+      afterBoardChange: () => afterBoardChangeRef.current(),
+      getInkBox: () => inkBoxRef.current,
+    });
+    conductorRef.current = agent;
 
     let lastCamKey = "";
     const sync = () => {
@@ -1477,7 +1174,7 @@ export function CanvasApp() {
         objects.current?.remove(id);
       },
       onRemoteObjectMerge: (id) => {
-        void mergeObjectToInk(id, { silent: true });
+        void mergeObjectToInkRef.current(id, { silent: true });
       },
       onRemoteWidgetAdd: (w) => {
         void hydrateAndAddRemoteWidget(w);
@@ -1492,17 +1189,16 @@ export function CanvasApp() {
           id,
           w,
           h,
-          contentW ?? currentItem.contentW,
-          contentH ?? currentItem.contentH,
+          contentW,
+          contentH,
           userResized ?? currentItem.userResized,
-          resizeMode ?? currentItem.resizeMode
+          resizeMode ?? currentItem.resizeMode,
         );
       },
       onRemoteWidgetRemove: (id) => {
         widgets.current?.remove(id);
       },
       onRemoteClear: () => {
-        if (!engine) return;
         engine.tiles.clear();
         engine.requestRender();
         widgets.current?.clear();
@@ -1570,7 +1266,11 @@ export function CanvasApp() {
       }
     });
 
-    const cs = new CloudSyncEngine((st) => setCloudStatus(st));
+    const cs = new CloudSyncEngine({
+      onStatusChange: (st) => setCloudStatus(st),
+      isBusy: () => isCanvasBusyRef.current(),
+      isAuthenticated: isAuthenticatedRef.current,
+    });
     cloudSync.current = cs;
 
     return () => {
@@ -1591,6 +1291,9 @@ export function CanvasApp() {
       objects.current = null;
       drafts.current = null;
       history.current = null;
+      agent.cancel();
+      conductorRef.current = null;
+      setAgentRunning(false);
     };
   }, [engine]);
 
@@ -1610,31 +1313,42 @@ export function CanvasApp() {
         history.current?.reset();
       }
 
-      // 2. Cold Path: Asynchronously check and sync with Neon Cloud DB
-      try {
-        const cloudRes = await fetchCloudCanvas();
-        if (cancelled) return;
-        if (cloudRes?.data) {
-          const cloudSavedAt = cloudRes.savedAt || 0;
-          const localSavedAt = localSaved?.savedAt || 0;
-          if (cloudSavedAt > localSavedAt) {
-            await restoreSnapshot(engine, widgets.current, objects.current, cloudRes.data);
-            history.current?.reset();
-            void saveAutosave(cloudRes.data);
-          } else if (localSaved && localSavedAt > cloudSavedAt) {
-            cloudSync.current?.scheduleCloudSync(localSaved, 500);
+      // 2. Cold Path: Asynchronously check and sync with Neon Cloud DB only if authenticated
+      if (isAuthenticated) {
+        try {
+          const cloudRes = await fetchCloudCanvas();
+          if (cancelled) return;
+          if (cloudRes?.data) {
+            const cloudSavedAt = cloudRes.savedAt || 0;
+            const localSavedAt = localSaved?.savedAt || 0;
+            const cloudHash = computeSnapshotHash(cloudRes.data);
+            const localHash = computeSnapshotHash(localSaved);
+
+            if (cloudHash === localHash) {
+              // Already completely in sync! Mark clean so tab switches don't trigger saves
+              cloudSync.current?.setLastSyncedHash(cloudHash);
+            } else if (cloudSavedAt > localSavedAt) {
+              await restoreSnapshot(engine, widgets.current, objects.current, cloudRes.data);
+              history.current?.reset();
+              void saveAutosave(cloudRes.data);
+              cloudSync.current?.setLastSyncedHash(cloudHash);
+            } else if (localSaved && localSavedAt > cloudSavedAt) {
+              cloudSync.current?.setLastSyncedHash(cloudHash);
+              cloudSync.current?.scheduleCloudSync(localSaved, 3000);
+            }
+          } else if (localSaved) {
+            cloudSync.current?.scheduleCloudSync(localSaved, 3000);
           }
-        } else if (localSaved) {
-          cloudSync.current?.scheduleCloudSync(localSaved, 1000);
+        } catch (err) {
+          console.warn("Cloud sync initial resolution:", err);
         }
-      } catch (err) {
-        console.warn("Cloud sync initial resolution:", err);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [engine]);
+  }, [engine, isAuthenticated]);
+
 
   useEffect(() => {
     tools.current?.setMode(mode);
@@ -1776,8 +1490,8 @@ export function CanvasApp() {
       const screenMaxWidth = 540;
       const maxWidth = Math.max(fontSize * 4, Math.round(screenMaxWidth / scale));
       const block = renderTextBlock(textValue, color, fontSize, maxWidth);
-      addObject({
-        id: `text-${Date.now()}`,
+      addObjectRef.current({
+        id: `obj-text-${Date.now()}`,
         kind: "text",
         x: textAnchor.x,
         y: textAnchor.y,
@@ -1806,7 +1520,7 @@ export function CanvasApp() {
     setTextOpen(false);
     setTextValue("");
     setTextAnchor(null);
-  }, [engine, textAnchor, textValue, color, addObject]);
+  }, [engine, textAnchor, textValue, color, scheduleAi]);
 
   const isTidyingRef = useRef(false);
 
@@ -2049,9 +1763,6 @@ export function CanvasApp() {
         clearTimeout(aiTimer.current);
         aiTimer.current = null;
       }
-      clearAiMilestoneTimers();
-      aiAbort.current?.abort();
-      aiRevision.current++;
     }
     if (mode === "text") {
       setTextAnchor(world);
@@ -2143,7 +1854,6 @@ export function CanvasApp() {
           }
           lastStrokeTimeRef.current = now;
           const currentInkBox = { ...inkBoxRef.current };
-          aiRevision.current++;
           afterBoardChange();
           if (appState.autoOn) scheduleAi(currentInkBox);
         } else {
@@ -2228,7 +1938,8 @@ export function CanvasApp() {
         aiRun={aiRun}
         autoOn={autoOn}
         onAutoChange={setAutoOn}
-        onAskAi={askAi}
+        onAskAi={handleAskAi}
+        agentRunning={agentRunning}
         models={models}
         activeModel={activeModel}
         onModelChange={handleModelChange}
@@ -2300,7 +2011,13 @@ export function CanvasApp() {
         )}
       </div>
 
-      <CanvasFooter onZoomIn={() => zoomBy(-100)} onZoomOut={() => zoomBy(100)} onReset={resetView} />
+      <CanvasFooter
+        onZoomIn={() => zoomBy(-100)}
+        onZoomOut={() => zoomBy(100)}
+        onReset={resetView}
+        tickerState={tickerState}
+        onOpenLogs={() => setLogsOpen(true)}
+      />
 
       <input
         ref={fileRef}
@@ -2338,8 +2055,9 @@ export function CanvasApp() {
       <LogsDialog
         open={logsOpen}
         onOpenChange={setLogsOpen}
-        log={latestLog}
-        onClearLogs={() => setLatestLog(null)}
+        logs={logs}
+        log={logs[0] || null}
+        onClearLogs={() => setLogs([])}
       />
       <ConnectDialog
         open={connectOpen}

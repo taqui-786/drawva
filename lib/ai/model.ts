@@ -244,3 +244,37 @@ export function createChatModel({
     }
   }
 }
+
+export function isRateLimitError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const rec = err as Record<string, unknown>;
+  const status = Number(rec.status || rec.statusCode || 0);
+  const lcCode = String(rec.lc_error_code || "");
+
+  return (
+    status === 429 ||
+    lcCode === "MODEL_RATE_LIMIT" ||
+    msg.includes("429") ||
+    msg.includes("rate limit") ||
+    msg.includes("too many requests") ||
+    msg.includes("capacity")
+  );
+}
+
+export function isFatalAuthError(err: unknown): boolean {
+  if (!err) return false;
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  const rec = err as Record<string, unknown>;
+  const status = Number(rec.status || rec.statusCode || 0);
+
+  return (
+    status === 401 ||
+    status === 403 ||
+    msg.includes("401") ||
+    msg.includes("403") ||
+    msg.includes("unauthorized") ||
+    msg.includes("api key not valid") ||
+    msg.includes("invalid api key")
+  );
+}
