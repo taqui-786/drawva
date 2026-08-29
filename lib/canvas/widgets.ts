@@ -156,7 +156,6 @@ export class WidgetManager {
         box-shadow: none !important;
         background: transparent !important;
       }
-      .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell:hover,
       .drawva-widget-shell[data-selected="true"],
       .drawva-widget-shell[data-status="draft"] {
         border-color: var(--primary) !important;
@@ -164,11 +163,21 @@ export class WidgetManager {
         border-width: 2px !important;
         box-shadow: none !important;
       }
-      .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell:hover .drawva-widget-chrome,
+      .drawva-widget-host[data-mode="select"] > .drawva-widget-shell:hover .drawva-widget-chrome,
       .drawva-widget-shell[data-selected="true"] .drawva-widget-chrome,
       .drawva-widget-shell[data-status="draft"] .drawva-widget-chrome {
         display: flex !important;
         pointer-events: auto !important;
+      }
+      .drawva-widget-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-widget-left-group,
+      .drawva-widget-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-widget-right-group {
+        display: none !important;
+      }
+      .drawva-widget-shell[data-selected="true"] .drawva-widget-left-group,
+      .drawva-widget-shell[data-selected="true"] .drawva-widget-right-group,
+      .drawva-widget-shell[data-status="draft"] .drawva-widget-left-group,
+      .drawva-widget-shell[data-status="draft"] .drawva-widget-right-group {
+        display: flex !important;
       }
       .drawva-widget-side-actions {
         display: none !important;
@@ -190,13 +199,11 @@ export class WidgetManager {
         z-index: 10;
         transform-origin: 0 0;
       }
-      .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell[data-narrow="true"]:hover .drawva-widget-side-actions,
       .drawva-widget-shell[data-narrow="true"][data-selected="true"] .drawva-widget-side-actions,
       .drawva-widget-shell[data-narrow="true"][data-status="draft"] .drawva-widget-side-actions {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-widget-host:not([data-mode="hand"]) > .drawva-widget-shell:hover .drawva-widget-resize,
       .drawva-widget-shell[data-selected="true"] .drawva-widget-resize,
       .drawva-widget-shell[data-status="draft"] .drawva-widget-resize {
         display: inline-flex !important;
@@ -496,17 +503,17 @@ export class WidgetManager {
     }
 
     if (chrome) {
-      chrome.style.display = active ? "flex" : "none";
+      chrome.style.display = hand ? (isDraft ? "flex" : "none") : active ? "flex" : "";
     }
     if (sideActions) {
       const isNarrow = shell?.dataset.narrow === "true";
-      sideActions.style.display = active && isNarrow ? "flex" : "none";
+      sideActions.style.display = !hand && active && isNarrow ? "flex" : "none";
     }
     if (dragBar) {
-      dragBar.style.display = active ? "inline-flex" : "none";
+      dragBar.style.display = hand && !isDraft ? "none" : "inline-flex";
     }
     if (acceptBtn) {
-      acceptBtn.style.display = isDraft && active ? "inline-flex" : "none";
+      acceptBtn.style.display = isDraft ? "inline-flex" : "none";
     }
     if (resizeHandle) {
       resizeHandle.style.display = active ? "inline-flex" : "none";
@@ -685,6 +692,7 @@ export class WidgetManager {
       "position:absolute;left:0;top:0;height:32px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;touch-action:none;transform-origin:0 0;";
 
     const leftGroup = document.createElement("div");
+    leftGroup.className = "drawva-widget-left-group";
     leftGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
     const closeBtn = document.createElement("button");
@@ -708,6 +716,7 @@ export class WidgetManager {
       "position:absolute;left:50%;transform:translateX(-50%);display:inline-flex;align-items:center;justify-content:center;cursor:grab;pointer-events:auto;user-select:none;touch-action:none;";
 
     const rightGroup = document.createElement("div");
+    rightGroup.className = "drawva-widget-right-group";
     rightGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
     const acceptBtn = document.createElement("button");

@@ -130,7 +130,6 @@ export class ObjectManager {
         box-shadow: none !important;
         background: transparent !important;
       }
-      .drawva-object-host:not([data-mode="hand"]) > .drawva-object-shell:hover,
       .drawva-object-shell[data-selected="true"],
       .drawva-object-shell[data-status="draft"] {
         border-color: var(--primary) !important;
@@ -138,11 +137,21 @@ export class ObjectManager {
         border-width: 2px !important;
         box-shadow: none !important;
       }
-      .drawva-object-host:not([data-mode="hand"]) > .drawva-object-shell:hover .drawva-object-chrome,
+      .drawva-object-host[data-mode="select"] > .drawva-object-shell:hover .drawva-object-chrome,
       .drawva-object-shell[data-selected="true"] .drawva-object-chrome,
       .drawva-object-shell[data-status="draft"] .drawva-object-chrome {
         display: flex !important;
         pointer-events: auto !important;
+      }
+      .drawva-object-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-object-left-group,
+      .drawva-object-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-object-right-group {
+        display: none !important;
+      }
+      .drawva-object-shell[data-selected="true"] .drawva-object-left-group,
+      .drawva-object-shell[data-selected="true"] .drawva-object-right-group,
+      .drawva-object-shell[data-status="draft"] .drawva-object-left-group,
+      .drawva-object-shell[data-status="draft"] .drawva-object-right-group {
+        display: flex !important;
       }
       .drawva-object-side-actions {
         display: none !important;
@@ -164,13 +173,11 @@ export class ObjectManager {
         z-index: 10;
         transform-origin: 0 0;
       }
-      .drawva-object-host:not([data-mode="hand"]) > .drawva-object-shell[data-narrow="true"]:hover .drawva-object-side-actions,
       .drawva-object-shell[data-narrow="true"][data-selected="true"] .drawva-object-side-actions,
       .drawva-object-shell[data-narrow="true"][data-status="draft"] .drawva-object-side-actions {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-object-host:not([data-mode="hand"]) > .drawva-object-shell:hover .drawva-object-resize,
       .drawva-object-shell[data-selected="true"] .drawva-object-resize,
       .drawva-object-shell[data-status="draft"] .drawva-object-resize {
         display: inline-flex !important;
@@ -375,26 +382,25 @@ export class ObjectManager {
     const hand = this.mode === "hand";
     const select = this.mode === "select";
     const isSelected = this.selectedId === id;
-    const isHovered = !hand && shell?.dataset.hovered === "true";
     const isDraft = item?.status === "draft";
-    const active = isSelected || isHovered;
+    const active = isSelected || isDraft;
     this.hostRoot.style.zIndex = active || isDraft || select ? "40" : "20";
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
       // Hand is pan-only: clicks pass through objects to the canvas.
       shell.style.pointerEvents = hand ? "none" : active || isDraft || select ? "auto" : "none";
-      shell.style.cursor = hand ? "grab" : select ? "grab" : "default";
+      shell.style.cursor = hand ? "grab" : select ? "default" : "default";
       shell.style.borderColor = !hand && (active || isDraft) ? "var(--primary)" : "transparent";
       shell.style.borderStyle = !hand && (active || isDraft) ? "dotted" : "none";
       shell.style.borderWidth = "2px";
       shell.style.boxShadow = "none";
     }
-    if (chrome) chrome.style.display = active || isDraft ? "flex" : "none";
+    if (chrome) chrome.style.display = hand ? (isDraft ? "flex" : "none") : active || isDraft ? "flex" : "";
     if (sideActions) {
       const isNarrow = shell?.dataset.narrow === "true";
-      sideActions.style.display = (active || isDraft) && isNarrow ? "flex" : "none";
+      sideActions.style.display = !hand && (active || isDraft) && isNarrow ? "flex" : "none";
     }
-    if (dragBar) dragBar.style.display = active || isDraft ? "inline-flex" : "none";
+    if (dragBar) dragBar.style.display = hand && !isDraft ? "none" : "inline-flex";
     if (resizeHandle) resizeHandle.style.display = active || isDraft ? "inline-flex" : "none";
     if (resizeWidth) resizeWidth.style.display = active || isDraft ? "inline-flex" : "none";
     if (resizeHeight) resizeHeight.style.display = active || isDraft ? "inline-flex" : "none";
@@ -502,6 +508,7 @@ export class ObjectManager {
       "position:absolute;left:0;top:0;height:32px;display:none;align-items:center;justify-content:space-between;padding:0 2px;z-index:10;pointer-events:none;touch-action:none;transform-origin:0 0;";
 
     const leftGroup = document.createElement("div");
+    leftGroup.className = "drawva-object-left-group";
     leftGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
     const removeBtn = document.createElement("button");
@@ -586,6 +593,7 @@ export class ObjectManager {
       "position:absolute;left:50%;transform:translateX(-50%);pointer-events:auto;user-select:none;touch-action:none;";
 
     const rightGroup = document.createElement("div");
+    rightGroup.className = "drawva-object-right-group";
     rightGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
     const kindLabel = item.kind === "text" ? "Text" : item.kind === "formula" ? "LaTeX" : item.kind === "plot" ? "Plot" : "Source";

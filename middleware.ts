@@ -12,8 +12,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(signInUrl);
   }
 
-  // Redirect already authenticated users from /signin to /canvas
-  if (sessionCookie && pathname === "/signin") {
+  // Redirect authenticated users from landing page or /signin to /canvas
+  if (sessionCookie && (pathname === "/" || pathname === "/signin")) {
     return NextResponse.redirect(new URL("/canvas", request.url));
   }
 
@@ -21,5 +21,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/canvas/:path*", "/signin"],
+  matcher: ["/", "/signin", "/canvas/:path*"],
 };
