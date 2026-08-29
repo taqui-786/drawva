@@ -34,7 +34,7 @@ const canvasSnapshotSchema = z.object({
 });
 
 const canvasApplySchema = z.object({
-  baseRevision: z.number(),
+  baseRevision: z.number().optional(),
   commands: z.array(z.record(z.string(), z.unknown())).min(1).max(16),
   note: z.string().optional(),
 });
@@ -52,7 +52,7 @@ const canvasReadSchema = z.object({
 
 const canvasPatchWidgetSchema = z.object({
   objectId: z.string(),
-  baseRevision: z.number(),
+  baseRevision: z.number().optional(),
   patch: z.string(),
 });
 

@@ -112,8 +112,9 @@ Return exactly one standard JSON object (no markdown fences, no leading/trailing
 
 Available Tools:
 1. canvas_apply: Apply drawing/writing/widgets to the canvas.
-   Arguments: {"baseRevision": ${currentRev}, "commands": [{"tool": "html_widget"|"write_text"|"draw_formula"|"plot_function"|"diagram_source"|"draw"|"erase", "x": number, "y": number, ...}]}
+   Arguments: {"baseRevision": ${currentRev}, "commands": [{"tool": "animate_scene"|"html_widget"|"write_text"|"draw_formula"|"plot_function"|"diagram_source"|"draw"|"erase", "x": number, "y": number, ...}]}
    Command schemas:
+   - animate_scene: { "tool": "animate_scene", "x": number, "y": number, "w": number, "h": number, "objects": Array<Record<string, unknown>>, "motions": Array<Record<string, unknown>> }
    - html_widget: { "tool": "html_widget", "title": string, "html": string, "x": number, "y": number, "w": number, "h": number }
    - write_text: { "tool": "write_text", "text": string, "x": number, "y": number, "fontSize"?: number }
    - draw_formula: { "tool": "draw_formula", "latex": string, "x": number, "y": number, "fontSize"?: number }

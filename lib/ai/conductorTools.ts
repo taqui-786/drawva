@@ -191,16 +191,6 @@ function commandBox(cmd: CanvasCommand): { objectId: string; kind: string; box: 
 
 async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const currentRevision = deps.getRevision();
-  const rawBase = args.baseRevision;
-  const baseRevision =
-    typeof rawBase === "number" && Number.isFinite(rawBase)
-      ? rawBase
-      : typeof rawBase === "string" && !isNaN(Number(rawBase))
-      ? Number(rawBase)
-      : null;
-  if (baseRevision === null || baseRevision !== currentRevision) {
-    return { ok: false, code: "REVISION_CONFLICT", currentRevision };
-  }
   const raw = Array.isArray(args.commands) ? args.commands : [];
   const ctx = applyContext(deps);
   const { commands, rejected } = validateCommands(raw, ctx);
@@ -300,11 +290,6 @@ async function execRead(args: Record<string, unknown>, deps: ConductorToolDeps) 
 
 async function execPatch(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const objectId = String(args.objectId || "");
-  const baseRevision = Number(args.baseRevision);
-  const currentRevision = deps.getRevision();
-  if (!Number.isFinite(baseRevision) || baseRevision !== currentRevision) {
-    return { ok: false, code: "REVISION_CONFLICT", currentRevision };
-  }
   const widget = deps.widgets.get(objectId);
   if (!widget) return toolError("OBJECT_NOT_FOUND", `No widget with id ${objectId}.`, { objectId });
   const patch = String(args.patch || "");

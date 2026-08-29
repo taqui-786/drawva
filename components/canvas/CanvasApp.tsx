@@ -1796,26 +1796,31 @@ export function CanvasApp() {
           clearTimeout(aiTimer.current);
           aiTimer.current = null;
         }
+        const eraserBox = { ...drawingRef.current };
         drawingRef.current = null;
-        afterBoardChange();
+        const hasErased = eraserBox.w > 1 || eraserBox.h > 1 || changed;
+        if (hasErased && !changed) afterBoardChange();
       } else {
         const isDrawing = ["pen", "highlighter", "rect", "ellipse", "arrow"].includes(mode);
         if (isDrawing) {
           const singleStrokeBox = { ...drawingRef.current };
           drawingRef.current = null;
-          const now = Date.now();
-          if (
-            inkBoxRef.current &&
-            now - lastStrokeTimeRef.current < 25000
-          ) {
-            inkBoxRef.current = unionRect(inkBoxRef.current, singleStrokeBox);
-          } else {
-            inkBoxRef.current = singleStrokeBox;
+          const hasDrawn = singleStrokeBox.w > 1 || singleStrokeBox.h > 1 || changed;
+          if (hasDrawn) {
+            const now = Date.now();
+            if (
+              inkBoxRef.current &&
+              now - lastStrokeTimeRef.current < 25000
+            ) {
+              inkBoxRef.current = unionRect(inkBoxRef.current, singleStrokeBox);
+            } else {
+              inkBoxRef.current = singleStrokeBox;
+            }
+            lastStrokeTimeRef.current = now;
+            const currentInkBox = { ...inkBoxRef.current };
+            if (!changed) afterBoardChange();
+            if (appState.autoOn) scheduleAi(currentInkBox);
           }
-          lastStrokeTimeRef.current = now;
-          const currentInkBox = { ...inkBoxRef.current };
-          afterBoardChange();
-          if (appState.autoOn) scheduleAi(currentInkBox);
         } else {
           drawingRef.current = null;
         }
