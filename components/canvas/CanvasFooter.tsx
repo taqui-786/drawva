@@ -102,8 +102,8 @@ export function CanvasFooter({
                 <span className="size-2 rounded-full bg-destructive shrink-0 shadow-xs shadow-destructive/50" />
               )}
 
-              {/* Flexible ticker container with vertical conveyor/stack animation */}
-              <div className="min-w-0 flex-1 w-full max-w-70 sm:max-w-110 md:max-w-145 lg:max-w-190 h-4 overflow-hidden relative flex items-center text-left">
+              {/* Responsive ticker container with vertical conveyor/stack animation */}
+              <div className="w-44 sm:w-72 md:w-96 lg:w-[480px] xl:w-[560px] h-4 overflow-hidden relative flex items-center text-left">
                 <AnimatePresence mode="popLayout" initial={false}>
                   <motion.div
                     key={tickerState.messageId}

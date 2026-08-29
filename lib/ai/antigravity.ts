@@ -110,12 +110,23 @@ export async function runAntigravityCli(opts: AntigravityRunOptions): Promise<Ag
     ? `${opts.systemPrompt}\n\nCanvas Image: See attached file at ${tempImagePath}\n\nIMPORTANT: Return ONLY a valid JSON object matching the required schema.\n\nInput Context:\n${opts.userJson}`
     : `${opts.systemPrompt}\n\nIMPORTANT: Return ONLY a valid JSON object matching the required schema.\n\nInput Context:\n${opts.userJson}`;
 
-  const args = ["-p", prompt, "--output-format", "json"];
+  const args = [
+    "--input-format", "text",
+    "--output-format", "json",
+    "--dangerously-skip-permissions",
+    "--disable-slash-commands",
+  ];
+
+  const hasEffortSuffix = opts.model && /-(high|medium|low|none|minimal|thinking)$/i.test(opts.model);
 
   if (opts.model && opts.model !== "default") {
-    args.push("--model", opts.model);
+    let selectedModel = opts.model;
+    if (hasEffortSuffix && opts.reasoningEffort && opts.reasoningEffort !== "default") {
+      selectedModel = selectedModel.replace(/-(high|medium|low)$/i, `-${opts.reasoningEffort}`);
+    }
+    args.push("--model", selectedModel);
   }
-  if (opts.reasoningEffort && opts.reasoningEffort !== "default") {
+  if (opts.reasoningEffort && opts.reasoningEffort !== "default" && !hasEffortSuffix) {
     args.push("--effort", opts.reasoningEffort);
   }
 
@@ -153,6 +164,9 @@ export async function runAntigravityCli(opts: AntigravityRunOptions): Promise<Ag
           clearTimeout(timer);
           resolve({ stdout: out, stderr: err, code: c });
         });
+
+        child.stdin.write(prompt);
+        child.stdin.end();
       }
     );
 

@@ -733,12 +733,21 @@ export function fitWidgetGeometry(
 
   // Refinement mode: snap ONLY if there is an explicit matched target or widgetEditBox
   const explicitTarget = matchedTarget || widgetEditBox;
+  const isSpatialMatch = Boolean(
+    matchedTarget &&
+    !isRelativeSide &&
+    (
+      Boolean(cmd.targetId) ||
+      (typeof cmd.title === "string" && matchedTarget.title && cmd.title.toLowerCase().trim() === matchedTarget.title.toLowerCase().trim()) ||
+      (hasExplicitCoords && Math.hypot(Number(rawCmdX) - matchedTarget.x, Number(rawCmdY) - matchedTarget.y) < 200)
+    )
+  );
   const snapInPlace =
     explicitTarget !== null &&
     explicitTarget !== undefined &&
     explicitTarget.w > 0 &&
     explicitTarget.h > 0 &&
-    (placement === "in_place" || planSaysReplace || Boolean(cmd.targetId) || (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords));
+    (placement === "in_place" || planSaysReplace || Boolean(cmd.targetId) || isSpatialMatch || (!reposition && !isRelativeSide && !isTargetPlacement && !hasExplicitCoords));
 
   if (snapInPlace && explicitTarget) {
     cmd.placement = "in_place";
