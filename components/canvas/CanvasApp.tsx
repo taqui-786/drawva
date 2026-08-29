@@ -233,7 +233,7 @@ async function readSse(
           else if (eventName === "result") result = data as AiReply & { rejected?: string[] };
           else if (eventName === "error") {
             const errData = data as { error?: string; detail?: string };
-            const rawErr = errData.detail || errData.error || "AI request failed";
+            const rawErr = errData.error || errData.detail || "AI request failed";
             throw new Error(parseCleanErrorMessage(rawErr));
           }
         }
