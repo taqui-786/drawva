@@ -17,9 +17,6 @@
 // postMessage; the parent origin is validated before any reply is sent.
 (() => {
   const MAX_HTML_LENGTH = 200000;
-  const MAX_SNAPSHOT_DIMENSION = 4000;
-  const MAX_SNAPSHOT_PIXELS = 12000000;
-  const MAX_SNAPSHOT_DATA_URL = 28 * 1024 * 1024;
 
   const requestedParentOrigin = new URL(location.href).searchParams.get("parent-origin");
   let parentOrigin = null;
@@ -27,7 +24,7 @@
     const u = new URL(requestedParentOrigin);
     if (u.origin === requestedParentOrigin) parentOrigin = u.origin;
   } catch {}
-  if (!parentOrigin) parentOrigin = location.origin; // same-origin fallback (dev)
+  if (!parentOrigin) parentOrigin = location.origin;
 
   const inner = document.createElement("iframe");
   inner.setAttribute("sandbox", "allow-scripts allow-popups allow-popups-to-escape-sandbox");
@@ -38,14 +35,108 @@
   function writeInner(html) {
     const autoResizeScript = `<script>
       (function() {
+        var runtimeActive = true;
+        var pendingAnimationFrames = new Map();
+        var nativeAnimationFrames = new Map();
+        var pausedAnimations = new WeakSet();
+        var pausedSvgRoots = new WeakSet();
+        var nativeRequestAnimationFrame = window.requestAnimationFrame.bind(window);
+        var nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
+        var nextAnimationFrameId = 1;
+
+        function scheduleAnimationFrame(id) {
+          var callback = pendingAnimationFrames.get(id);
+          if (!callback || !runtimeActive || nativeAnimationFrames.has(id)) return;
+          var nativeId = nativeRequestAnimationFrame(function(timestamp) {
+            nativeAnimationFrames.delete(id);
+            if (!runtimeActive || !pendingAnimationFrames.has(id)) return;
+            pendingAnimationFrames.delete(id);
+            callback(timestamp);
+          });
+          nativeAnimationFrames.set(id, nativeId);
+        }
+
+        window.requestAnimationFrame = function(callback) {
+          if (typeof callback !== 'function') throw new TypeError('Callback must be a function');
+          var id = nextAnimationFrameId++;
+          pendingAnimationFrames.set(id, callback);
+          scheduleAnimationFrame(id);
+          return id;
+        };
+
+        window.cancelAnimationFrame = function(id) {
+          pendingAnimationFrames.delete(id);
+          var nativeId = nativeAnimationFrames.get(id);
+          if (nativeId === undefined) return;
+          nativeAnimationFrames.delete(id);
+          nativeCancelAnimationFrame(nativeId);
+        };
+
+        function setRuntimeActive(active) {
+          if (runtimeActive !== active) {
+            runtimeActive = active;
+            if (active) {
+              for (var id of pendingAnimationFrames.keys()) scheduleAnimationFrame(id);
+            } else {
+              for (var nativeId of nativeAnimationFrames.values()) nativeCancelAnimationFrame(nativeId);
+              nativeAnimationFrames.clear();
+            }
+          }
+          if (active) {
+            document.documentElement.classList.remove('drawva-widget-paused');
+            if (document.getAnimations) {
+              try {
+                var anims = document.getAnimations();
+                for (var i = 0; i < anims.length; i++) {
+                  var a = anims[i];
+                  if (!pausedAnimations.has(a)) continue;
+                  pausedAnimations.delete(a);
+                  try { a.play(); } catch (e) {}
+                }
+              } catch (e) {}
+            }
+            var svgs = document.querySelectorAll('svg');
+            for (var j = 0; j < svgs.length; j++) {
+              var svg = svgs[j];
+              if (!pausedSvgRoots.has(svg)) continue;
+              pausedSvgRoots.delete(svg);
+              try { svg.unpauseAnimations(); } catch (e) {}
+            }
+            return;
+          }
+          if (document.getAnimations) {
+            try {
+              var anims = document.getAnimations();
+              for (var i = 0; i < anims.length; i++) {
+                var a = anims[i];
+                if (a.playState !== 'running') continue;
+                try {
+                  a.pause();
+                  pausedAnimations.add(a);
+                } catch (e) {}
+              }
+            } catch (e) {}
+          }
+          var svgs = document.querySelectorAll('svg');
+          for (var j = 0; j < svgs.length; j++) {
+            var svg = svgs[j];
+            if (typeof svg.pauseAnimations !== 'function') continue;
+            try {
+              svg.pauseAnimations();
+              pausedSvgRoots.add(svg);
+            } catch (e) {}
+          }
+          document.documentElement.classList.add('drawva-widget-paused');
+        }
+
         function postSnapshotResult(reqId, dataUrl, w, h) {
           window.parent.postMessage({ type: 'drawva-widget-inner-snapshot', reqId: reqId, dataUrl: dataUrl, w: w, h: h }, '*');
         }
 
         function svgNaturalSize(svg) {
-          const r = svg.getBoundingClientRect();
-          let w = parseFloat(svg.getAttribute('width')) || 0;
-          let h = parseFloat(svg.getAttribute('height')) || 0;
+          var r = svg.getBoundingClientRect();
+          var w = parseFloat(svg.getAttribute('width')) || 0;
+          var h = parseFloat(svg.getAttribute('height')) || 0;
           if ((!w || !h) && svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width > 0) {
             w = svg.viewBox.baseVal.width;
             h = svg.viewBox.baseVal.height;
@@ -58,15 +149,15 @@
         }
 
         function cloneLiveSvg(svg) {
-          const clone = svg.cloneNode(true);
+          var clone = svg.cloneNode(true);
           clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
           clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-          const nat = svgNaturalSize(svg);
+          var nat = svgNaturalSize(svg);
           clone.setAttribute('width', String(nat.w));
           clone.setAttribute('height', String(nat.h));
-          const css = Array.from(document.querySelectorAll('style')).map(function(s) { return s.textContent || ''; }).join('\\n');
+          var css = Array.from(document.querySelectorAll('style')).map(function(s) { return s.textContent || ''; }).join('\\n');
           if (css.trim()) {
-            const styleTag = document.createElementNS('http://www.w3.org/2000/svg', 'style');
+            var styleTag = document.createElementNS('http://www.w3.org/2000/svg', 'style');
             styleTag.textContent = css;
             clone.insertBefore(styleTag, clone.firstChild);
           }
@@ -76,11 +167,11 @@
         function svgToImage(svg) {
           return new Promise(function(resolve) {
             try {
-              const clone = cloneLiveSvg(svg);
-              const serialized = new XMLSerializer().serializeToString(clone);
-              const blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
-              const url = URL.createObjectURL(blob);
-              const img = new Image();
+              var clone = cloneLiveSvg(svg);
+              var serialized = new XMLSerializer().serializeToString(clone);
+              var blob = new Blob([serialized], { type: 'image/svg+xml;charset=utf-8' });
+              var url = URL.createObjectURL(blob);
+              var img = new Image();
               img.onload = function() { URL.revokeObjectURL(url); resolve(img); };
               img.onerror = function() { URL.revokeObjectURL(url); resolve(null); };
               img.src = url;
@@ -100,116 +191,29 @@
         }
 
         function pageSize() {
-          const root = document.documentElement;
-          const body = document.body;
-          const w = Math.max(1, Math.ceil(Math.max(root.scrollWidth, root.clientWidth, body ? body.scrollWidth : 0)));
-          const h = Math.max(1, Math.ceil(Math.max(root.scrollHeight, root.clientHeight, body ? body.scrollHeight : 0)));
+          var root = document.documentElement;
+          var body = document.body;
+          var w = Math.max(1, Math.ceil(Math.max(root.scrollWidth, root.clientWidth, body ? body.scrollWidth : 0)));
+          var h = Math.max(1, Math.ceil(Math.max(root.scrollHeight, root.clientHeight, body ? body.scrollHeight : 0)));
           return { w: w, h: h };
         }
 
-        // Union bounding box of everything that actually paints. Full-viewport
-        // layout wrappers (flex/100vh containers) paint nothing, so they are
-        // excluded and the reported box hugs the real visible content.
-        function contentBBox() {
-          var de = document.documentElement;
-          var vw = Math.max(1, de.clientWidth);
-          var vh = Math.max(1, de.clientHeight);
-          var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-          function mark(r) {
-            if (r.width <= 0 || r.height <= 0) return;
-            if (r.left < minX) minX = r.left;
-            if (r.top < minY) minY = r.top;
-            if (r.right > maxX) maxX = r.right;
-            if (r.bottom > maxY) maxY = r.bottom;
-          }
-          var nodes = document.body ? document.body.querySelectorAll('*') : [];
-          for (var i = 0; i < nodes.length; i++) {
-            var el = nodes[i];
-            var tag = el.tagName;
-            if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK') continue;
-            if (isInsideSvg(el)) continue;
-            var style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) continue;
-            var r = el.getBoundingClientRect();
-            if (r.width <= 0 || r.height <= 0) continue;
-            var bg = style.backgroundColor;
-            var paints = (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') ||
-              (parseFloat(style.borderTopWidth) || 0) > 0 ||
-              (parseFloat(style.borderLeftWidth) || 0) > 0 ||
-              tag === 'IMG' || tag === 'CANVAS' || tag === 'VIDEO' || tag === 'svg' ||
-              tag === 'IFRAME' || tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || tag === 'BUTTON';
-            if (paints) { mark(r); continue; }
-            if (el.childNodes) {
-              for (var j = 0; j < el.childNodes.length; j++) {
-                var n = el.childNodes[j];
-                if (n.nodeType === 3 && (n.textContent || '').trim()) {
-                  var range = document.createRange();
-                  range.selectNodeContents(n);
-                  var tr = range.getBoundingClientRect();
-                  if (tr.width > 0 && tr.height > 0) mark(tr);
-                }
-              }
-            }
-          }
-          if (minX === Infinity) return null;
-          return { x: minX, y: minY, w: maxX - minX, h: maxY - minY, vw: vw, vh: vh };
-        }
-
-        var contentSizeTimer = 0;
         function postContentSize() {
           try {
             var de = document.documentElement;
             var body = document.body;
-            var vw = Math.max(1, de.clientWidth);
-            var vh = Math.max(1, de.clientHeight);
-
-            var neededW = Math.max(vw, de.scrollWidth, body ? body.scrollWidth : 0);
-            var neededH = Math.max(vh, de.scrollHeight, body ? body.scrollHeight : 0);
-
-            var nodes = body ? body.querySelectorAll('*') : [];
-            for (var i = 0; i < nodes.length; i++) {
-              var el = nodes[i];
-              var tag = el.tagName;
-              if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'LINK') continue;
-              if (isInsideSvg(el)) continue;
-              var style = window.getComputedStyle(el);
-              if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) continue;
-
-              var r = el.getBoundingClientRect();
-              if (r.width > 0 && r.height > 0) {
-                if (r.right > neededW) neededW = Math.ceil(r.right);
-                if (r.bottom > neededH) neededH = Math.ceil(r.bottom);
-              }
-
-              // Check if any subcontainer has scrollable overflow (e.g. flex: 1; overflow-y: auto)
-              if (el.scrollHeight > el.clientHeight + 2) {
-                var overflowH = vh + (el.scrollHeight - el.clientHeight);
-                if (overflowH > neededH) neededH = Math.ceil(overflowH);
-              }
-              if (el.scrollWidth > el.clientWidth + 2) {
-                var overflowW = vw + (el.scrollWidth - el.clientWidth);
-                if (overflowW > neededW) neededW = Math.ceil(overflowW);
-              }
-            }
-
-            if (neededW > vw + 4 || neededH > vh + 4) {
+            var neededW = Math.max(de.scrollWidth, body ? body.scrollWidth : 0);
+            var neededH = Math.max(de.scrollHeight, body ? body.scrollHeight : 0);
+            if (neededW > 0 && neededH > 0) {
               window.parent.postMessage({
                 type: 'drawva-widget-inner-content-size',
-                width: Math.max(vw, neededW),
-                height: Math.max(vh, neededH)
+                width: neededW,
+                height: neededH
               }, '*');
             }
           } catch (e) {}
         }
-        function scheduleContentSize() {
-          if (contentSizeTimer) return;
-          contentSizeTimer = setTimeout(function() { contentSizeTimer = 0; postContentSize(); }, 200);
-        }
-        setTimeout(postContentSize, 350);
-        setTimeout(postContentSize, 1500);
-        if (window.ResizeObserver && document.body) {
-          new ResizeObserver(scheduleContentSize).observe(document.body);
-        }
+        setTimeout(postContentSize, 120);
 
         function canvasToDataUrl(canvas) {
           try {
@@ -220,106 +224,55 @@
         }
 
         async function rasterizeSingleSvg(svg) {
-          const nat = svgNaturalSize(svg);
-          const img = await svgToImage(svg);
+          var nat = svgNaturalSize(svg);
+          var img = await svgToImage(svg);
           if (!img) return null;
-          const scale = Math.min(2, 2048 / Math.max(1, nat.w), 2048 / Math.max(1, nat.h));
-          const canvas = document.createElement('canvas');
+          var scale = Math.min(2, 2048 / Math.max(1, nat.w), 2048 / Math.max(1, nat.h));
+          var canvas = document.createElement('canvas');
           canvas.width = Math.max(1, Math.round(nat.w * scale));
           canvas.height = Math.max(1, Math.round(nat.h * scale));
-          const ctx2d = canvas.getContext('2d');
+          var ctx2d = canvas.getContext('2d');
           ctx2d.drawImage(img, 0, 0, canvas.width, canvas.height);
           return { canvas: canvas, w: nat.w, h: nat.h };
         }
 
         async function rasterizeDocument() {
-          const page = pageSize();
-          let scale = Math.min(2, 2048 / page.w, 2048 / page.h);
+          var page = pageSize();
+          var scale = Math.min(2, 2048 / page.w, 2048 / page.h);
           if (page.w * scale * page.h * scale > 12000000) {
             scale = Math.sqrt(12000000 / Math.max(1, page.w * page.h));
           }
-          const canvas = document.createElement('canvas');
+          var canvas = document.createElement('canvas');
           canvas.width = Math.max(1, Math.round(page.w * scale));
           canvas.height = Math.max(1, Math.round(page.h * scale));
-          const ctx2d = canvas.getContext('2d');
+          var ctx2d = canvas.getContext('2d');
           ctx2d.scale(scale, scale);
 
-          const nodes = document.body ? document.body.querySelectorAll('*') : [];
-          for (let i = 0; i < nodes.length; i++) {
-            const el = nodes[i];
-            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'LINK') continue;
-            if (isInsideSvg(el)) continue;
-            const style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden' || parseFloat(style.opacity || '1') === 0) continue;
-            const r = el.getBoundingClientRect();
-            if (r.width <= 0 || r.height <= 0) continue;
-            const bg = style.backgroundColor;
-            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
-              ctx2d.fillStyle = bg;
-              const radius = parseFloat(style.borderRadius) || 0;
-              if (radius > 0 && ctx2d.roundRect) {
-                ctx2d.beginPath();
-                ctx2d.roundRect(r.left, r.top, r.width, r.height, radius);
-                ctx2d.fill();
-              } else {
-                ctx2d.fillRect(r.left, r.top, r.width, r.height);
-              }
-            }
-            const bw = parseFloat(style.borderTopWidth) || 0;
-            if (bw > 0 && style.borderTopStyle !== 'none') {
-              ctx2d.strokeStyle = style.borderTopColor || '#000';
-              ctx2d.lineWidth = bw;
-              ctx2d.strokeRect(r.left + bw / 2, r.top + bw / 2, r.width - bw, r.height - bw);
-            }
-          }
-
-          const svgs = document.querySelectorAll('svg');
-          for (let s = 0; s < svgs.length; s++) {
-            const svg = svgs[s];
+          var svgs = document.querySelectorAll('svg');
+          for (var s = 0; s < svgs.length; s++) {
+            var svg = svgs[s];
             if (isInsideSvg(svg)) continue;
-            const r = svg.getBoundingClientRect();
+            var r = svg.getBoundingClientRect();
             if (r.width <= 1 || r.height <= 1) continue;
-            const img = await svgToImage(svg);
+            var img = await svgToImage(svg);
             if (img) ctx2d.drawImage(img, r.left, r.top, r.width, r.height);
           }
 
-          const canvases = document.querySelectorAll('canvas');
-          for (let c = 0; c < canvases.length; c++) {
-            const el = canvases[c];
-            const r = el.getBoundingClientRect();
+          var canvases = document.querySelectorAll('canvas');
+          for (var c = 0; c < canvases.length; c++) {
+            var el = canvases[c];
+            var r = el.getBoundingClientRect();
             if (r.width <= 1 || r.height <= 1) continue;
             try { ctx2d.drawImage(el, r.left, r.top, r.width, r.height); } catch (e) {}
           }
 
-          const images = document.querySelectorAll('img');
-          for (let m = 0; m < images.length; m++) {
-            const el = images[m];
+          var images = document.querySelectorAll('img');
+          for (var m = 0; m < images.length; m++) {
+            var el = images[m];
             if (!el.naturalWidth) continue;
-            const r = el.getBoundingClientRect();
+            var r = el.getBoundingClientRect();
             if (r.width <= 1 || r.height <= 1) continue;
             try { ctx2d.drawImage(el, r.left, r.top, r.width, r.height); } catch (e) {}
-          }
-
-          if (document.body) {
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-            let node;
-            while ((node = walker.nextNode())) {
-              const parent = node.parentElement;
-              if (!parent || parent.tagName === 'SCRIPT' || parent.tagName === 'STYLE') continue;
-              if (isInsideSvg(parent) || (parent.closest && parent.closest('svg'))) continue;
-              const text = (node.textContent || '').replace(/\\s+/g, ' ').trim();
-              if (!text) continue;
-              const style = window.getComputedStyle(parent);
-              if (style.display === 'none' || style.visibility === 'hidden') continue;
-              const range = document.createRange();
-              range.selectNodeContents(node);
-              const r = range.getBoundingClientRect();
-              if (r.width <= 0 || r.height <= 0) continue;
-              ctx2d.font = (style.fontWeight || '400') + ' ' + (style.fontSize || '16px') + ' ' + (style.fontFamily || 'system-ui, sans-serif');
-              ctx2d.fillStyle = style.color || '#0f172a';
-              ctx2d.textBaseline = 'middle';
-              ctx2d.fillText(text, r.left, r.top + r.height / 2);
-            }
           }
 
           return { canvas: canvas, w: page.w, h: page.h };
@@ -332,15 +285,15 @@
         }
 
         async function snapshotLive(reqId) {
-          const svgs = document.querySelectorAll('svg');
-          const canvases = document.querySelectorAll('canvas');
-          const imgs = document.querySelectorAll('img');
-          const extra = canvases.length + imgs.length;
-          let shot = null;
+          var svgs = document.querySelectorAll('svg');
+          var canvases = document.querySelectorAll('canvas');
+          var imgs = document.querySelectorAll('img');
+          var extra = canvases.length + imgs.length;
+          var shot = null;
           if (svgs.length === 1 && extra === 0) {
             shot = await rasterizeSingleSvg(svgs[0]);
           } else if (svgs.length === 0 && canvases.length === 1 && imgs.length === 0) {
-            const el = canvases[0];
+            var el = canvases[0];
             if (el.width > 2 && el.height > 2) {
               postSnapshotResult(reqId, canvasToDataUrl(el), el.width, el.height);
               return;
@@ -351,7 +304,7 @@
             postSnapshotResult(reqId, null, 0, 0);
             return;
           }
-          const dataUrl = canvasToDataUrl(shot.canvas);
+          var dataUrl = canvasToDataUrl(shot.canvas);
           if (!dataUrl || dataUrl.length > 28 * 1024 * 1024) {
             postSnapshotResult(reqId, null, 0, 0);
             return;
@@ -360,12 +313,17 @@
         }
 
         window.addEventListener('message', function(ev) {
-          if (ev.data && ev.data.type === 'drawva-widget-snapshot-request') {
+          if (!ev.data) return;
+          if (ev.data.type === 'drawva-widget-snapshot-request') {
             postSnapshot(ev.data.reqId);
-          } else if (ev.data && ev.data.type === 'drawva-widget-check-size') {
+          } else if (ev.data.type === 'drawva-widget-check-size') {
             postContentSize();
-          } else if (ev.data && ev.data.type === 'drawva-widget-layout-size') {
-            const w = Number(ev.data.width), h = Number(ev.data.height);
+          } else if (ev.data.type === 'drawva-widget-state') {
+            if (typeof ev.data.active === 'boolean') {
+              setRuntimeActive(ev.data.active);
+            }
+          } else if (ev.data.type === 'drawva-widget-layout-size') {
+            var w = Number(ev.data.width), h = Number(ev.data.height);
             if (w >= 80 && w <= 3200 && h >= 60 && h <= 6000) {
               document.documentElement.style.setProperty('--drawva-layout-width', w + 'px');
               document.documentElement.style.setProperty('--drawva-layout-height', h + 'px');
@@ -388,19 +346,15 @@
           }, '*');
         }, { passive: false });
 
-        window.addEventListener('pointerdown', function(e) {
+        window.addEventListener('pointerdown', function() {
           window.parent.postMessage({
             type: 'drawva-widget-inner-pointerdown'
           }, '*');
         }, true);
-
-        // Auto-snapshot after chart likely rendered
-        setTimeout(function() { postSnapshot('auto'); }, 900);
-        setTimeout(function() { postSnapshot('auto'); }, 2200);
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%;height:100%;}body{background:transparent!important;margin:0;width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}</style>' + autoResizeScript;
+    const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%;height:100%;}body{background:transparent!important;margin:0;width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}.drawva-widget-paused *,.drawva-widget-paused *::before,.drawva-widget-paused *::after{animation-play-state:paused!important;transition:none!important;}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;
@@ -410,7 +364,6 @@
   function forward(msg) {
     if (parentOrigin) parent.postMessage(msg, parentOrigin);
   }
-  // Fallback for snapshots/wheel if origin not pinned. Never used for content.
   const postAnywhere = (msg) => parent.postMessage(msg, "*");
 
   addEventListener("message", (event) => {
@@ -447,14 +400,11 @@
       if (!fromInner) return;
       forward({ type: "drawva-widget-updated" });
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-check-size" }, "*");
-      inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: "updated" }, "*");
     } else if (data.type === "drawva-widget-snapshot-request") {
       if (!fromParent) return;
-      // Forward snapshot request into the inner iframe
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-snapshot-request", reqId: data.reqId }, "*");
     } else if (data.type === "drawva-widget-inner-snapshot") {
       if (!fromInner) return;
-      // Forward snapshot response from inner iframe up to parent
       postAnywhere({ type: "drawva-widget-snapshot", reqId: data.reqId, dataUrl: data.dataUrl, w: data.w, h: data.h });
     } else if (data.type === "drawva-widget-inner-content-size") {
       if (!fromInner) return;
@@ -465,7 +415,6 @@
     }
   });
 
-  // Forward wheel from inside the host so the parent canvas still pans/zooms.
   addEventListener("wheel", (ev) => {
     ev.preventDefault();
     postAnywhere({
@@ -480,7 +429,6 @@
     });
   }, { passive: false });
 
-  // Forward pointerdown from inside the host so parent WidgetManager selects this widget on click.
   addEventListener("pointerdown", () => {
     postAnywhere({ type: "drawva-widget-pointerdown" });
   }, true);

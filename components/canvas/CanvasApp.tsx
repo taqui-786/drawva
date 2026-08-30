@@ -979,20 +979,31 @@ export function CanvasApp() {
     conductorRef.current = agent;
 
     let lastCamKey = "";
+    let lastZoom = -1;
+    let lastCx = -1;
+    let lastCy = -1;
     const sync = () => {
       const cam = engine.camera;
       const camKey = `${cam.panX}|${cam.panY}|${cam.scale}`;
       if (camKey === lastCamKey) return;
       lastCamKey = camKey;
-      setZoom(Math.round(cam.scale * 100));
+
+      wm.sync();
+      objects.current?.sync();
+
+      const zoom = Math.round(cam.scale * 100);
+      if (zoom !== lastZoom) {
+        lastZoom = zoom;
+        setZoom(zoom);
+      }
       const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
       const cx = Math.round(c.x);
       const cy = Math.round(c.y);
-      if (appState.center.x !== cx || appState.center.y !== cy) {
+      if (cx !== lastCx || cy !== lastCy) {
+        lastCx = cx;
+        lastCy = cy;
         setCenter(cx, cy);
       }
-      wm.sync();
-      objects.current?.sync();
     };
     const unsub = engine.onPostFrame(sync);
 
@@ -1326,14 +1337,9 @@ export function CanvasApp() {
       if (engine) {
         let screenX = window.innerWidth / 2;
         let screenY = window.innerHeight / 2;
-        const iframes = document.querySelectorAll<HTMLIFrameElement>(".drawva-widget-shell iframe");
-        for (const iframe of iframes) {
-          if (iframe.contentWindow === e.source) {
-            const rect = iframe.getBoundingClientRect();
-            screenX = rect.left + (typeof e.data.clientX === "number" ? e.data.clientX : rect.width / 2);
-            screenY = rect.top + (typeof e.data.clientY === "number" ? e.data.clientY : rect.height / 2);
-            break;
-          }
+        if (typeof e.data.clientX === "number" && typeof e.data.clientY === "number") {
+          screenX = e.data.clientX;
+          screenY = e.data.clientY;
         }
         engine.camera.handleWheel({
           clientX: screenX,

@@ -33,18 +33,16 @@ Add shadcn components with `pnpm dlx shadcn add <component>` — never hand-writ
 
 Drawva is a tile-based infinite canvas whiteboard engine powered by a multimodal AI perception agent.
 
-### How the AI Pipeline Actually Works (short version)
+### How the AI Pipeline Actually Works
 
-No magic bruh, it's just one loop: **draw → snapshot → prompt build → AI picks tools → validators → render.**
+The AI is an interactive, multi-turn agent driven by a client-side Conductor and streaming backend:
 
-1. **📸 Snapshot**: `atlas.ts` photographs the canvas as WebP (≤2048px) + `scene.ts` serializes scene state to compact JSON.
-2. **🧾 Prompt build** (`agent.ts`): system prompt = rulebook blocks glued together (`prompts.ts`: `SYSTEM_PROMPT` + persona + `PLUGIN_ROUTING_PROMPT` + `PLUGIN_SYSTEM_PROMPT` + `MANDATORY_VISIBLE_RESPONSE` + JSON schema). User message = JSON blob (`modelInput`) with `changedBox` (newest ink), viewport rects, widget geometry limits, scene items — plus the photo attached as an image part.
-3. **🔌 Plugin injection** (`lib/plugins/registry.ts`): plugins are markdown cards in `public/plugins/<name>/plugin.md`. Server scans them (10s cache), filters by enabled IDs (localStorage `drawva.enabledPlugins`), enforces a 40KB total injection budget, and pastes each card's full document into `modelInput.enabledPlugins[]`. The model only knows plugins because their docs were pasted into its prompt — plugin CSS never enters model context.
-4. **🤖 Tool choice is the model's job**: native commands for simple stuff (`write_text`, `draw_formula`, `plot_function`, `draw`, `erase`), `diagram_source` for professional formats (mermaid/dot/smiles/vega-lite/bpmn/cytoscape/geojson), `html_widget` for rich/interactive/live-data visuals.
-5. **✅ Validation is NOT optional** (`commands.ts`): every command goes through `validateCommand`/`validateCommands` — allowed-tools check against enabled plugins, coordinate clamping to 20000×20000, HTML ≤200KB, diagram source ≤100KB, max 16 commands, max 1 widget per reply (with companion native commands like write_text/draw_formula preserved), smart placement around `changedBox`. Failures are dropped with a reason. Never bypass these checks.
-6. **🎨 Render**: native commands hit canvas layers directly; widgets mount via `WidgetManager` into sandboxed iframes (`/widget-host.html`, libraries loaded per format).
-
-Key rule: **the AI can only request changes; strict validators decide what actually draws.** Any new command type must be added in both `prompts.ts` (schema/rulebook) and `commands.ts` (validator) or it will be silently rejected.
+1. **📸 Perception & Snapshot**: `atlas.ts` captures canvas WebP snapshots + `scene.ts` serializes visible canvas items into compact scene JSON.
+2. **🎼 Conductor Agent Loop** (`lib/ai/conductor.ts`): Client-side controller managing multi-turn agent turns, message history, streaming SSE events, steering, cancellation, and token budgets.
+3. **⚡ Step API Route** (`app/api/canvas/agent/step/route.ts`): Server-side SSE route that prepares system prompts with enabled plugins catalog, dispatches LLM calls via LangChain `ChatOpenAI` (`lib/ai/model.ts`) or local CLI runners (`lib/ai/antigravity.ts`, `lib/ai/codex.ts`), and streams back tool calls or text deltas.
+4. **🛠️ Tool Execution** (`lib/ai/conductorTools.ts`, `lib/ai/agentTools.ts`): Client executes requested agent tools against live canvas state (`apply_patch`, `inspect_box`, `load_plugin`, `read_history`, etc.) on objects, widgets, drafts, and history.
+5. **🗜️ Context Compaction** (`app/api/canvas/agent/compact/route.ts`): Summarizes earlier conversation turns when token limits are reached (`AGENT_HISTORY_TOKEN_TRIGGER`).
+6. **🎨 Render**: Native shapes, text, and formulas render to canvas layers via `ObjectManager` / `CanvasEngine`; rich diagrams and HTML applets mount via `WidgetManager` into sandboxed iframes (`/widget-host.html`).
 
 ```
 Drawva Stack Architecture:
@@ -60,12 +58,12 @@ Drawva Stack Architecture:
  │  Widget Manager (lib/canvas/widgets.ts & diagram.ts):                    │
  │   └── Dynamic iframe host for 7 diagram formats & HTML applets           │
  ├──────────────────────────────────────────────────────────────────────────┤
- │  LangChain AI Agent (lib/ai/):                                           │
- │   ├── Canvas Perception (Atlas image & Scene JSON)                       │
- │   ├── Multimodal Reasoning (Spatial intent & gestures)                    │
- │   └── Structured Command Output (7 diagram formats, MathJax & applets)   │
+ │  Conductor AI Agent System (lib/ai/ & app/api/canvas/):                  │
+ │   ├── Conductor Loop (lib/ai/conductor.ts & conductorTools.ts)           │
+ │   ├── Step & Compact Routes (/api/canvas/agent/step & /compact)          │
+ │   └── Provider Adapters (LangChain ChatOpenAI, Antigravity CLI, Codex)   │
  ├──────────────────────────────────────────────────────────────────────────┤
- │  Persistence (lib/canvas/persistence.ts): IndexedDB autosave canvas-db   │
+ │  Persistence: IndexedDB (persistence.ts) & Cloud Sync (/api/canvas/cloud)│
  └──────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -104,13 +102,20 @@ Drawva Stack Architecture:
 | `ellipse` | `O` | Vector ellipse shape |
 | `arrow` | `A` | Directed arrow vector shape |
 
-### 3. LangChain AI Agent (`lib/ai/`)
+### 3. Conductor AI Agent Architecture (`lib/ai/` & `app/api/canvas/`)
 
-- `model.ts`: Single OpenAI-compatible model factory `createChatModel({ baseUrl, apiKey, model })` → `ChatOpenAI` (temp 0.2, timeout 120s). `MAX_RETRIES = 3` (total attempts). No env-based provider routing.
-- `agent.ts`: Single-model pipeline (`runAgent(req, sceneText, model, opts)`): structured-output first, direct-JSON fallback within an attempt, up to `MAX_RETRIES` total attempts, then throws. No fallback chain (`getAllCodeModels`, `getFallbackReply` removed).
-- `provider.ts`: Safe-SSR localStorage helpers for the user's provider config (`drawva.aiProvider`), cached model list (`drawva.aiModels`), and active model (`drawva.aiModel`).
-- `prompts.ts`: Core prompt contracts (`SYSTEM_PROMPT`, `CODE_SYSTEM_PROMPT_EXTRA`, `MANDATORY_VISIBLE_RESPONSE`, `PLUGIN_ROUTING_PROMPT`, `PLUGIN_SYSTEM_PROMPT`, `WIDGET_RENDERING_POLICY`). Anchors answers below the user's latest ink (`x = changedBox.x, y = changedBox.y + changedBox.h + 24`).
-- `app/api/canvas/provider/route.ts`: POST verifies a user-supplied OpenAI-compatible base URL + API key by fetching `{base}/models` (falls back to `{base}/v1/models`); returns the model list. When the provider declares per-model capabilities (OpenRouter `input_modalities`), it returns only vision-capable models (`filteredByVision: true`); otherwise it returns all models. Key is never logged or persisted.
+- `conductor.ts`: Client-side `Conductor` class orchestrating the multi-turn ReAct agent loop, managing message history, streaming SSE events, tool invocation cycles, steer/cancel queues, and turn budgets.
+- `conductorTools.ts` & `agentTools.ts`: Canvas tool executor and OpenAI/LangChain tool definitions (`apply_patch`, `inspect_box`, `load_plugin`, `read_history`, etc.).
+- `model.ts`: LangChain model factory `createChatModel({ baseUrl, apiKey, model })` → `ChatOpenAI` with retry/backoff.
+- `antigravity.ts` & `codex.ts`: Local CLI subprocess runners for Antigravity and Codex providers.
+- `modelRegistry.ts` & `capabilities.ts`: Model metadata registry, pricing tiers, vision capability detection, and tool calling support.
+- `prompts.ts`: `AGENT_SYSTEM_PROMPT` and system prompt contracts.
+- `provider.ts`: Safe-SSR localStorage helpers for provider config (`drawva.aiProvider`), cached models (`drawva.aiModels`), and active model (`drawva.aiModel`).
+- `app/api/canvas/agent/step/route.ts`: SSE streaming endpoint executing a single LLM agent step (via ChatOpenAI or local CLI subprocess).
+- `app/api/canvas/agent/compact/route.ts`: POST endpoint summarizing conversation history on context overflow.
+- `app/api/canvas/provider/route.ts`: POST endpoint verifying API credentials and fetching model lists.
+- `app/api/canvas/model-validate/route.ts`: POST endpoint validating model tool calling and vision support.
+- `app/api/canvas/cloud/route.ts`: GET/POST endpoint for cloud canvas persistence.
 
 ### 4. UI Shell & Control Dock (`components/canvas/`)
 

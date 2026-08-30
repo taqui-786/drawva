@@ -92,6 +92,7 @@ export class ObjectManager {
   private selectedId: string | null = null;
   private animRafId: number | null = null;
   private animCanvases = new Map<string, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }>();
+  private styleSizeKey = new Map<string, string>();
 
   private onPointerMove = (e: PointerEvent) => {
     const cb = this.opts.callbacks;
@@ -129,6 +130,10 @@ export class ObjectManager {
         border: 2px solid transparent !important;
         box-shadow: none !important;
         background: transparent !important;
+        will-change: transform;
+        transform-style: preserve-3d;
+        backface-visibility: hidden;
+        contain: layout style;
       }
       .drawva-object-shell[data-selected="true"],
       .drawva-object-shell[data-status="draft"] {
@@ -469,7 +474,7 @@ export class ObjectManager {
     shell.dataset.narrow = "false";
     shell.className = "drawva-object-shell";
     shell.style.cssText =
-      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:8px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;user-select:none;touch-action:none;overscroll-behavior:contain;";
+      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:8px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;user-select:none;touch-action:none;overscroll-behavior:contain;will-change:transform;backface-visibility:hidden;";
 
     const body = document.createElement("div");
     body.className = "drawva-object-body";
@@ -726,6 +731,8 @@ export class ObjectManager {
       let hasActive = false;
       for (const item of this.items.values()) {
         if (item.kind !== "animation" || !item.animationScene) continue;
+        const shell = this.shells.get(item.id);
+        if (shell && shell.style.visibility === "hidden") continue;
         hasActive = true;
         const entry = this.animCanvases.get(item.id);
         if (!entry) continue;
@@ -752,15 +759,16 @@ export class ObjectManager {
     this.shells.delete(id);
     this.toolbars.delete(id);
     this.animCanvases.delete(id);
+    this.styleSizeKey.delete(id);
   }
 
   private position(item: ObjectItem): void {
     const shell = this.shells.get(item.id);
     if (!shell) return;
     const cam = this.opts.camera;
-    const rect = this.opts.engineContainer.getBoundingClientRect();
-    const viewportW = rect.width;
-    const viewportH = rect.height;
+    const vp = cam.viewportRect;
+    const viewportW = vp.w || 1920;
+    const viewportH = vp.h || 1080;
     const relativeX = cam.panX + item.x * cam.scale;
     const relativeY = cam.panY + item.y * cam.scale;
     const scaleX = (cam.scale * item.w) / item.contentW;
@@ -770,11 +778,18 @@ export class ObjectManager {
     const invScaleY = 1 / (scaleY || 1);
 
     const renderedW = item.contentW * scaleX;
+    const renderedH = item.contentH * scaleY;
     const isNarrow = renderedW < 340;
-    shell.dataset.narrow = isNarrow ? "true" : "false";
+    if (shell.dataset.narrow !== (isNarrow ? "true" : "false")) {
+      shell.dataset.narrow = isNarrow ? "true" : "false";
+    }
 
-    shell.style.width = `${item.contentW}px`;
-    shell.style.height = `${item.contentH}px`;
+    const sizeKey = `${item.contentW}x${item.contentH}`;
+    if (this.styleSizeKey.get(item.id) !== sizeKey) {
+      this.styleSizeKey.set(item.id, sizeKey);
+      shell.style.width = `${item.contentW}px`;
+      shell.style.height = `${item.contentH}px`;
+    }
     shell.style.transform = `translate3d(${relativeX}px,${relativeY}px,0) scale(${scaleX},${scaleY})`;
 
     const tb = this.toolbars.get(item.id);
@@ -803,9 +818,13 @@ export class ObjectManager {
     const offscreen =
       relativeX > viewportW ||
       relativeY > viewportH ||
-      relativeX + item.w * cam.scale < 0 ||
-      relativeY + item.h * cam.scale < 0;
-    shell.style.visibility = offscreen ? "hidden" : "visible";
+      relativeX + renderedW < 0 ||
+      relativeY + renderedH < 0;
+    const isVisible = !offscreen;
+    const visStr = isVisible ? "visible" : "hidden";
+    if (shell.style.visibility !== visStr) {
+      shell.style.visibility = visStr;
+    }
     this.applyMode(item.id);
   }
 }

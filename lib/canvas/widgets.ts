@@ -116,6 +116,8 @@ export class WidgetManager {
   private selectedId: string | null = null;
   private snapshotWaiters = new Map<string, Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>>();
   private lastLayoutSize = new Map<string, string>();
+  private styleSizeKey = new Map<string, string>();
+  private lastRenderState = new Map<string, string>();
   private lastContentFit = new Map<string, { w: number; h: number; grows: number }>();
 
   private onPointerMove = (e: PointerEvent) => {
@@ -155,6 +157,10 @@ export class WidgetManager {
         border: 2px solid transparent !important;
         box-shadow: none !important;
         background: transparent !important;
+        will-change: transform;
+        transform-style: preserve-3d;
+        backface-visibility: hidden;
+        contain: layout style;
       }
       .drawva-widget-shell[data-selected="true"],
       .drawva-widget-shell[data-status="draft"] {
@@ -614,7 +620,7 @@ export class WidgetManager {
     shell.dataset.status = widget.status;
     shell.className = "drawva-widget-shell";
     shell.style.cssText =
-      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;opacity:0;transition:opacity 0.12s ease;touch-action:none;overscroll-behavior:contain;";
+      "position:absolute;left:0;top:0;transform-origin:0 0;pointer-events:auto;contain:layout style;background:transparent;border:2px solid transparent;border-radius:12px;box-shadow:none;padding:0;overflow:visible;display:flex;flex-direction:column;opacity:0;transition:opacity 0.12s ease;touch-action:none;overscroll-behavior:contain;will-change:transform;backface-visibility:hidden;";
 
     let revealed = false;
     const reveal = () => {
@@ -870,16 +876,32 @@ export class WidgetManager {
     this.shells.delete(id);
     this.toolbars.delete(id);
     this.lastLayoutSize.delete(id);
+    this.styleSizeKey.delete(id);
+    this.lastRenderState.delete(id);
     this.lastContentFit.delete(id);
+  }
+
+  private sendWidgetState(widget: WidgetItem, active: boolean, scaleX: number, scaleY: number): void {
+    const shell = this.shells.get(widget.id);
+    const frame = shell?.querySelector("iframe");
+    if (!frame?.contentWindow) return;
+    const selected = this.selectedId === widget.id || widget.status === "draft";
+    const stateKey = `${selected ? 1 : 0}:${active ? 1 : 0}:${scaleX.toFixed(4)}:${scaleY.toFixed(4)}`;
+    if (this.lastRenderState.get(widget.id) === stateKey) return;
+    this.lastRenderState.set(widget.id, stateKey);
+    frame.contentWindow.postMessage(
+      { type: "drawva-widget-state", selected, active, scaleX, scaleY },
+      location.origin
+    );
   }
 
   private position(widget: WidgetItem): void {
     const shell = this.shells.get(widget.id);
     if (!shell) return;
     const cam = this.opts.camera;
-    const rect = this.opts.engineContainer.getBoundingClientRect();
-    const viewportW = rect.width;
-    const viewportH = rect.height;
+    const vp = cam.viewportRect;
+    const viewportW = vp.w || 1920;
+    const viewportH = vp.h || 1080;
     const screenX = cam.panX + widget.x * cam.scale;
     const screenY = cam.panY + widget.y * cam.scale;
     const contentW = Math.max(80, widget.contentW && widget.contentW > 10 ? widget.contentW : (widget.w || 400));
@@ -891,11 +913,18 @@ export class WidgetManager {
     const invScaleY = 1 / (scaleY || 1);
 
     const renderedW = contentW * scaleX;
+    const renderedH = contentH * scaleY;
     const isNarrow = renderedW < 340;
-    shell.dataset.narrow = isNarrow ? "true" : "false";
+    if (shell.dataset.narrow !== (isNarrow ? "true" : "false")) {
+      shell.dataset.narrow = isNarrow ? "true" : "false";
+    }
 
-    shell.style.width = `${contentW}px`;
-    shell.style.height = `${contentH}px`;
+    const sizeKey = `${contentW}x${contentH}`;
+    if (this.styleSizeKey.get(widget.id) !== sizeKey) {
+      this.styleSizeKey.set(widget.id, sizeKey);
+      shell.style.width = `${contentW}px`;
+      shell.style.height = `${contentH}px`;
+    }
     shell.style.transform = `translate3d(${screenX}px,${screenY}px,0) scale(${scaleX},${scaleY})`;
 
     const tb = this.toolbars.get(widget.id);
@@ -922,7 +951,6 @@ export class WidgetManager {
     }
 
     const frame = shell.querySelector("iframe");
-    const sizeKey = `${contentW}x${contentH}`;
     if (frame?.contentWindow && this.lastLayoutSize.get(widget.id) !== sizeKey) {
       this.lastLayoutSize.set(widget.id, sizeKey);
       frame.contentWindow.postMessage({ type: "drawva-widget-layout-size", width: contentW, height: contentH }, location.origin);
@@ -931,9 +959,16 @@ export class WidgetManager {
     const offscreen =
       screenX > viewportW ||
       screenY > viewportH ||
-      screenX + widget.w * cam.scale < 0 ||
-      screenY + widget.h * cam.scale < 0;
-    shell.style.visibility = offscreen ? "hidden" : "visible";
+      screenX + renderedW < 0 ||
+      screenY + renderedH < 0;
+
+    const isVisible = !offscreen;
+    const visStr = isVisible ? "visible" : "hidden";
+    if (shell.style.visibility !== visStr) {
+      shell.style.visibility = visStr;
+    }
+
+    this.sendWidgetState(widget, isVisible, scaleX, scaleY);
   }
 }
 
