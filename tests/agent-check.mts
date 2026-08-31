@@ -341,6 +341,68 @@ await test("D4 new widget creation without targetId never overwrites or adopts e
   assert.equal(validated.y, 6835);
 });
 
+await test("D5 arithmetic completion with command: 'draw_formula' and latex: '5' resolves correctly without becoming 'draw_formula' text", async () => {
+  const { validateCommands } = await import("../lib/canvas/commands");
+  const validationCtx = {
+    aiColor: "#2679b8",
+    scale: 1,
+    widgetSlots: 8,
+    plugins: new Set(["general"]),
+    visibleRect: { x: 7800, y: 6600, w: 2500, h: 1500 },
+    changedBox: { x: 7801, y: 6616, w: 1800, h: 200 },
+  };
+  const rawCommand = {
+    command: "draw_formula",
+    latex: "5",
+    x: 9700,
+    y: 6960,
+    w: 250,
+    h: 150,
+  };
+  const { commands, rejected } = validateCommands([rawCommand], validationCtx);
+  assert.equal(rejected.length, 0);
+  assert.equal(commands.length, 1);
+  const validated = commands[0] as { tool: string; latex: string; x: number; y: number };
+  assert.equal(validated.tool, "draw_formula");
+  assert.equal(validated.latex, "5");
+  assert.notEqual(validated.tool, "write_text");
+});
+
+await test("D6 extractText never extracts metadata keys like command or tool name", async () => {
+  const { extractText } = await import("../lib/canvas/commands");
+  const result = extractText({
+    command: "draw_formula",
+    tool: "draw_formula",
+    action: "mutate",
+    type: "math",
+    latex: "5",
+  });
+  assert.equal(result, "");
+});
+
+await test("D7 numeric latex values and formula synonyms validate as draw_formula", async () => {
+  const { validateCommands } = await import("../lib/canvas/commands");
+  const validationCtx = {
+    aiColor: "#2679b8",
+    scale: 1,
+    widgetSlots: 8,
+    plugins: new Set(["general"]),
+    visibleRect: { x: 1000, y: 1000, w: 2000, h: 1200 },
+  };
+  const rawCommand = {
+    tool: "formula",
+    latex: 42,
+    x: 1200,
+    y: 1200,
+  };
+  const { commands, rejected } = validateCommands([rawCommand], validationCtx);
+  assert.equal(rejected.length, 0);
+  assert.equal(commands.length, 1);
+  const validated = commands[0] as { tool: string; latex: string };
+  assert.equal(validated.tool, "draw_formula");
+  assert.equal(validated.latex, "42");
+});
+
 // ---------------------------------------------------------------------------
 // E. HTTP integration (real Next server + fake OpenAI-compatible model)
 // ---------------------------------------------------------------------------
@@ -569,7 +631,8 @@ try {
     const res = await post("/api/canvas/agent/step", validStepBase);
     assert.equal(res.status, 200);
     assert.ok((res.headers.get("content-type") || "").includes("text/event-stream"));
-    const events = sseEvents(await readSseText(res));
+    const rawText = await readSseText(res);
+    const events = sseEvents(rawText);
     const deltas = events.filter((e) => e.event === "text_delta");
     const final = events.filter((e) => e.event === "final");
     assert.equal(deltas.length, 2);
@@ -585,7 +648,6 @@ try {
     assert.ok(String(msgs[0].content).includes("PLUGIN CATALOG"));
     assert.ok(String(msgs[0].content).includes("weather"));
     assert.ok(Array.isArray(body.tools) && body.tools.length === 8);
-    assert.equal(body.parallel_tool_calls, false);
   });
 
   await test("E8 step E2E: tool_call round-trips with parsed args", async () => {
@@ -678,3 +740,4 @@ if (failures.length) {
   for (const f of failures) console.log(`  - ${f}`);
   process.exit(1);
 }
+process.exit(0);

@@ -589,7 +589,7 @@ export class WidgetManager {
    */
   private autoFitContent(id: string, measuredW: number, measuredH: number): void {
     const widget = this.widgets.get(id);
-    if (!widget) return;
+    if (!widget || widget.userResized) return;
     const curW = Math.max(80, widget.contentW || widget.w);
     const curH = Math.max(60, widget.contentH || widget.h);
     const lastFit = this.lastContentFit.get(id);

@@ -585,12 +585,12 @@ export function CanvasApp() {
           om.setSelected(null);
         },
         onDragStart: (id, e) => {
+          history.current?.recordWidgets();
           widgetDrag.current = { id, last: { x: e.clientX, y: e.clientY } };
         },
         onDragMove: (id, e) => {
           const g = widgetDrag.current;
           if (!g || g.id !== id) return;
-          history.current?.recordWidgets();
           const dx = (e.clientX - g.last.x) / engine.camera.scale;
           const dy = (e.clientY - g.last.y) / engine.camera.scale;
           wm.move(id, dx, dy);
@@ -607,6 +607,7 @@ export function CanvasApp() {
         onResizeStart: (id, mode, e) => {
           const item = wm.get(id);
           if (!item) return;
+          history.current?.recordWidgets();
           widgetResize.current = {
             id,
             mode,
@@ -617,7 +618,6 @@ export function CanvasApp() {
         onResizeMove: (id, _mode, e) => {
           const g = widgetResize.current;
           if (!g || g.id !== id || !g.startLayout) return;
-          history.current?.recordWidgets();
           const dx = (e.clientX - g.startPoint.x) / engine.camera.scale;
           const dy = (e.clientY - g.startPoint.y) / engine.camera.scale;
           const requestedW = g.startLayout.w + dx;

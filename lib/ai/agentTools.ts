@@ -1,3 +1,4 @@
+import { tool } from "ai";
 import { z } from "zod";
 
 export const AGENT_MAX_STEPS_PER_TURN = 24;
@@ -15,53 +16,110 @@ export const AGENT_SCENE_JSON_MAX = 8_000;
 export const AGENT_CONVERSATION_MAX_BYTES = 512 * 1024;
 
 const regionSchema = z.object({
-  x: z.number(),
-  y: z.number(),
-  w: z.number(),
-  h: z.number(),
+  x: z.number().describe("World X coordinate"),
+  y: z.number().describe("World Y coordinate"),
+  w: z.number().describe("Box width"),
+  h: z.number().describe("Box height"),
 });
 
 const canvasScanSchema = z.object({
-  scope: z.enum(["all", "viewport"]).optional(),
+  scope: z.enum(["all", "viewport"]).optional().describe("Scan scope: 'viewport' for visible area or 'all' for entire canvas"),
 });
 
 const canvasSnapshotSchema = z.object({
-  target: z.enum(["viewport", "canvas", "region", "object"]),
-  region: regionSchema.optional(),
-  objectId: z.string().optional(),
-  quality: z.enum(["basic", "detail"]).optional(),
-  grid: z.boolean().optional(),
+  target: z.enum(["viewport", "canvas", "region", "object"]).describe("Capture target"),
+  region: regionSchema.optional().describe("Region box when target='region'"),
+  objectId: z.string().optional().describe("Object or widget ID when target='object'"),
+  quality: z.enum(["basic", "detail"]).optional().describe("Snapshot resolution: 'basic' (≤1024px) or 'detail' (≤2048px)"),
+  grid: z.boolean().optional().describe("Whether to overlay coordinate grid labels"),
 });
 
+const commandItemSchema = z.object({
+  tool: z.enum([
+    "write_text",
+    "draw_formula",
+    "plot_function",
+    "animate_scene",
+    "html_widget",
+    "diagram_source",
+    "draw",
+    "erase",
+  ]).optional().describe("Tool identifier (e.g. 'draw_formula', 'write_text', 'html_widget')"),
+  command: z.string().optional().describe("Alias for tool identifier"),
+  type: z.string().optional().describe("Alias for tool identifier"),
+  name: z.string().optional().describe("Alias for tool identifier"),
+  x: z.number().optional().describe("World X coordinate on canvas (0..20000)"),
+  y: z.number().optional().describe("World Y coordinate on canvas (0..20000)"),
+  w: z.number().optional().describe("Box width in canvas units"),
+  h: z.number().optional().describe("Box height in canvas units"),
+  placement: z.enum([
+    "below",
+    "right",
+    "left",
+    "top",
+    "in_place",
+    "inside_target",
+    "match_sketch",
+    "overlay",
+  ]).optional().describe("Relative placement hint relative to handwriting/anchor"),
+  targetId: z.string().optional().describe("Target existing widget or object ID for refinement/replacement"),
+  text: z.string().optional().describe("write_text: Text content to write on canvas"),
+  latex: z.union([z.string(), z.number()]).optional().describe("draw_formula: LaTeX math expression (e.g. '5', 'x^2+y^2=r^2', '\\frac{a}{b}')"),
+  expression: z.string().optional().describe("plot_function: Single-variable 2D math formula y=f(x)"),
+  html: z.string().optional().describe("html_widget: Complete standalone HTML/SVG applet string"),
+  source: z.string().optional().describe("diagram_source: Structured diagram source code"),
+  sourceFormat: z.enum([
+    "mermaid",
+    "dot",
+    "vega-lite",
+    "smiles",
+    "bpmn-xml",
+    "cytoscape-json",
+    "geojson",
+  ]).optional().describe("diagram_source format"),
+  title: z.string().optional().describe("Title for widget or diagram header"),
+  fontSize: z.number().optional().describe("Font size in canvas units"),
+  maxWidth: z.number().optional().describe("Maximum width for wrapped text column (default ~1200-2000)"),
+  lineHeight: z.number().optional().describe("Line height multiplier (default ~1.35)"),
+  pluginId: z.string().optional().describe("Plugin identifier"),
+  points: z.array(z.any()).optional().describe("draw/erase: array of [x, y] coordinates"),
+  size: z.number().optional().describe("draw/erase: stroke width or eraser brush size"),
+  mode: z.enum(["rect", "path"]).optional().describe("erase: 'rect' or 'path'"),
+  durationMs: z.number().optional().describe("animate_scene: animation loop duration in ms"),
+  loop: z.boolean().optional().describe("animate_scene: whether animation loops"),
+  objects: z.array(z.any()).optional().describe("animate_scene: scene visual objects"),
+  motions: z.array(z.any()).optional().describe("animate_scene: object motion tracks"),
+}).passthrough();
+
 const canvasApplySchema = z.object({
-  baseRevision: z.number().optional(),
-  commands: z.array(z.record(z.string(), z.unknown())).min(1).max(16),
-  note: z.string().optional(),
+  baseRevision: z.number().optional().describe("Base board revision for conflict safety"),
+  commands: z.array(commandItemSchema).min(1).max(16).describe("Array of 1..16 canvas commands (write_text, draw_formula, diagram_source, html_widget, plot_function, animate_scene, draw, erase)"),
+  note: z.string().optional().describe("Brief note explaining what this mutation achieves"),
 });
 
 const loadPluginSchema = z.object({
-  pluginId: z.string(),
+  pluginId: z.string().describe("ID of the enabled plugin to load full documentation for"),
 });
 
 const canvasReadSchema = z.object({
-  objectId: z.string(),
-  resource: z.enum(["text", "html", "source"]).optional(),
-  startLine: z.number().optional(),
-  endLine: z.number().optional(),
+  objectId: z.string().describe("ID of the widget or canvas object to inspect"),
+  resource: z.enum(["text", "html", "source"]).optional().describe("Resource format to read: 'text' (default), 'html', or 'source'"),
+  startLine: z.number().optional().describe("1-indexed start line number"),
+  endLine: z.number().optional().describe("1-indexed end line number"),
 });
 
 const canvasPatchWidgetSchema = z.object({
-  objectId: z.string(),
-  baseRevision: z.number().optional(),
-  patch: z.string(),
+  objectId: z.string().describe("ID of the widget to patch"),
+  baseRevision: z.number().optional().describe("Base board revision"),
+  patch: z.string().describe("Unified diff patch string with --- a/widget.html / +++ b/widget.html headers"),
 });
 
 const canvasUndoSchema = z.object({});
 
 const canvasFocusSchema = z.object({
-  target: z.enum(["canvas", "object", "region"]),
-  objectId: z.string().optional(),
-  region: regionSchema.optional(),
+  target: z.enum(["canvas", "object", "region"]).describe("Camera focus target"),
+  objectId: z.string().optional().describe("Object ID to focus on"),
+  region: regionSchema.optional().describe("Region box to focus camera on"),
 });
 
 export interface AgentToolDef {
@@ -118,6 +176,43 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
   },
 ];
 
+export function getAiSdkTools() {
+  return {
+    canvas_scan: tool({
+      description: "List canvas items (id, kind, box, title). Cheap, no image. Use before mutating. scope=viewport limits to the visible rect.",
+      inputSchema: canvasScanSchema,
+    }),
+    canvas_snapshot: tool({
+      description: "Capture a picture of the canvas. target=viewport|canvas|region|object. quality=basic (default, max edge 1024) or detail (max edge 2048, region/object only). grid=true (default) overlays global coordinate labels. Returns sourceRect + imageScale for the coordinate contract.",
+      inputSchema: canvasSnapshotSchema,
+    }),
+    canvas_apply: tool({
+      description: "Apply 1..16 validated canvas commands in one undo step. commands use write_text, draw_formula, plot_function, html_widget, diagram_source, draw, erase. Pass baseRevision from the latest scan/snapshot.",
+      inputSchema: canvasApplySchema,
+    }),
+    load_plugin: tool({
+      description: "Load the full capability card for one enabled plugin id from the catalog. Call before using a plugin's APIs or HTML contract.",
+      inputSchema: loadPluginSchema,
+    }),
+    canvas_read: tool({
+      description: 'Read one object or widget as line-numbered text. Format is "NNN| " + line; default window is 200 lines.',
+      inputSchema: canvasReadSchema,
+    }),
+    canvas_patch_widget: tool({
+      description: "Surgical unified-diff edit of one widget. Headers must be exactly --- a/widget.html / +++ b/widget.html or widget.source.",
+      inputSchema: canvasPatchWidgetSchema,
+    }),
+    canvas_undo: tool({
+      description: "Undo the last canvas mutation (one history step).",
+      inputSchema: canvasUndoSchema,
+    }),
+    canvas_focus: tool({
+      description: "Move the user's camera to the whole canvas, an object, or a region.",
+      inputSchema: canvasFocusSchema,
+    }),
+  };
+}
+
 export interface ParsedAgentToolCall {
   name: string;
   args: unknown;
@@ -144,4 +239,3 @@ export function parseAgentToolCall(name: string, rawArgs: unknown): ParsedAgentT
   }
   return { name, args: result.data, valid: true };
 }
-

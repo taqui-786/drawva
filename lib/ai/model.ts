@@ -1,12 +1,13 @@
-import { ChatOpenAI } from "@langchain/openai";
-import { ChatAnthropic } from "@langchain/anthropic";
-import { ChatGoogleGenerativeAI } from "@langchain/google-genai";
-import { ChatGroq } from "@langchain/groq";
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createGroq } from "@ai-sdk/groq";
+import type { streamText } from "ai";
 import type { ProviderType, ReasoningEffort } from "./provider";
-import { AI_TIMEOUT_MS } from "./prompts";
 
 export const MAX_RETRIES = 3;
+
+export type LanguageModel = Parameters<typeof streamText>[0]["model"];
 
 export interface CreateChatModelOptions {
   providerType?: ProviderType;
@@ -35,163 +36,81 @@ export function createChatModel({
   baseUrl,
   apiKey,
   model,
-  timeoutMs = AI_TIMEOUT_MS,
-  temperature = 0.2,
-  reasoningEffort = "default",
-}: CreateChatModelOptions): BaseChatModel {
+}: CreateChatModelOptions): LanguageModel {
   if (!apiKey || !model) {
     throw new Error("Missing apiKey or model for provider.");
   }
 
   const cleanBaseUrl = baseUrl ? baseUrl.replace(/\/+$/, "") : undefined;
 
-  const openAiReasoningEffort =
-    reasoningEffort === "low"
-      ? "low"
-      : reasoningEffort === "medium"
-      ? "medium"
-      : reasoningEffort === "high" || reasoningEffort === "max"
-      ? "high"
-      : undefined;
-
   switch (providerType) {
     case "anthropic": {
-      const isThinkingModel =
-        model.includes("3-7") ||
-        model.includes("3.7") ||
-        model.includes("claude-4");
-
-      const thinkingBudget =
-        reasoningEffort === "low"
-          ? 2048
-          : reasoningEffort === "medium"
-          ? 4096
-          : reasoningEffort === "high"
-          ? 8192
-          : reasoningEffort === "max"
-          ? 16384
-          : undefined;
-
-      const thinkingConfig =
-        isThinkingModel && thinkingBudget
-          ? { type: "enabled" as const, budget_tokens: thinkingBudget }
-          : undefined;
-
-      // Anthropic strictly requires max_tokens to be strictly greater than thinking.budget_tokens
-      const maxTokens = thinkingConfig
-        ? Math.max(8192, thinkingConfig.budget_tokens + 4096)
-        : 4096;
-
-      return new ChatAnthropic({
-        model,
+      const anthropic = createAnthropic({
         apiKey,
-        maxTokens,
-        temperature: thinkingConfig?.type === "enabled" ? 1 : temperature,
-        maxRetries: 0,
-        ...(thinkingConfig ? { thinking: thinkingConfig } : {}),
-        clientOptions: {
-          timeout: timeoutMs,
-          ...(cleanBaseUrl ? { baseURL: cleanBaseUrl } : {}),
+        baseURL: cleanBaseUrl,
+        headers: {
+          "anthropic-dangerous-direct-browser-access": "true",
         },
-      }) as unknown as BaseChatModel;
-    }
-    case "gemini": {
-      const geminiThinkingBudget =
-        reasoningEffort === "low"
-          ? 1024
-          : reasoningEffort === "medium"
-          ? 4096
-          : reasoningEffort === "high"
-          ? 8192
-          : reasoningEffort === "max"
-          ? 16384
-          : undefined;
+      });
 
-      if (cleanBaseUrl && cleanBaseUrl !== "https://generativelanguage.googleapis.com/v1beta/openai") {
-        return new ChatOpenAI({
-          model,
-          apiKey,
-          configuration: { baseURL: cleanBaseUrl },
-          temperature,
-          timeout: timeoutMs,
-          maxRetries: 0,
-        }) as unknown as BaseChatModel;
-      }
-      return new ChatGoogleGenerativeAI({
-        model,
-        apiKey,
-        temperature,
-        maxRetries: 0,
-        ...(geminiThinkingBudget ? { thinkingConfig: { thinkingBudget: geminiThinkingBudget } } : {}),
-      }) as unknown as BaseChatModel;
+      return anthropic(model);
     }
+
+    case "gemini": {
+      if (cleanBaseUrl && cleanBaseUrl !== "https://generativelanguage.googleapis.com/v1beta/openai") {
+        const customGemini = createOpenAI({
+          apiKey,
+          baseURL: cleanBaseUrl,
+        });
+        return customGemini.chat(model);
+      }
+
+      const google = createGoogleGenerativeAI({
+        apiKey,
+        baseURL: cleanBaseUrl,
+      });
+
+      return google(model);
+    }
+
     case "nvidia": {
       const effectiveBaseUrl = cleanBaseUrl || "https://integrate.api.nvidia.com/v1";
-      const isReasoning = isReasoningModelId(model);
-      return new ChatOpenAI({
-        model,
+      const nvidia = createOpenAI({
         apiKey,
-        configuration: { baseURL: effectiveBaseUrl },
-        temperature,
-        timeout: timeoutMs,
-        maxRetries: 0,
-        ...(openAiReasoningEffort && isReasoning
-          ? { modelKwargs: { reasoning_effort: openAiReasoningEffort } }
-          : {}),
-      }) as unknown as BaseChatModel;
+        baseURL: effectiveBaseUrl,
+      });
+      return nvidia.chat(model);
     }
+
     case "groq": {
-      const isReasoning = isReasoningModelId(model);
       if (cleanBaseUrl && cleanBaseUrl !== "https://api.groq.com/openai/v1") {
-        return new ChatOpenAI({
-          model,
+        const customGroq = createOpenAI({
           apiKey,
-          configuration: { baseURL: cleanBaseUrl },
-          temperature,
-          timeout: timeoutMs,
-          maxRetries: 0,
-          ...(openAiReasoningEffort && isReasoning
-            ? { modelKwargs: { reasoning_effort: openAiReasoningEffort } }
-            : {}),
-        }) as unknown as BaseChatModel;
+          baseURL: cleanBaseUrl,
+        });
+        return customGroq.chat(model);
       }
-      return new ChatGroq({
-        model,
+      const groq = createGroq({
         apiKey,
-        temperature,
-        maxRetries: 0,
-        ...(openAiReasoningEffort && isReasoning
-          ? { modelKwargs: { reasoning_effort: openAiReasoningEffort } }
-          : {}),
-      }) as unknown as BaseChatModel;
+        baseURL: cleanBaseUrl,
+      });
+      return groq(model);
     }
+
     case "openai": {
       const effectiveBaseUrl = cleanBaseUrl || "https://api.openai.com/v1";
-      const isReasoning = isReasoningModelId(model);
-      return new ChatOpenAI({
-        model,
+      const openai = createOpenAI({
         apiKey,
-        configuration: { baseURL: effectiveBaseUrl },
-        temperature: isReasoning ? 1 : temperature,
-        timeout: timeoutMs,
-        maxRetries: 0,
-        // Only inject reasoning params if it is an o-series/reasoning model;
-        // passing reasoning_effort to gpt-4o/gpt-4o-mini triggers HTTP 400 Unsupported parameter
-        ...(openAiReasoningEffort && isReasoning
-          ? {
-              reasoning: { effort: openAiReasoningEffort },
-              modelKwargs: { reasoning_effort: openAiReasoningEffort },
-            }
-          : {}),
-      }) as unknown as BaseChatModel;
+        baseURL: effectiveBaseUrl,
+      });
+      return openai.chat(model);
     }
+
     case "custom":
     default: {
       if (!cleanBaseUrl) {
         throw new Error("Missing baseUrl for custom provider.");
       }
-      const isReasoning = isReasoningModelId(model);
-      const isOpenRouter = cleanBaseUrl.includes("openrouter.ai");
       const isAgentRouter = cleanBaseUrl.includes("agentrouter.org");
 
       const customFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -240,25 +159,13 @@ export function createChatModel({
         return res;
       };
 
-      return new ChatOpenAI({
-        model,
+      const custom = createOpenAI({
         apiKey,
-        configuration: {
-          baseURL: cleanBaseUrl,
-          fetch: customFetch,
-        },
-        temperature,
-        timeout: timeoutMs,
-        maxRetries: 0,
-        ...(openAiReasoningEffort && (isReasoning || isOpenRouter)
-          ? {
-              modelKwargs: {
-                ...(isReasoning ? { reasoning_effort: openAiReasoningEffort } : {}),
-                ...(isOpenRouter ? { extra_body: { reasoning: { effort: openAiReasoningEffort } } } : {}),
-              },
-            }
-          : {}),
-      }) as unknown as BaseChatModel;
+        baseURL: cleanBaseUrl,
+        fetch: customFetch,
+      });
+
+      return custom.chat(model);
     }
   }
 }
@@ -268,15 +175,14 @@ export function isRateLimitError(err: unknown): boolean {
   const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
   const rec = err as Record<string, unknown>;
   const status = Number(rec.status || rec.statusCode || 0);
-  const lcCode = String(rec.lc_error_code || "");
 
   return (
     status === 429 ||
-    lcCode === "MODEL_RATE_LIMIT" ||
     msg.includes("429") ||
     msg.includes("rate limit") ||
     msg.includes("too many requests") ||
-    msg.includes("capacity")
+    msg.includes("capacity") ||
+    msg.includes("resource_exhausted")
   );
 }
 

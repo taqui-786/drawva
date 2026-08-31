@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { generateText } from "ai";
 import { createChatModel } from "@/lib/ai/model";
 import { AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
 import type { ProviderType } from "@/lib/ai/provider";
@@ -67,13 +67,13 @@ export async function POST(req: Request) {
     timeoutMs: AI_TIMEOUT_MS,
   });
 
-  const res = await model.invoke([
-    new SystemMessage(
-      "Summarize this Drawva Agent conversation for a later step. Keep object ids, coordinates, plugin ids, and the unfinished task. Plain text, ≤ 1500 characters. No JSON."
-    ),
-    new HumanMessage(digest || "(empty)"),
-  ]);
-  const text = typeof res.content === "string" ? res.content : JSON.stringify(res.content);
+  const { text } = await generateText({
+    model,
+    instructions:
+      "Summarize this Drawva Agent conversation for a later step. Keep object ids, coordinates, plugin ids, and the unfinished task. Plain text, ≤ 1500 characters. No JSON.",
+    prompt: digest || "(empty)",
+  });
+
   const summary = text.trim().slice(0, 1500);
   return NextResponse.json({ summary });
 }

@@ -398,9 +398,10 @@ export async function buildAtlas(
   out.height = imageSize.h;
   const q = out.getContext("2d")!;
 
-  const latestVisible = latestInCapture.w > 0 && latestInCapture.h > 0
+  const hasLatestInk = latestInCapture.w > 0 && latestInCapture.h > 0;
+  const latestVisible = hasLatestInk
     ? clip(intersect(latestInCapture, sourceRect))
-    : { ...sourceRect };
+    : emptyRect();
 
   q.fillStyle = "#fff";
   q.fillRect(0, 0, out.width, out.height);
@@ -427,10 +428,10 @@ export async function buildAtlas(
     visibleRect,
     captureRect,
     sourceRect,
-    changedBox: latestVisible,
+    changedBox: hasLatestInk ? latestVisible : sourceRect,
     imageScale,
     focusInset: null,
-    latestInput: latestInputMetadata(latestVisible, sourceRect, imageScale, imageSize),
+    latestInput: hasLatestInk ? latestInputMetadata(latestVisible, sourceRect, imageScale, imageSize) : null,
   };
 }
 

@@ -198,7 +198,7 @@
           return { w: w, h: h };
         }
 
-        function postContentSize() {
+         function postContentSize() {
           try {
             var de = document.documentElement;
             var body = document.body;
@@ -211,9 +211,36 @@
                 height: neededH
               }, '*');
             }
-          } catch (e) {}
-        }
-        setTimeout(postContentSize, 120);
+           } catch (e) {}
+         }
+
+         // Canvas widgets use world pixels, so ordinary 12-16px web type is
+         // unreadably small in a large user-drawn box. Leave graphics and
+         // deliberately large typography alone, and set scale property for micro text.
+         var adaptiveLayout = { width: 0, height: 0, factor: 1 };
+         function adaptHtmlTypography(width, height) {
+           if (document.querySelector('svg, canvas')) return;
+           var elements = document.querySelectorAll('body *');
+           var sizes = [];
+           for (var i = 0; i < elements.length; i++) {
+             var element = elements[i];
+             if (!element.textContent || !element.textContent.trim()) continue;
+             var rect = element.getBoundingClientRect();
+             if (rect.width < 2 || rect.height < 2) continue;
+             var size = parseFloat(getComputedStyle(element).fontSize);
+             if (Number.isFinite(size) && size >= 8 && size <= 80) sizes.push(size);
+           }
+           if (!sizes.length) return;
+           sizes.sort(function(a, b) { return a - b; });
+           var current = sizes[Math.floor(sizes.length / 2)];
+           var target = Math.max(18, Math.min(38, Math.min(width, height) * 0.055));
+           var factor = current < target * 0.82 ? Math.max(1, Math.min(2.6, target / current)) : 1;
+           if (adaptiveLayout.width === width && adaptiveLayout.height === height && adaptiveLayout.factor === factor) return;
+           adaptiveLayout = { width: width, height: height, factor: factor };
+           document.documentElement.style.setProperty('--drawva-widget-scale', String(factor));
+           setTimeout(postContentSize, 0);
+         }
+         setTimeout(postContentSize, 120);
 
         function canvasToDataUrl(canvas) {
           try {
@@ -326,9 +353,10 @@
             var w = Number(ev.data.width), h = Number(ev.data.height);
             if (w >= 80 && w <= 3200 && h >= 60 && h <= 6000) {
               document.documentElement.style.setProperty('--drawva-layout-width', w + 'px');
-              document.documentElement.style.setProperty('--drawva-layout-height', h + 'px');
-              window.dispatchEvent(new CustomEvent('drawva-widget-layout', { detail: { width: w, height: h } }));
-            }
+               document.documentElement.style.setProperty('--drawva-layout-height', h + 'px');
+               window.dispatchEvent(new CustomEvent('drawva-widget-layout', { detail: { width: w, height: h } }));
+               adaptHtmlTypography(w, h);
+             }
           }
         });
 
@@ -354,7 +382,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%;height:100%;}body{background:transparent!important;margin:0;width:100%;height:100%;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}.drawva-widget-paused *,.drawva-widget-paused *::before,.drawva-widget-paused *::after{animation-play-state:paused!important;transition:none!important;}</style>' + autoResizeScript;
+    const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%!important;height:100%!important;container-type:size;}body{background:transparent!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}.drawva-widget-paused *,.drawva-widget-paused *::before,.drawva-widget-paused *::after{animation-play-state:paused!important;transition:none!important;}</style>' + autoResizeScript;
     const source = /<\/head>/i.test(html)
       ? html.replace(/<\/head>/i, transparentBase + '</head>')
       : transparentBase + html;

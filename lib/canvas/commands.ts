@@ -188,15 +188,14 @@ function matchedFontSize(
 ): number {
   const effectiveScale = Number.isFinite(scale) && scale > 0 ? scale : 0.25;
   const screenReadable = Math.round(42 / Math.max(0.03, Math.min(3, effectiveScale)));
-  let size = Number(value);
-  if (!Number.isFinite(size) || size <= 0) {
-    if (changedBoxHeight && changedBoxHeight > 40) {
-      size = Math.max(24, Math.min(650, Math.round(changedBoxHeight * 0.75)));
-    } else {
-      size = screenReadable;
-    }
+  const size = Number(value);
+  if (Number.isFinite(size) && size > 0) {
+    return Math.max(16, Math.min(650, Math.round(size)));
   }
-  return Math.max(24, Math.min(650, Math.max(size, screenReadable)));
+  if (changedBoxHeight && changedBoxHeight > 20) {
+    return Math.max(20, Math.min(650, Math.round(changedBoxHeight * 0.75)));
+  }
+  return Math.max(20, Math.min(650, screenReadable));
 }
 
 function matchedTextFontSize(
@@ -995,6 +994,9 @@ export function extractText(input: unknown, depth = 0): string {
   if (typeof input === "string") {
     return input.trim();
   }
+  if (typeof input === "number") {
+    return String(input);
+  }
   if (Array.isArray(input)) {
     return input
       .map((item) => extractText(item, depth + 1))
@@ -1016,9 +1018,6 @@ export function extractText(input: unknown, depth = 0): string {
       "body",
       "answer",
       "response",
-      "data",
-      "params",
-      "args",
     ];
     for (const key of priorityKeys) {
       if (key in rec && rec[key] !== undefined && rec[key] !== null) {
@@ -1026,7 +1025,38 @@ export function extractText(input: unknown, depth = 0): string {
         if (res) return res;
       }
     }
-    for (const val of Object.values(rec)) {
+    const IGNORED_METADATA_KEYS = new Set([
+      "tool",
+      "command",
+      "action",
+      "type",
+      "kind",
+      "name",
+      "pluginId",
+      "plugin",
+      "placement",
+      "targetId",
+      "sourceFormat",
+      "diagramKind",
+      "copyLabel",
+      "copyText",
+      "html",
+      "source",
+      "latex",
+      "formula",
+      "equation",
+      "math",
+      "expression",
+      "expr",
+      "title",
+      "note",
+      "reason",
+      "status",
+      "revision",
+      "baseRevision",
+    ]);
+    for (const [k, val] of Object.entries(rec)) {
+      if (IGNORED_METADATA_KEYS.has(k)) continue;
       if (typeof val === "string" && val.trim().length > 0) {
         return val.trim();
       }
@@ -1041,6 +1071,9 @@ export function extractText(input: unknown, depth = 0): string {
  */
 export function extractLatex(input: unknown, depth = 0): string {
   if (depth > 6 || input === null || input === undefined) return "";
+  if (typeof input === "number") {
+    return String(input);
+  }
   if (typeof input === "string") {
     let s = input.trim();
     if (s.startsWith("$$") && s.endsWith("$$") && s.length >= 4) {
@@ -1170,7 +1203,7 @@ export function validateCommand(
     return null;
   }
   const c = raw as Record<string, unknown>;
-  let tool = canonicalToolName(c.tool || c.type || c.name || c.kind || c.action);
+  let tool = canonicalToolName(c.tool || c.command || c.type || c.name || c.kind || c.action || c.actionType || c.operation);
 
   // If tool is unrecognized, infer from content structure
   if (!["html_widget", "write_text", "draw_formula", "plot_function", "animate_scene", "diagram_source", "draw", "erase"].includes(tool)) {
@@ -1178,11 +1211,12 @@ export function validateCommand(
       tool = "animate_scene";
     } else {
       const potentialHtml = extractHtmlOrSvg(c);
-      if (potentialHtml.includes("<svg") || potentialHtml.includes("<html") || potentialHtml.includes("<!DOCTYPE") || potentialHtml.includes("<div") || potentialHtml.includes("<canvas")) {
+      if (potentialHtml && (potentialHtml.includes("<svg") || potentialHtml.includes("<html") || potentialHtml.includes("<!DOCTYPE") || potentialHtml.includes("<div") || potentialHtml.includes("<canvas"))) {
         tool = "html_widget";
       } else {
+        const hasExplicitMathKey = Boolean(c.latex !== undefined || c.formula !== undefined || c.equation !== undefined || c.math !== undefined);
         const potentialLatex = extractLatex(c);
-        if (potentialLatex && (potentialLatex.includes("\\") || potentialLatex.includes("^") || potentialLatex.includes("_"))) {
+        if (potentialLatex && (hasExplicitMathKey || potentialLatex.includes("\\") || potentialLatex.includes("^") || potentialLatex.includes("_") || potentialLatex.includes("="))) {
           tool = "draw_formula";
         } else {
           const potentialExpr = extractExpression(c);
@@ -1640,22 +1674,22 @@ export function diagramSourceFits(value: unknown): boolean {
 
 export function canonicalToolName(value: unknown): string {
   const raw = String(value || "").trim().toLowerCase().replace(/[-_]/g, "");
-  if (raw === "htmlwidget" || raw === "html" || raw === "widget" || raw === "svg" || raw === "applet") {
+  if (raw === "htmlwidget" || raw === "html" || raw === "widget" || raw === "svg" || raw === "applet" || raw === "interactive") {
     return "html_widget";
   }
-  if (raw === "writetext" || raw === "text" || raw === "write") {
+  if (raw === "writetext" || raw === "text" || raw === "write" || raw === "note" || raw === "notes" || raw === "textbox") {
     return "write_text";
   }
-  if (raw === "drawformula" || raw === "formula" || raw === "latex" || raw === "math") {
+  if (raw === "drawformula" || raw === "formula" || raw === "latex" || raw === "math" || raw === "equation" || raw === "drawmath" || raw === "mathformula") {
     return "draw_formula";
   }
-  if (raw === "plotfunction" || raw === "plot" || raw === "functionplot") {
+  if (raw === "plotfunction" || raw === "plot" || raw === "functionplot" || raw === "graph" || raw === "graphplot") {
     return "plot_function";
   }
   if (raw === "animatescene" || raw === "animation" || raw === "anim" || raw === "sceneanimation") {
     return "animate_scene";
   }
-  if (raw === "diagramsource" || raw === "diagram" || raw === "mermaid") {
+  if (raw === "diagramsource" || raw === "diagram" || raw === "mermaid" || raw === "flowchart") {
     return "diagram_source";
   }
   if (raw === "draw" || raw === "sketch" || raw === "drawpoints" || raw === "stroke" || raw === "strokes" || raw === "polyline") {
@@ -1711,22 +1745,23 @@ export function validateCommands(
   const siblingBoxes: Array<{ kind: string; x: number; y: number; w: number; h: number }> = Array.isArray(
     ctx.sceneItems
   )
-    ? [...ctx.sceneItems]
-    : [];
+  ? [...ctx.sceneItems]
+  : [];
   for (const raw of rawCmds.slice(0, MAX_COMMANDS)) {
     const c = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : null;
     if (!c) {
       reportReject("not-an-object");
       continue;
     }
-    let tool = canonicalToolName(c.tool || c.type || c.name || c.kind || c.action);
+    let tool = canonicalToolName(c.tool || c.command || c.type || c.name || c.kind || c.action || c.actionType || c.operation);
     if (!acceptedTools.has(tool)) {
       const htmlStr = extractHtmlOrSvg(c);
       if (htmlStr && (htmlStr.includes("<svg") || htmlStr.includes("<html") || htmlStr.includes("<!DOCTYPE") || htmlStr.includes("<div") || htmlStr.includes("<canvas"))) {
         tool = "html_widget";
       } else {
+        const hasExplicitMathKey = Boolean(c.latex !== undefined || c.formula !== undefined || c.equation !== undefined || c.math !== undefined);
         const latexStr = extractLatex(c);
-        if (latexStr && (latexStr.includes("\\") || latexStr.includes("^") || latexStr.includes("_"))) {
+        if (latexStr && (hasExplicitMathKey || latexStr.includes("\\") || latexStr.includes("^") || latexStr.includes("_") || latexStr.includes("="))) {
           tool = "draw_formula";
         } else {
           const exprStr = extractExpression(c);

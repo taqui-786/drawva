@@ -363,6 +363,17 @@ export class Conductor {
             text: `One tool call per step. ${call.extraToolCalls} extra call(s) were not executed.`,
           });
         }
+
+        // Single-step turn completion: For terminal canvas mutation tools (canvas_apply, canvas_undo, canvas_focus, or successful canvas_patch_widget),
+        // if the tool succeeded, finish immediately to cut redundant second-step roundtrips and token costs by 50%.
+        const isTerminalMutation = call.name === "canvas_apply" || call.name === "canvas_undo" || call.name === "canvas_focus";
+        const isSuccessfulPatch = call.name === "canvas_patch_widget" && !isError;
+        const hasExplanation = Boolean(step.text?.trim() || (call.args && typeof call.args === "object" && typeof (call.args as Record<string, unknown>).note === "string" && (call.args as Record<string, unknown>).note));
+
+        if (!isError && (isTerminalMutation || (isSuccessfulPatch && hasExplanation))) {
+          finished = true;
+          break;
+        }
       }
 
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
@@ -436,7 +447,9 @@ export class Conductor {
       this.deps.objects.getSelectedId(),
     ].filter((id): id is string => Boolean(id));
     const viewport = this.deps.camera.visibleWorldRect();
-    const ink = atlasMeta?.changedBox || (this.deps.getInkBox?.() ?? null);
+    const ink = (atlasMeta?.changedBox && atlasMeta.changedBox.w > 0 && atlasMeta.changedBox.h > 0 && (!atlasMeta.sourceRect || atlasMeta.changedBox.w !== atlasMeta.sourceRect.w || atlasMeta.changedBox.h !== atlasMeta.sourceRect.h))
+      ? atlasMeta.changedBox
+      : (this.deps.getInkBox?.() ?? null);
     const scene = trimScene(buildScene(this.deps.widgets, this.deps.objects), viewport, selected);
     return JSON.stringify({
       revision: this.deps.getRevision(),

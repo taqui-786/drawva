@@ -75,12 +75,21 @@ export function resizeWidgetGeometry(item: WidgetGeometry, mode: WidgetResizeMod
   return normalizeWidgetGeometry({ ...start, w: start.w * scale, h: start.h * scale, resizeMode: "corner", userResized: true });
 }
 
-/** A settled reflow updates content dimensions while preserving the selected uniform canvas scale. */
 export function settleWidgetContent(item: WidgetGeometry, contentW: number, contentH: number): WidgetGeometry {
   const base = normalizeWidgetGeometry(item);
   const nextW = clamp(contentW, 80, MAX_CONTENT_W);
   const nextH = clamp(contentH, 60, MAX_CONTENT_H);
   if (!base.userResized) return normalizeWidgetGeometry({ ...base, w: nextW, h: nextH, contentW: nextW, contentH: nextH });
+
+  if (base.resizeMode === "horizontal") {
+    const scaleX = base.w / Math.max(1, base.contentW);
+    return normalizeWidgetGeometry({ ...base, w: nextW * scaleX, contentW: nextW, contentH: nextH });
+  }
+  if (base.resizeMode === "vertical") {
+    const scaleY = base.h / Math.max(1, base.contentH);
+    return normalizeWidgetGeometry({ ...base, h: nextH * scaleY, contentW: nextW, contentH: nextH });
+  }
+
   const scale = widgetScale(base);
   return normalizeWidgetGeometry({ ...base, w: nextW * scale, h: nextH * scale, contentW: nextW, contentH: nextH });
 }

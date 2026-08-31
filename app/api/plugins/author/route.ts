@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { HumanMessage, SystemMessage } from "@langchain/core/messages";
+import { generateText } from "ai";
 import { createChatModel } from "@/lib/ai/model";
 import { PLUGIN_AUTHORING_PROMPT } from "@/lib/ai/prompts";
 import { parsePluginMarkdown } from "@/lib/plugins/registry";
@@ -41,13 +41,13 @@ export async function POST(req: Request) {
       temperature: 0.2,
     });
 
-    const messages = [
-      new SystemMessage(PLUGIN_AUTHORING_PROMPT),
-      new HumanMessage(`Generate a plugin document for: ${prompt.trim()}`),
-    ];
+    const { text: rawContent } = await generateText({
+      model,
+      system: PLUGIN_AUTHORING_PROMPT,
+      prompt: `Generate a plugin document for: ${prompt.trim()}`,
+    });
 
-    const res = await model.invoke(messages);
-    let text = typeof res.content === "string" ? res.content : JSON.stringify(res.content);
+    let text = rawContent.trim();
 
     // Strip wrapping markdown fences if model wrapped entire document in ```markdown
     if (text.startsWith("```markdown") && text.endsWith("```")) {

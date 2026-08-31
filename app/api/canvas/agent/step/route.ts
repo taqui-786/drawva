@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
-import type { BaseMessage } from "@langchain/core/messages";
-import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
+import { streamText, type ModelMessage } from "ai";
 import { createChatModel, isFatalAuthError, isRateLimitError } from "@/lib/ai/model";
 import { runAntigravityCli } from "@/lib/ai/antigravity";
 import { runCodexCli } from "@/lib/ai/codex";
 import { AGENT_SYSTEM_PROMPT, AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
-import { AGENT_TOOL_DEFS, parseAgentToolCall } from "@/lib/ai/agentTools";
+import { getAiSdkTools, parseAgentToolCall } from "@/lib/ai/agentTools";
 import { getPluginMetadataList } from "@/lib/plugins/registry";
 import type { ProviderType } from "@/lib/ai/provider";
 
@@ -113,15 +111,6 @@ Return exactly one standard JSON object (no markdown fences, no leading/trailing
 Available Tools:
 1. canvas_apply: Apply drawing/writing/widgets to the canvas.
    Arguments: {"baseRevision": ${currentRev}, "commands": [{"tool": "animate_scene"|"html_widget"|"write_text"|"draw_formula"|"plot_function"|"diagram_source"|"draw"|"erase", "x": number, "y": number, ...}]}
-   Command schemas:
-   - animate_scene: { "tool": "animate_scene", "x": number, "y": number, "w": number, "h": number, "objects": Array<Record<string, unknown>>, "motions": Array<Record<string, unknown>> }
-   - html_widget: { "tool": "html_widget", "title": string, "html": string, "x": number, "y": number, "w": number, "h": number }
-   - write_text: { "tool": "write_text", "text": string, "x": number, "y": number, "fontSize"?: number }
-   - draw_formula: { "tool": "draw_formula", "latex": string, "x": number, "y": number, "fontSize"?: number }
-   - plot_function: { "tool": "plot_function", "expression": string, "x": number, "y": number, "w": number, "h": number }
-   - diagram_source: { "tool": "diagram_source", "source": string, "sourceFormat": "mermaid"|"dot"|"vega-lite"|"smiles"|"bpmn-xml"|"cytoscape-json"|"geojson", "title"?: string, "x": number, "y": number, "w": number, "h": number }
-   - draw: { "tool": "draw", "points": [[x, y], ...], "size": number, "color"?: string }
-   - erase: { "tool": "erase", "mode": "rect", "x": number, "y": number, "w": number, "h": number }
 2. canvas_scan: List existing objects/widgets. Arguments: {"scope": "all"|"viewport"}
 3. canvas_snapshot: Capture image of canvas region or viewport. Arguments: {"target": "viewport"|"region"|"object", "quality": "basic"|"detail"}
 4. canvas_read: Read widget source code. Arguments: {"objectId": string}
@@ -134,11 +123,15 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
 
           const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
           const lastImage = lastUserMsg?.images?.[0]?.dataUrl;
-          const userJson = JSON.stringify({
-            instruction: "Return one standard JSON tool_call for the next necessary canvas action (e.g. canvas_apply), or final when done.",
-            context: body.context,
-            messages,
-          }, null, 2);
+          const userJson = JSON.stringify(
+            {
+              instruction: "Return one standard JSON tool_call for the next necessary canvas action (e.g. canvas_apply), or final when done.",
+              context: body.context,
+              messages,
+            },
+            null,
+            2
+          );
 
           const cliOpts = {
             systemPrompt: cliSystem,
@@ -205,9 +198,7 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
     });
   }
 
-  const lcMessages = toLangChainMessages(system, messages);
-
-  let model: BaseChatModel;
+  let model;
   try {
     model = createChatModel({
       providerType,
@@ -221,15 +212,7 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
     return json({ error: err instanceof Error ? err.message : "Failed to create model." }, 400);
   }
 
-  if (typeof model.bindTools !== "function") {
-    return json({ error: "This model does not support tool calling." }, 400);
-  }
-
-  const bound =
-    providerType === "openai"
-      ? model.bindTools(AGENT_TOOL_DEFS, { parallel_tool_calls: false } as never)
-      : model.bindTools(AGENT_TOOL_DEFS);
-
+  const aiSdkMessages = toAiSdkMessages(messages);
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -242,8 +225,9 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
           closed = true;
         }
       };
+
       try {
-        await runStep(bound, lcMessages, req.signal, send);
+        await runStepWithAiSdk(model, system, aiSdkMessages, req.signal, send);
       } catch (err) {
         if (req.signal.aborted) return;
         send("error", { message: publicError(err) });
@@ -261,20 +245,22 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
   return new NextResponse(stream, {
     status: 200,
     headers: {
-      "content-type": "text/event-stream",
-      "cache-control": "no-cache",
+      "content-type": "text/event-stream; charset=utf-8",
+      "cache-control": "no-cache, no-transform",
       connection: "keep-alive",
+      "x-accel-buffering": "no",
     },
   });
 }
 
-async function runStep(
-  bound: ReturnType<NonNullable<BaseChatModel["bindTools"]>>,
-  messages: BaseMessage[],
+async function runStepWithAiSdk(
+  model: ReturnType<typeof createChatModel>,
+  system: string,
+  messages: ModelMessage[],
   signal: AbortSignal,
   send: (event: string, data: unknown) => void
 ): Promise<void> {
-  const once = async () => streamOnce(bound, messages, signal, send);
+  const once = async () => streamOnceWithAiSdk(model, system, messages, signal, send);
   try {
     await once();
   } catch (err) {
@@ -288,50 +274,80 @@ async function runStep(
   }
 }
 
-async function streamOnce(
-  bound: ReturnType<NonNullable<BaseChatModel["bindTools"]>>,
-  messages: BaseMessage[],
+async function streamOnceWithAiSdk(
+  model: ReturnType<typeof createChatModel>,
+  system: string,
+  messages: ModelMessage[],
   signal: AbortSignal,
   send: (event: string, data: unknown) => void
 ): Promise<void> {
-  const stream = await bound.stream(messages, { signal });
-  let full: unknown = null;
-  let streamedText = "";
-  const bufferedDeltas: string[] = [];
-  for await (const chunk of stream) {
-    full = concatChunk(full, chunk);
-    const delta = chunkText(chunk);
-    if (delta) {
-      streamedText += delta;
-      bufferedDeltas.push(delta);
+  const tools = getAiSdkTools();
+  const safeMessages = messages.length > 0 ? messages : [{ role: "user" as const, content: "Proceed with the canvas task." }];
+
+  const result = streamText({
+    model,
+    instructions: system,
+    messages: safeMessages,
+    tools,
+    abortSignal: signal,
+    maxRetries: 0,
+    providerOptions: {
+      anthropic: { cacheControl: { type: "ephemeral" } },
+      openai: { promptCacheKey: "drawva-agent-system-v1" },
+    },
+  });
+
+  let fullText = "";
+  const toolCallsCollected: { id: string; name: string; args: unknown }[] = [];
+
+  for await (const part of result.stream) {
+    if (signal.aborted) return;
+
+    if (part.type === "text-delta") {
+      const delta = (part as { textDelta?: string; text?: string }).textDelta || (part as { textDelta?: string; text?: string }).text || "";
+      fullText += delta;
+      send("text_delta", { text: delta });
+    } else if (part.type === "reasoning-delta") {
+      const rText = (part as { textDelta?: string; text?: string }).textDelta || (part as { textDelta?: string; text?: string }).text || "";
+      send("reasoning", { text: rText });
+    } else if (part.type === "tool-call") {
+      const tc = part as { toolCallId: string; toolName: string; args?: unknown; input?: unknown };
+      const parsed = parseAgentToolCall(tc.toolName, tc.args ?? tc.input);
+      toolCallsCollected.push({
+        id: tc.toolCallId,
+        name: parsed.name,
+        args: parsed.args,
+      });
+    } else if (part.type === "error") {
+      const errPart = part as { error: unknown };
+      send("error", { message: publicError(errPart.error) });
+      return;
     }
   }
 
-  for (const delta of bufferedDeltas) {
-    send("text_delta", { text: delta });
-  }
+  try {
+    const usage = await result.usage;
+    if (usage) {
+      send("usage", {
+        inputTokens: usage.inputTokens || 0,
+        outputTokens: usage.outputTokens || 0,
+      });
+    }
+  } catch {}
 
-  const usage = extractUsage(full);
-  if (usage) send("usage", usage);
-
-  const toolCalls = normalizeToolCalls(
-    full && typeof full === "object" ? (full as { tool_calls?: unknown }).tool_calls : undefined
-  );
-  if (toolCalls.length) {
-    const first = toolCalls[0];
-    const parsed = parseAgentToolCall(first.name, first.args);
+  if (toolCallsCollected.length > 0) {
+    const first = toolCallsCollected[0];
     send("tool_call", {
       id: first.id,
-      name: parsed.name,
-      args: parsed.args,
-      extraToolCalls: Math.max(0, toolCalls.length - 1),
+      name: first.name,
+      args: first.args,
+      extraToolCalls: Math.max(0, toolCallsCollected.length - 1),
     });
-    send("final", { text: streamedText });
+    send("final", { text: fullText });
     return;
   }
 
-  const text = streamedText || chunkText(full) || "";
-  send("final", { text });
+  send("final", { text: fullText });
 }
 
 function parseMessages(raw: unknown): StepMessage[] | null {
@@ -391,59 +407,79 @@ function parseImages(raw: unknown): { id: string; dataUrl: string }[] | undefine
   return images.length ? images : undefined;
 }
 
-function toLangChainMessages(
-  system: string,
-  messages: StepMessage[]
-): BaseMessage[] {
-  const out: BaseMessage[] = [new SystemMessage(system)];
-  for (const m of messages) {
+function toAiSdkMessages(messages: StepMessage[]): ModelMessage[] {
+  const out: ModelMessage[] = [];
+
+  let lastUserWithImagesIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg.role === "user" && msg.images?.length) {
+      lastUserWithImagesIdx = i;
+      break;
+    }
+  }
+
+  for (let idx = 0; idx < messages.length; idx++) {
+    const m = messages[idx];
     if (m.role === "system") {
-      // Anthropic/Gemini reject mid-conversation system roles, so compact
-      // summaries and lifecycle notes travel as labeled human turns.
-      out.push(new HumanMessage(`[system note] ${m.text}`));
+      out.push({ role: "user", content: `[system note] ${m.text}` });
     } else if (m.role === "user") {
-      out.push(humanWithImages(m.text, m.images));
+      const isLatestImageUser = idx === lastUserWithImagesIdx;
+      if (!m.images?.length || !isLatestImageUser) {
+        const extraNote = !isLatestImageUser && m.images?.length ? "\n[canvas image already inspected on step 1]" : "";
+        out.push({ role: "user", content: `${m.text || ""}${extraNote}`.trim() });
+      } else {
+        const contentParts: Array<{ type: "text"; text: string } | { type: "image"; image: string }> = [];
+        if (m.text) {
+          contentParts.push({ type: "text", text: m.text });
+        }
+        for (const img of m.images) {
+          contentParts.push({ type: "image", image: img.dataUrl });
+        }
+        out.push({ role: "user", content: contentParts });
+      }
     } else if (m.role === "assistant") {
       if (m.toolCall) {
-        out.push(
-          new AIMessage({
-            content: m.text || "",
-            tool_calls: [
-              {
-                id: m.toolCall.id || `call-${Date.now()}`,
-                name: m.toolCall.name,
-                args: asArgs(m.toolCall.args),
-                type: "tool_call",
-              },
-            ],
-          })
-        );
+        out.push({
+          role: "assistant",
+          content: [
+            ...(m.text ? [{ type: "text" as const, text: m.text }] : []),
+            {
+              type: "tool-call" as const,
+              toolCallId: m.toolCall.id || `call-${Date.now()}`,
+              toolName: m.toolCall.name,
+              input: asArgs(m.toolCall.args),
+            },
+          ],
+        });
       } else {
-        out.push(new AIMessage(m.text || ""));
+        out.push({ role: "assistant", content: m.text || "" });
       }
-    } else {
-      out.push(
-        new ToolMessage({
-          content: stringifyResult(m.result),
-          tool_call_id: m.toolCallId || "call-1",
-          name: m.name,
-          status: m.isError ? "error" : "success",
-        })
-      );
-      if (m.images?.length) out.push(humanWithImages("", m.images));
+    } else if (m.role === "tool") {
+      out.push({
+        role: "tool",
+        content: [
+          {
+            type: "tool-result" as const,
+            toolCallId: m.toolCallId || "call-1",
+            toolName: m.name,
+            output: {
+              type: "json" as const,
+              value: (m.result ?? {}) as never,
+            },
+          },
+        ],
+      });
+      if (m.images?.length) {
+        const imageParts: Array<{ type: "image"; image: string }> = m.images.map((img) => ({
+          type: "image",
+          image: img.dataUrl,
+        }));
+        out.push({ role: "user", content: imageParts });
+      }
     }
   }
   return out;
-}
-
-function humanWithImages(text: string, images?: { id: string; dataUrl: string }[]): HumanMessage {
-  if (!images?.length) return new HumanMessage(text);
-  const content: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
-  if (text) content.push({ type: "text", text });
-  for (const img of images) {
-    content.push({ type: "image_url", image_url: { url: img.dataUrl } });
-  }
-  return new HumanMessage({ content });
 }
 
 function asArgs(args: unknown): Record<string, unknown> {
@@ -455,67 +491,6 @@ function asArgs(args: unknown): Record<string, unknown> {
     } catch {}
   }
   return {};
-}
-
-function stringifyResult(result: unknown): string {
-  if (typeof result === "string") return result;
-  try {
-    return JSON.stringify(result ?? {});
-  } catch {
-    return "{\"code\":\"INTERNAL\",\"message\":\"Unserializable tool result.\"}";
-  }
-}
-
-function concatChunk(full: unknown, chunk: unknown): unknown {
-  if (full && typeof full === "object" && "concat" in full && typeof (full as { concat: unknown }).concat === "function") {
-    return (full as { concat: (c: unknown) => unknown }).concat(chunk);
-  }
-  return chunk;
-}
-
-function chunkText(chunk: unknown): string {
-  if (!chunk || typeof chunk !== "object") return "";
-  const rec = chunk as { text?: unknown; content?: unknown };
-  if (typeof rec.text === "string" && rec.text) return rec.text;
-  if (typeof rec.content === "string") return rec.content;
-  if (Array.isArray(rec.content)) {
-    return rec.content
-      .map((part) => {
-        if (typeof part === "string") return part;
-        if (part && typeof part === "object" && "text" in part) return String((part as { text?: unknown }).text || "");
-        return "";
-      })
-      .join("");
-  }
-  return "";
-}
-
-function normalizeToolCalls(raw: unknown): { id: string; name: string; args: unknown }[] {
-  if (!Array.isArray(raw)) return [];
-  const out: { id: string; name: string; args: unknown }[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== "object") continue;
-    const rec = item as Record<string, unknown>;
-    const name = typeof rec.name === "string" ? rec.name : "";
-    if (!name) continue;
-    out.push({
-      id: typeof rec.id === "string" && rec.id ? rec.id : `call-${out.length + 1}`,
-      name,
-      args: rec.args,
-    });
-  }
-  return out;
-}
-
-function extractUsage(chunk: unknown): { inputTokens: number; outputTokens: number } | null {
-  if (!chunk || typeof chunk !== "object") return null;
-  const rec = chunk as Record<string, unknown>;
-  const meta = (rec.usage_metadata || rec.usageMetadata) as Record<string, unknown> | undefined;
-  if (!meta) return null;
-  const inputTokens = Number(meta.input_tokens || meta.inputTokens || 0);
-  const outputTokens = Number(meta.output_tokens || meta.outputTokens || 0);
-  if (!inputTokens && !outputTokens) return null;
-  return { inputTokens, outputTokens };
 }
 
 function isServerError(err: unknown): boolean {
