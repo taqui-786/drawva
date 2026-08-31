@@ -243,6 +243,59 @@ export async function saveAutosave(snapshot: ProjectSnapshot): Promise<void> {
   } catch {}
 }
 
+export async function saveAgentSession(messages: unknown[], canvasId?: string): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+  try {
+    const db = await openDb();
+    const key = canvasId ? `session:${canvasId}` : "session:autosave";
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(messages, key);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+export async function loadAgentSession(canvasId?: string): Promise<unknown[] | null> {
+  if (typeof window === "undefined" || !window.indexedDB) return null;
+  try {
+    const db = await openDb();
+    const key = canvasId ? `session:${canvasId}` : "session:autosave";
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(key);
+      req.onsuccess = () => {
+        db.close();
+        resolve(Array.isArray(req.result) ? req.result : null);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function clearAgentSession(canvasId?: string): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+  try {
+    const db = await openDb();
+    const key = canvasId ? `session:${canvasId}` : "session:autosave";
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
 export async function loadAutosave(): Promise<ProjectSnapshot | null> {
   try {
     const db = await openDb();

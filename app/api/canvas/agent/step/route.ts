@@ -122,7 +122,10 @@ Available Tools:
 INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the whiteboard, return a tool_call with canvas_apply containing the commands. Return final only when complete or when purely answering a conversational question.`;
 
           const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
-          const lastImage = lastUserMsg?.images?.[0]?.dataUrl;
+          const hasAssistantAfterLastUser = lastUserMsg
+            ? messages.slice(messages.indexOf(lastUserMsg) + 1).some((m) => m.role === "assistant")
+            : false;
+          const lastImage = hasAssistantAfterLastUser ? undefined : lastUserMsg?.images?.[0]?.dataUrl;
           const userJson = JSON.stringify(
             {
               instruction: "Return one standard JSON tool_call for the next necessary canvas action (e.g. canvas_apply), or final when done.",
@@ -410,23 +413,16 @@ function parseImages(raw: unknown): { id: string; dataUrl: string }[] | undefine
 function toAiSdkMessages(messages: StepMessage[]): ModelMessage[] {
   const out: ModelMessage[] = [];
 
-  let lastUserWithImagesIdx = -1;
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const msg = messages[i];
-    if (msg.role === "user" && msg.images?.length) {
-      lastUserWithImagesIdx = i;
-      break;
-    }
-  }
-
   for (let idx = 0; idx < messages.length; idx++) {
     const m = messages[idx];
     if (m.role === "system") {
       out.push({ role: "user", content: `[system note] ${m.text}` });
     } else if (m.role === "user") {
-      const isLatestImageUser = idx === lastUserWithImagesIdx;
-      if (!m.images?.length || !isLatestImageUser) {
-        const extraNote = !isLatestImageUser && m.images?.length ? "\n[canvas image already inspected on step 1]" : "";
+      // Only attach vision images if this user prompt has no assistant response yet (Step 1 of the turn).
+      // If assistant messages follow, Step 1 already processed this image.
+      const hasSubsequentAssistant = messages.slice(idx + 1).some((msg) => msg.role === "assistant");
+      if (!m.images?.length || hasSubsequentAssistant) {
+        const extraNote = hasSubsequentAssistant && m.images?.length ? "\n[canvas visual layout inspected on step 1]" : "";
         out.push({ role: "user", content: `${m.text || ""}${extraNote}`.trim() });
       } else {
         const contentParts: Array<{ type: "text"; text: string } | { type: "image"; image: string }> = [];

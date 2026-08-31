@@ -541,6 +541,7 @@ export function CanvasApp() {
     objects.current?.clear();
     inkBoxRef.current = null;
     conductorRef.current?.cancel();
+    conductorRef.current?.clearHistory();
     setAiStatus("idle");
     setAiRun({ phase: "idle", activeProvider: null, doneProvider: null, durationStage: "normal" });
     syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
@@ -560,6 +561,8 @@ export function CanvasApp() {
     if (!engine) return;
     try {
       history.current?.reset();
+      conductorRef.current?.cancel();
+      conductorRef.current?.clearHistory();
       await importJson(engine, widgets.current, objects.current, file);
       afterBoardChange();
       if (syncManager.current) {
@@ -1325,7 +1328,7 @@ export function CanvasApp() {
     tools.current?.setMode(mode);
     widgets.current?.setMode(mode);
     objects.current?.setMode(mode);
-    if (mode === "hand") {
+    if (mode !== "select") {
       widgets.current?.setSelected(null);
       objects.current?.setSelected(null);
     }

@@ -135,28 +135,34 @@ export class ObjectManager {
         backface-visibility: hidden;
         contain: layout style;
       }
-      .drawva-object-shell[data-selected="true"],
-      .drawva-object-shell[data-status="draft"] {
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-selected="true"],
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-status="draft"] {
         border-color: var(--primary) !important;
         border-style: dotted !important;
         border-width: 2px !important;
         box-shadow: none !important;
       }
       .drawva-object-host[data-mode="select"] > .drawva-object-shell:hover .drawva-object-chrome,
-      .drawva-object-shell[data-selected="true"] .drawva-object-chrome,
-      .drawva-object-shell[data-status="draft"] .drawva-object-chrome {
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-selected="true"] .drawva-object-chrome,
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-status="draft"] .drawva-object-chrome {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-object-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-object-left-group,
-      .drawva-object-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-object-right-group {
+      .drawva-object-host[data-mode="select"] .drawva-object-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-object-left-group,
+      .drawva-object-host[data-mode="select"] .drawva-object-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-object-right-group {
         display: none !important;
       }
-      .drawva-object-shell[data-selected="true"] .drawva-object-left-group,
-      .drawva-object-shell[data-selected="true"] .drawva-object-right-group,
-      .drawva-object-shell[data-status="draft"] .drawva-object-left-group,
-      .drawva-object-shell[data-status="draft"] .drawva-object-right-group {
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-selected="true"] .drawva-object-left-group,
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-selected="true"] .drawva-object-right-group,
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-status="draft"] .drawva-object-left-group,
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-status="draft"] .drawva-object-right-group {
         display: flex !important;
+      }
+      .drawva-object-host:not([data-mode="select"]) .drawva-object-chrome,
+      .drawva-object-host:not([data-mode="select"]) .drawva-object-resize,
+      .drawva-object-host:not([data-mode="select"]) .drawva-object-side-actions {
+        display: none !important;
+        pointer-events: none !important;
       }
       .drawva-object-side-actions {
         display: none !important;
@@ -178,13 +184,13 @@ export class ObjectManager {
         z-index: 10;
         transform-origin: 0 0;
       }
-      .drawva-object-shell[data-narrow="true"][data-selected="true"] .drawva-object-side-actions,
-      .drawva-object-shell[data-narrow="true"][data-status="draft"] .drawva-object-side-actions {
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-narrow="true"][data-selected="true"] .drawva-object-side-actions,
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-narrow="true"][data-status="draft"] .drawva-object-side-actions {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-object-shell[data-selected="true"] .drawva-object-resize,
-      .drawva-object-shell[data-status="draft"] .drawva-object-resize {
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-selected="true"] .drawva-object-resize,
+      .drawva-object-host[data-mode="select"] .drawva-object-shell[data-status="draft"] .drawva-object-resize {
         display: inline-flex !important;
         pointer-events: auto !important;
       }
@@ -342,6 +348,7 @@ export class ObjectManager {
 
   setSelected(id: string | null): void {
     if (this.selectedId === id) return;
+    if (id && this.mode !== "select") return;
     const prev = this.selectedId;
     this.selectedId = id;
     if (prev) this.applyMode(prev);
@@ -366,6 +373,9 @@ export class ObjectManager {
   setMode(mode: CanvasMode): void {
     this.mode = mode;
     this.hostRoot.dataset.mode = mode;
+    if (mode !== "select") {
+      this.selectedId = null;
+    }
     for (const id of this.toolbars.keys()) this.applyMode(id);
   }
 
@@ -384,32 +394,30 @@ export class ObjectManager {
     const { chrome, dragBar, resizeHandle, resizeWidth, resizeHeight, sideActions, acceptBtn } = tb;
     const shell = this.shells.get(id);
     const item = this.items.get(id);
-    const hand = this.mode === "hand";
     const select = this.mode === "select";
-    const isSelected = this.selectedId === id;
+    const isSelected = select && this.selectedId === id;
     const isDraft = item?.status === "draft";
-    const active = isSelected || isDraft;
-    this.hostRoot.style.zIndex = active || isDraft || select ? "40" : "20";
+    const active = select && (isSelected || isDraft);
+    this.hostRoot.style.zIndex = select ? "40" : "20";
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
-      // Hand is pan-only: clicks pass through objects to the canvas.
-      shell.style.pointerEvents = hand ? "none" : active || isDraft || select ? "auto" : "none";
-      shell.style.cursor = hand ? "grab" : select ? "default" : "default";
-      shell.style.borderColor = !hand && (active || isDraft) ? "var(--primary)" : "transparent";
-      shell.style.borderStyle = !hand && (active || isDraft) ? "dotted" : "none";
+      shell.style.pointerEvents = select ? "auto" : "none";
+      shell.style.cursor = "default";
+      shell.style.borderColor = active ? "var(--primary)" : "transparent";
+      shell.style.borderStyle = active ? "dotted" : "none";
       shell.style.borderWidth = "2px";
       shell.style.boxShadow = "none";
     }
-    if (chrome) chrome.style.display = hand ? (isDraft ? "flex" : "none") : active || isDraft ? "flex" : "";
+    if (chrome) chrome.style.display = select ? (active ? "flex" : "") : "none";
     if (sideActions) {
       const isNarrow = shell?.dataset.narrow === "true";
-      sideActions.style.display = !hand && (active || isDraft) && isNarrow ? "flex" : "none";
+      sideActions.style.display = select && active && isNarrow ? "flex" : "none";
     }
-    if (dragBar) dragBar.style.display = hand && !isDraft ? "none" : "inline-flex";
-    if (resizeHandle) resizeHandle.style.display = active || isDraft ? "inline-flex" : "none";
-    if (resizeWidth) resizeWidth.style.display = active || isDraft ? "inline-flex" : "none";
-    if (resizeHeight) resizeHeight.style.display = active || isDraft ? "inline-flex" : "none";
-    if (acceptBtn) acceptBtn.style.display = isDraft ? "inline-flex" : "none";
+    if (dragBar) dragBar.style.display = select ? "inline-flex" : "none";
+    if (resizeHandle) resizeHandle.style.display = select && active ? "inline-flex" : "none";
+    if (resizeWidth) resizeWidth.style.display = select && active ? "inline-flex" : "none";
+    if (resizeHeight) resizeHeight.style.display = select && active ? "inline-flex" : "none";
+    if (acceptBtn) acceptBtn.style.display = select && isDraft ? "inline-flex" : "none";
   }
 
   all(): ObjectItem[] {
@@ -681,7 +689,7 @@ export class ObjectManager {
       this.applyMode(item.id);
     });
     shell.addEventListener("pointerdown", (e) => {
-      if (this.mode === "hand") return;
+      if (this.mode !== "select") return;
       const target = e.target as HTMLElement | null;
       if (!target?.closest(".drawva-object-btn") && !target?.closest(".drawva-object-resize")) {
         e.stopPropagation();
@@ -692,13 +700,13 @@ export class ObjectManager {
     const cb = this.opts.callbacks ?? {};
     const beginDrag = (e: PointerEvent) => {
       e.stopPropagation();
-      if (this.mode !== "hand") this.setSelected(item.id);
+      if (this.mode === "select") this.setSelected(item.id);
       dragBar.setPointerCapture?.(e.pointerId);
       cb.onDragStart?.(item.id, e);
     };
     const beginResize = (mode: ObjectResizeMode) => (e: PointerEvent) => {
       e.stopPropagation();
-      if (this.mode !== "hand") this.setSelected(item.id);
+      if (this.mode === "select") this.setSelected(item.id);
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
       cb.onResizeStart?.(item.id, mode, e);
     };

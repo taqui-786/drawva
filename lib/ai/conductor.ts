@@ -18,6 +18,11 @@ import { buildAtlas } from "@/lib/canvas/atlas";
 import { buildScene } from "@/lib/canvas/scene";
 import { SIZE } from "@/lib/canvas/constants";
 import {
+  saveAgentSession,
+  loadAgentSession,
+  clearAgentSession,
+} from "@/lib/canvas/persistence";
+import {
   AGENT_CONVERSATION_MAX_BYTES,
   AGENT_HISTORY_TOKEN_TRIGGER,
   AGENT_MAX_APPLIES_PER_TURN,
@@ -97,6 +102,18 @@ export class Conductor {
 
   constructor(private deps: ConductorDeps) {
     this.messages = loadConversation(this.deps.canvasId?.());
+    void loadAgentSession(this.deps.canvasId?.()).then((saved) => {
+      if (saved && Array.isArray(saved) && saved.length > 0 && this.messages.length === 0) {
+        this.messages = saved as StepMessage[];
+      }
+    });
+  }
+
+  clearHistory(): void {
+    this.messages = [];
+    this.images.clear();
+    this.latestSnapshotId = null;
+    clearConversation(this.deps.canvasId?.());
   }
 
   watch(fn: (e: ConductorEvent) => void): () => void {
@@ -657,6 +674,7 @@ function saveConversation(messages: StepMessage[], canvasId?: string): void {
   if (typeof window === "undefined") return;
   const key = getConversationKey(canvasId);
   const stripped = stripImages(messages);
+  void saveAgentSession(stripped, canvasId);
   let payload = { messages: stripped, createdAt: Date.now(), updatedAt: Date.now() };
   let raw = JSON.stringify(payload);
   while (raw.length > AGENT_CONVERSATION_MAX_BYTES && payload.messages.length > 1) {
@@ -673,6 +691,7 @@ function saveConversation(messages: StepMessage[], canvasId?: string): void {
 
 function clearConversation(canvasId?: string): void {
   if (typeof window === "undefined") return;
+  void clearAgentSession(canvasId);
   try {
     window.localStorage.removeItem(getConversationKey(canvasId));
   } catch {}

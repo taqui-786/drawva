@@ -4,8 +4,8 @@ import type { Rect } from "./types";
 import { WidgetManager, type WidgetItem } from "./widgets";
 import { ObjectManager, type ObjectItem } from "./objects";
 
-const MAX_ATLAS_WIDTH = 2048;
-const MAX_ATLAS_HEIGHT = 1536;
+const MAX_ATLAS_WIDTH = 1024;
+const MAX_ATLAS_HEIGHT = 768;
 
 export interface FocusInsetMeta {
   sourceRect: Rect;

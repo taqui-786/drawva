@@ -162,28 +162,34 @@ export class WidgetManager {
         backface-visibility: hidden;
         contain: layout style;
       }
-      .drawva-widget-shell[data-selected="true"],
-      .drawva-widget-shell[data-status="draft"] {
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-selected="true"],
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-status="draft"] {
         border-color: var(--primary) !important;
         border-style: dotted !important;
         border-width: 2px !important;
         box-shadow: none !important;
       }
       .drawva-widget-host[data-mode="select"] > .drawva-widget-shell:hover .drawva-widget-chrome,
-      .drawva-widget-shell[data-selected="true"] .drawva-widget-chrome,
-      .drawva-widget-shell[data-status="draft"] .drawva-widget-chrome {
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-selected="true"] .drawva-widget-chrome,
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-status="draft"] .drawva-widget-chrome {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-widget-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-widget-left-group,
-      .drawva-widget-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-widget-right-group {
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-widget-left-group,
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell:not([data-selected="true"]):not([data-status="draft"]) .drawva-widget-right-group {
         display: none !important;
       }
-      .drawva-widget-shell[data-selected="true"] .drawva-widget-left-group,
-      .drawva-widget-shell[data-selected="true"] .drawva-widget-right-group,
-      .drawva-widget-shell[data-status="draft"] .drawva-widget-left-group,
-      .drawva-widget-shell[data-status="draft"] .drawva-widget-right-group {
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-selected="true"] .drawva-widget-left-group,
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-selected="true"] .drawva-widget-right-group,
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-status="draft"] .drawva-widget-left-group,
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-status="draft"] .drawva-widget-right-group {
         display: flex !important;
+      }
+      .drawva-widget-host:not([data-mode="select"]) .drawva-widget-chrome,
+      .drawva-widget-host:not([data-mode="select"]) .drawva-widget-resize,
+      .drawva-widget-host:not([data-mode="select"]) .drawva-widget-side-actions {
+        display: none !important;
+        pointer-events: none !important;
       }
       .drawva-widget-side-actions {
         display: none !important;
@@ -205,13 +211,13 @@ export class WidgetManager {
         z-index: 10;
         transform-origin: 0 0;
       }
-      .drawva-widget-shell[data-narrow="true"][data-selected="true"] .drawva-widget-side-actions,
-      .drawva-widget-shell[data-narrow="true"][data-status="draft"] .drawva-widget-side-actions {
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-narrow="true"][data-selected="true"] .drawva-widget-side-actions,
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-narrow="true"][data-status="draft"] .drawva-widget-side-actions {
         display: flex !important;
         pointer-events: auto !important;
       }
-      .drawva-widget-shell[data-selected="true"] .drawva-widget-resize,
-      .drawva-widget-shell[data-status="draft"] .drawva-widget-resize {
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-selected="true"] .drawva-widget-resize,
+      .drawva-widget-host[data-mode="select"] .drawva-widget-shell[data-status="draft"] .drawva-widget-resize {
         display: inline-flex !important;
         pointer-events: auto !important;
       }
@@ -353,7 +359,7 @@ export class WidgetManager {
   private onMessage = (e: MessageEvent) => {
     if (e.origin !== location.origin) return;
     if (e.data?.type === "drawva-widget-pointerdown") {
-      if (this.mode === "hand") return;
+      if (this.mode !== "select") return;
       for (const [id, shell] of this.shells) {
         const iframe = shell.querySelector("iframe");
         if (iframe && iframe.contentWindow === e.source) {
@@ -440,6 +446,7 @@ export class WidgetManager {
 
   setSelected(id: string | null): void {
     if (this.selectedId === id) return;
+    if (id && this.mode !== "select") return;
     const prev = this.selectedId;
     this.selectedId = id;
     if (prev) this.applyMode(prev);
@@ -475,6 +482,9 @@ export class WidgetManager {
   setMode(mode: CanvasMode): void {
     this.mode = mode;
     this.hostRoot.dataset.mode = mode;
+    if (mode !== "select") {
+      this.selectedId = null;
+    }
     for (const id of this.toolbars.keys()) this.applyMode(id);
   }
 
@@ -485,49 +495,48 @@ export class WidgetManager {
     const shell = this.shells.get(id);
     const hand = this.mode === "hand";
     const select = this.mode === "select";
-    const isSelected = this.selectedId === id;
+    const isSelected = select && this.selectedId === id;
     const widget = this.widgets.get(id);
     const isDraft = widget?.status === "draft";
-    const active = isDraft || isSelected;
+    const active = select && (isDraft || isSelected);
     const frame = shell?.querySelector("iframe") as HTMLIFrameElement | null;
 
-    this.hostRoot.style.zIndex = active || hand || select ? "40" : "20";
+    this.hostRoot.style.zIndex = select ? "40" : "20";
 
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
-      // Hand pans through the shell; the iframe keeps pointer-events so graphs/HTML stay clickable.
-      shell.style.pointerEvents = hand ? "none" : active || select ? "auto" : "none";
-      shell.style.cursor = hand ? "grab" : select ? "grab" : "default";
-      shell.style.borderColor = active && !hand ? "var(--primary)" : "transparent";
-      shell.style.borderStyle = active && !hand ? "dotted" : "none";
+      shell.style.pointerEvents = select ? "auto" : "none";
+      shell.style.cursor = select ? "grab" : "default";
+      shell.style.borderColor = active ? "var(--primary)" : "transparent";
+      shell.style.borderStyle = active ? "dotted" : "none";
       shell.style.borderWidth = "2px";
       shell.style.boxShadow = "none";
     }
 
     if (frame) {
-      frame.style.pointerEvents = hand || active || select ? "auto" : "none";
+      frame.style.pointerEvents = select || hand ? "auto" : "none";
     }
 
     if (chrome) {
-      chrome.style.display = hand ? (isDraft ? "flex" : "none") : active ? "flex" : "";
+      chrome.style.display = select ? (active ? "flex" : "") : "none";
     }
     if (sideActions) {
       const isNarrow = shell?.dataset.narrow === "true";
-      sideActions.style.display = !hand && active && isNarrow ? "flex" : "none";
+      sideActions.style.display = select && active && isNarrow ? "flex" : "none";
     }
     if (dragBar) {
-      dragBar.style.display = hand && !isDraft ? "none" : "inline-flex";
+      dragBar.style.display = select ? "inline-flex" : "none";
     }
     if (acceptBtn) {
-      acceptBtn.style.display = isDraft ? "inline-flex" : "none";
+      acceptBtn.style.display = select && isDraft ? "inline-flex" : "none";
     }
     if (resizeHandle) {
-      resizeHandle.style.display = active ? "inline-flex" : "none";
+      resizeHandle.style.display = select && active ? "inline-flex" : "none";
     }
-    resizeWidth.style.display = active ? "inline-flex" : "none";
-    resizeHeight.style.display = active ? "inline-flex" : "none";
+    resizeWidth.style.display = select && active ? "inline-flex" : "none";
+    resizeHeight.style.display = select && active ? "inline-flex" : "none";
     if (refine) {
-      refine.style.display = active ? "inline-flex" : "none";
+      refine.style.display = select && active ? "inline-flex" : "none";
     }
     if (overlay) {
       overlay.style.display = isDraft ? "block" : "none";
@@ -795,7 +804,7 @@ export class WidgetManager {
     shell.append(body, chrome, sideActions, resizeHandle, resizeWidth, resizeHeight);
 
     shell.addEventListener("pointerdown", (e) => {
-      if (this.mode === "hand") return;
+      if (this.mode !== "select") return;
       const target = e.target as HTMLElement | null;
       if (!target?.closest(".drawva-widget-btn") && !target?.closest(".drawva-widget-resize")) {
         e.stopPropagation();
@@ -806,13 +815,13 @@ export class WidgetManager {
     const cb = this.opts.callbacks ?? {};
     const beginDrag = (e: PointerEvent) => {
       e.stopPropagation();
-      if (this.mode !== "hand") this.setSelected(widget.id);
+      if (this.mode === "select") this.setSelected(widget.id);
       dragBar.setPointerCapture?.(e.pointerId);
       cb.onDragStart?.(widget.id, e);
     };
     const beginResize = (mode: WidgetResizeMode) => (e: PointerEvent) => {
       e.stopPropagation();
-      if (this.mode !== "hand") this.setSelected(widget.id);
+      if (this.mode === "select") this.setSelected(widget.id);
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
       cb.onResizeStart?.(widget.id, mode, e);
     };
