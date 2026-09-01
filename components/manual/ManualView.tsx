@@ -647,7 +647,7 @@ ollama serve               # default port 11434`}
               <HugeiconsIcon icon={BotIcon} />
               <AlertTitle>The Agent needs an API provider</AlertTitle>
               <AlertDescription>
-                Select an API connection with a vision-capable model first. Codex and Antigravity are available for one-shot Ask AI, but are not used by Drawva Agent.
+                Select an API connection with a vision-capable model first.
               </AlertDescription>
             </Alert>
 

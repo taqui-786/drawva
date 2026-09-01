@@ -31,9 +31,6 @@ export async function POST(req: Request) {
   }
 
   const providerType: ProviderType = body.providerType || "custom";
-  if (providerType === "codex" || providerType === "antigravity") {
-    return NextResponse.json({ error: "Compact requires an API provider." }, { status: 400 });
-  }
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   const modelId = typeof body.model === "string" ? body.model.trim() : "";
   const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";

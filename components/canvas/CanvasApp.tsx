@@ -540,8 +540,7 @@ export function CanvasApp() {
     cloudSync.current?.cancel();
     const config = getProviderConfig();
     const model = getActiveModel();
-    const isCli = config?.type === "codex" || config?.type === "antigravity";
-    if (!config || !model || (!isCli && !config.apiKey)) {
+    if (!config || !model || !config.apiKey) {
       setSettingsOpen(true);
       toast.info("Please configure an AI provider and select a model.");
       return;
@@ -576,8 +575,7 @@ export function CanvasApp() {
       cloudSync.current?.cancel();
       const config = getProviderConfig();
       const model = getActiveModel();
-      const isCli = config?.type === "codex" || config?.type === "antigravity";
-      if (!config || !model || (!isCli && !config.apiKey)) {
+      if (!config || !model || !config.apiKey) {
         return;
       }
       const prompt =
@@ -2217,7 +2215,17 @@ export function CanvasApp() {
         selectedElement={mode === "select" ? selectedElement : null}
         onTidy={handleTidy}
         cloudStatus={cloudStatus}
-        onTriggerCloudSync={() => void cloudSync.current?.flush()}
+         onTriggerCloudSync={() => {
+           const sync = cloudSync.current;
+           if (!engine || !isAuthenticated || !sync) {
+             toast.info("Sign in to sync this canvas to the cloud.");
+             return;
+           }
+           const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
+           void sync.syncNow(snapshot).then((synced) => {
+             if (!synced) toast.error("Cloud sync failed. Please try again.");
+           });
+         }}
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">

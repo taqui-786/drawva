@@ -581,10 +581,10 @@ try {
     assert.ok((await res.json()).error.includes("prompt text"));
   });
 
-  await test("E2 step validates CLI providers requiring modelId", async () => {
-    const res = await post("/api/canvas/agent/step", { ...validStepBase, providerType: "codex", model: "" });
+  await test("E2 step validates required apiKey and modelId", async () => {
+    const res = await post("/api/canvas/agent/step", { ...validStepBase, model: "" });
     assert.equal(res.status, 400);
-    const res2 = await post("/api/canvas/agent/step", { ...validStepBase, providerType: "antigravity", model: "" });
+    const res2 = await post("/api/canvas/agent/step", { ...validStepBase, apiKey: "" });
     assert.equal(res2.status, 400);
   });
 
@@ -718,11 +718,7 @@ try {
     assert.equal(data.summary, "SUMMARY: kept ids and coords.");
   });
 
-  await test("E12 compact rejects CLI providers and missing fields", async () => {
-    assert.equal(
-      (await post("/api/canvas/agent/compact", { providerType: "antigravity", apiKey: "k", model: "m", messages: [] })).status,
-      400
-    );
+  await test("E12 compact rejects invalid / missing fields", async () => {
     assert.equal((await post("/api/canvas/agent/compact", { providerType: "custom", apiKey: "k", model: "m" })).status, 400);
   });
 } finally {

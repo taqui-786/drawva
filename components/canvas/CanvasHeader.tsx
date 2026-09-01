@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
@@ -305,24 +304,6 @@ export function CanvasHeader({
     if (!activeModel) return false;
     return getModelCapabilitiesCached(activeModel).reasoning;
   }, [activeModel, capabilitiesVersion]);
-
-  // Warm the react-query cache for the settings dialog while the page is idle,
-  // so opening Settings never waits on a network round-trip.
-  const queryClient = useQueryClient();
-  useEffect(() => {
-    const t = setTimeout(() => {
-      void queryClient.prefetchQuery({
-        queryKey: ["cli-status"],
-        queryFn: async () => {
-          const res = await fetch("/api/canvas/provider");
-          if (!res.ok) return null;
-          return res.json();
-        },
-        staleTime: 5 * 60 * 1000,
-      });
-    }, 2000);
-    return () => clearTimeout(t);
-  }, [queryClient]);
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-1.5 sm:px-3 w-full max-w-full overflow-hidden">

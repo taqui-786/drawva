@@ -230,14 +230,24 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   await deps.draft.accept(deps.engine);
   deps.afterBoardChange();
 
-  const applied: { objectId: string; kind: string; box: Rect }[] = [];
+  const applied: { objectId: string; kind: string; box: Rect; maxWidth?: number; fontSize?: number }[] = [];
   const afterW = new Set(deps.widgets.all().map((w) => w.id));
   const afterO = new Set(deps.objects.all().map((o) => o.id));
   for (const w of deps.widgets.all()) {
     if (!beforeW.has(w.id)) applied.push({ objectId: w.id, kind: w.kind, box: { x: w.x, y: w.y, w: w.w, h: w.h } });
   }
   for (const o of deps.objects.all()) {
-    if (!beforeO.has(o.id)) applied.push({ objectId: o.id, kind: o.kind, box: { x: o.x, y: o.y, w: o.w, h: o.h } });
+    if (!beforeO.has(o.id)) {
+      // For text, box.w is the tight width of the longest wrapped line — surface
+      // the wrap boundary (maxWidth) + fontSize so the model understands the
+      // effective column vs its requested width instead of guessing.
+      const row: (typeof applied)[number] = { objectId: o.id, kind: o.kind, box: { x: o.x, y: o.y, w: o.w, h: o.h } };
+      if (o.kind === "text") {
+        if (typeof o.maxWidth === "number") row.maxWidth = o.maxWidth;
+        if (typeof o.fontSize === "number") row.fontSize = o.fontSize;
+      }
+      applied.push(row);
+    }
   }
   for (const wid of beforeW) {
     if (!afterW.has(wid)) applied.push({ objectId: wid, kind: "removed_widget", box: { x: 0, y: 0, w: 0, h: 0 } });

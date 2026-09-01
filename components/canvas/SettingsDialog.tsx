@@ -91,16 +91,6 @@ const PROVIDER_METADATA: Record<
     apiKeyUrl: "https://console.groq.com/keys",
     keyPlaceholder: "gsk_...",
   },
-  codex: {
-    tagline: "Local CLI Session",
-    apiKeyUrl: "https://github.com/openai/codex",
-    keyPlaceholder: "Local codex session (no key required)",
-  },
-  antigravity: {
-    tagline: "Local CLI Session (agy)",
-    apiKeyUrl: "https://antigravity.google.com",
-    keyPlaceholder: "Local antigravity session (no key required)",
-  },
   nvidia: {
     tagline: "NVIDIA NIM Cloud Endpoints",
     apiKeyUrl: "https://build.nvidia.com/",
@@ -248,31 +238,10 @@ function ProviderTabContent({
     if (type !== "custom") {
       setBaseUrl(info.defaultBaseUrl || "");
     }
-    if (type === "codex" || type === "antigravity") {
-      setApiKey(`${type}-local`);
-    } else if (apiKey === "codex-local" || apiKey === "antigravity-local") {
-      setApiKey("");
-    }
   };
 
-  const isLocalCli = providerType === "codex" || providerType === "antigravity";
-
-  const { data: cliStatus, isLoading: cliStatusLoading } = useQuery({
-    queryKey: ["cli-status"],
-    queryFn: async () => {
-      const res = await fetch("/api/canvas/provider");
-      if (!res.ok) return null;
-      return (await res.json()) as {
-        codex?: { available: boolean; reason?: string; path?: string; models?: string[] };
-        antigravity?: { available: boolean; reason?: string; path?: string; models?: string[] };
-      };
-    },
-    enabled: isLocalCli,
-    staleTime: 5 * 60 * 1000,
-  });
-
   const verifyAndSave = async () => {
-    if (!isLocalCli && !apiKey.trim()) {
+    if (!apiKey.trim()) {
       toast.error("Please enter an API key.");
       return;
     }
@@ -288,7 +257,7 @@ function ProviderTabContent({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           providerType,
-          apiKey: apiKey.trim() || (isLocalCli ? `${providerType}-local` : ""),
+          apiKey: apiKey.trim(),
           baseUrl: baseUrl.trim() || undefined,
           customModels,
         }),
@@ -308,7 +277,7 @@ function ProviderTabContent({
 
       const config: ProviderConfig = {
         type: providerType,
-        apiKey: apiKey.trim() || (isLocalCli ? `${providerType}-local` : ""),
+        apiKey: apiKey.trim(),
         baseUrl: baseUrl.trim() || undefined,
         customModels: providerType === "custom" ? customModels : undefined,
       };
@@ -380,92 +349,44 @@ function ProviderTabContent({
             <div>
               <CardTitle>{PROVIDER_INFOS[providerType].name} Credentials</CardTitle>
               <CardDescription>
-                {isLocalCli
-                  ? "Connect via your authenticated local CLI session."
-                  : "Enter your API credentials to connect."}
+                Enter your API credentials to connect.
               </CardDescription>
             </div>
             {meta.apiKeyUrl && (
               <Button variant="link" size="sm" className="h-auto p-0" render={<a href={meta.apiKeyUrl} target="_blank" rel="noopener noreferrer" />}>
-                {isLocalCli ? "CLI docs" : "Get API key"}
+                Get API key
               </Button>
             )}
           </div>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          {isLocalCli ? (
-            cliStatusLoading ? (
-              <div className="rounded-md border border-border/70 bg-muted/40 p-3 flex flex-col gap-2">
-                <Skeleton className="h-3.5 w-48" />
-                <Skeleton className="h-3 w-full" />
-                <Skeleton className="h-3 w-2/3" />
-              </div>
-            ) : (
-            <div className="rounded-md border border-border/70 bg-muted/40 p-3 text-xs text-muted-foreground flex flex-col gap-1.5">
-              <div className="font-semibold text-foreground flex items-center gap-2">
-                <span
-                  className={`inline-block h-2 w-2 rounded-full ${
-                    (providerType === "codex" ? cliStatus?.codex?.available : cliStatus?.antigravity?.available) !== false
-                      ? "bg-emerald-500"
-                      : "bg-destructive"
-                  }`}
-                />
-                {providerType === "codex"
-                  ? cliStatus?.codex?.available !== false
-                    ? "Local Codex Session Detected"
-                    : "Codex CLI Not Detected"
-                  : cliStatus?.antigravity?.available !== false
-                  ? "Local Antigravity Session Detected"
-                  : "Antigravity CLI (agy) Not Detected"}
-              </div>
-              <p>
-                {providerType === "codex" ? (
-                  cliStatus?.codex?.available !== false ? (
-                    <>
-                      Detected executable at <code className="text-foreground">{cliStatus?.codex?.path || "PATH"}</code> using session in <code className="text-foreground">~/.codex/auth.json</code>. No API key or Base URL required.
-                    </>
-                  ) : (
-                    <>{cliStatus?.codex?.reason || "Install and log in with `codex login` in your terminal."}</>
-                  )
-                ) : cliStatus?.antigravity?.available !== false ? (
-                  <>
-                    Detected executable at <code className="text-foreground">{cliStatus?.antigravity?.path || "PATH"}</code> using session in <code className="text-foreground">~/.gemini/antigravity-cli</code>. No API key or Base URL required.
-                  </>
-                ) : (
-                  <>{cliStatus?.antigravity?.reason || "Antigravity CLI binary (agy) not found on PATH."}</>
-                )}
-              </p>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="api-key">API Key</Label>
+            <div className="relative">
+              <Input
+                id="api-key"
+                type={showApiKey ? "text" : "password"}
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder={meta.keyPlaceholder}
+                autoComplete="off"
+                spellCheck={false}
+                className="pr-10 font-mono"
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="absolute right-1 top-1/2 -translate-y-1/2"
+                onClick={() => setShowApiKey(!showApiKey)}
+              >
+                <HugeiconsIcon icon={showApiKey ? EyeOffIcon : EyeIcon} />
+                <span className="sr-only">Toggle API key visibility</span>
+              </Button>
             </div>
-            )
-          ) : (
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="api-key">API Key</Label>
-              <div className="relative">
-                <Input
-                  id="api-key"
-                  type={showApiKey ? "text" : "password"}
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={meta.keyPlaceholder}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="pr-10 font-mono"
-                />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  className="absolute right-1 top-1/2 -translate-y-1/2"
-                  onClick={() => setShowApiKey(!showApiKey)}
-                >
-                  <HugeiconsIcon icon={showApiKey ? EyeOffIcon : EyeIcon} />
-                  <span className="sr-only">Toggle API key visibility</span>
-                </Button>
-              </div>
-            </div>
-          )}
+          </div>
 
-          {!isLocalCli && (providerType === "custom" || (Boolean(PROVIDER_INFOS[providerType].defaultBaseUrl) && baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl)) && (
+          {(providerType === "custom" || (Boolean(PROVIDER_INFOS[providerType].defaultBaseUrl) && baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl)) && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="base-url">Base URL</Label>
@@ -733,6 +654,8 @@ function UsageTabContent() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ["aiUsage"],
     queryFn: () => getRecentAiUsage(10),
+    staleTime: 0,
+    refetchOnMount: "always",
   });
 
   const clearMutation = useMutation({
@@ -900,4 +823,3 @@ function UsageTabContent() {
     </div>
   );
 }
-

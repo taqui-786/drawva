@@ -39,7 +39,7 @@ The AI is an interactive, multi-turn agent driven by a client-side Conductor and
 
 1. **📸 Perception & Snapshot**: `atlas.ts` captures canvas WebP snapshots + `scene.ts` serializes visible canvas items into compact scene JSON.
 2. **🎼 Conductor Agent Loop** (`lib/ai/conductor.ts`): Client-side controller managing multi-turn agent turns, message history, streaming SSE events, steering, cancellation, and token budgets.
-3. **⚡ Step API Route** (`app/api/canvas/agent/step/route.ts`): Server-side SSE route that prepares system prompts with enabled plugins catalog, dispatches LLM calls via LangChain `ChatOpenAI` (`lib/ai/model.ts`) or local CLI runners (`lib/ai/antigravity.ts`, `lib/ai/codex.ts`), and streams back tool calls or text deltas.
+3. **⚡ Step API Route** (`app/api/canvas/agent/step/route.ts`): Server-side SSE route that prepares system prompts with enabled plugins catalog, dispatches LLM calls via AI SDK (`lib/ai/model.ts`), and streams back tool calls or text deltas.
 4. **🛠️ Tool Execution** (`lib/ai/conductorTools.ts`, `lib/ai/agentTools.ts`): Client executes requested agent tools against live canvas state (`apply_patch`, `inspect_box`, `load_plugin`, `read_history`, etc.) on objects, widgets, drafts, and history.
 5. **🗜️ Context Compaction** (`app/api/canvas/agent/compact/route.ts`): Summarizes earlier conversation turns when token limits are reached (`AGENT_HISTORY_TOKEN_TRIGGER`).
 6. **🎨 Render**: Native shapes, text, and formulas render to canvas layers via `ObjectManager` / `CanvasEngine`; rich diagrams and HTML applets mount via `WidgetManager` into sandboxed iframes (`/widget-host.html`).
@@ -61,7 +61,7 @@ Drawva Stack Architecture:
  │  Conductor AI Agent System (lib/ai/ & app/api/canvas/):                  │
  │   ├── Conductor Loop (lib/ai/conductor.ts & conductorTools.ts)           │
  │   ├── Step & Compact Routes (/api/canvas/agent/step & /compact)          │
- │   └── Provider Adapters (LangChain ChatOpenAI, Antigravity CLI, Codex)   │
+ │   └── Provider Adapters (AI SDK OpenAI, Anthropic, Gemini, Groq, NVIDIA) │
  ├──────────────────────────────────────────────────────────────────────────┤
  │  Persistence: IndexedDB (persistence.ts) & Cloud Sync (/api/canvas/cloud)│
  └──────────────────────────────────────────────────────────────────────────┘
@@ -105,13 +105,12 @@ Drawva Stack Architecture:
 ### 3. Conductor AI Agent Architecture (`lib/ai/` & `app/api/canvas/`)
 
 - `conductor.ts`: Client-side `Conductor` class orchestrating the multi-turn ReAct agent loop, managing message history, streaming SSE events, tool invocation cycles, steer/cancel queues, and turn budgets.
-- `conductorTools.ts` & `agentTools.ts`: Canvas tool executor and OpenAI/LangChain tool definitions (`apply_patch`, `inspect_box`, `load_plugin`, `read_history`, etc.).
-- `model.ts`: LangChain model factory `createChatModel({ baseUrl, apiKey, model })` → `ChatOpenAI` with retry/backoff.
-- `antigravity.ts` & `codex.ts`: Local CLI subprocess runners for Antigravity and Codex providers.
+- `conductorTools.ts` & `agentTools.ts`: Canvas tool executor and AI SDK tool definitions (`apply_patch`, `inspect_box`, `load_plugin`, `read_history`, etc.).
+- `model.ts`: Model factory `createChatModel({ providerType, baseUrl, apiKey, model })` with retry/backoff.
 - `modelRegistry.ts` & `capabilities.ts`: Model metadata registry, pricing tiers, vision capability detection, and tool calling support.
 - `prompts.ts`: `AGENT_SYSTEM_PROMPT` and system prompt contracts.
 - `provider.ts`: Safe-SSR localStorage helpers for provider config (`drawva.aiProvider`), cached models (`drawva.aiModels`), and active model (`drawva.aiModel`).
-- `app/api/canvas/agent/step/route.ts`: SSE streaming endpoint executing a single LLM agent step (via ChatOpenAI or local CLI subprocess).
+- `app/api/canvas/agent/step/route.ts`: SSE streaming endpoint executing a single LLM agent step via AI SDK.
 - `app/api/canvas/agent/compact/route.ts`: POST endpoint summarizing conversation history on context overflow.
 - `app/api/canvas/provider/route.ts`: POST endpoint verifying API credentials and fetching model lists.
 - `app/api/canvas/model-validate/route.ts`: POST endpoint validating model tool calling and vision support.

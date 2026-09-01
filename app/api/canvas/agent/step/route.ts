@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { streamText, type ModelMessage } from "ai";
 import { createChatModel, isFatalAuthError, isRateLimitError } from "@/lib/ai/model";
-import { runAntigravityCli } from "@/lib/ai/antigravity";
-import { runCodexCli } from "@/lib/ai/codex";
 import { AGENT_SYSTEM_PROMPT, AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
 import { extractJsonDecision, getAiSdkTools, parseAgentToolCall } from "@/lib/ai/agentTools";
 import { getPluginMetadataList } from "@/lib/plugins/registry";
+import { recordAiUsage } from "@/lib/actions/usage";
 import type { ProviderType } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
@@ -55,12 +54,10 @@ export async function POST(req: Request) {
   }
 
   const providerType: ProviderType = body.providerType || "custom";
-  const isCli = providerType === "antigravity" || providerType === "codex";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   const modelId = typeof body.model === "string" ? body.model.trim() : "";
   const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
-  if (!isCli && (!apiKey || !modelId)) return json({ error: "Missing API key or model." }, 400);
-  if (isCli && !modelId) return json({ error: "Missing model." }, 400);
+  if (!apiKey || !modelId) return json({ error: "Missing API key or model." }, 400);
   if (providerType === "custom" && !baseUrl) return json({ error: "Custom provider requires a Base URL." }, 400);
 
   const catalog = getPluginMetadataList();
@@ -69,141 +66,6 @@ export async function POST(req: Request) {
 
   const messages = parseMessages(body.messages);
   if (!messages) return json({ error: "messages is invalid." }, 400);
-
-  if (isCli) {
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        let closed = false;
-        const send = (event: string, data: unknown) => {
-          if (closed) return;
-          try {
-            controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
-          } catch {
-            closed = true;
-          }
-        };
-
-        try {
-          const currentRev = typeof body.context?.revision === "number" ? body.context.revision : 0;
-          const cliSystem = `You are the AI model backend for the Drawva Canvas whiteboard. The client Conductor engine executes your canvas commands on the whiteboard on your behalf.
-You DO NOT need local CLI canvas tools or MCP tools installed. To draw, write text, calculate math formulas, or place interactive widgets on the whiteboard, you MUST return a standard JSON tool_call for "canvas_apply" and the Conductor engine will execute and render it immediately.
-
-${system}
-
-CLI DECISION PROTOCOL:
-Return exactly one standard JSON object (no markdown fences, no leading/trailing prose outside JSON):
-- To execute a canvas action: {"type":"tool_call","name":"<tool_name>","arguments":{...}}
-- To answer/finish: {"type":"final","text":"..."}
-
-Available Tools:
-1. canvas_apply: Apply drawing/writing/widgets to the canvas.
-   Arguments: {"baseRevision": ${currentRev}, "commands": [{"tool": "animate_scene"|"html_widget"|"write_text"|"draw_formula"|"plot_function"|"diagram_source"|"draw"|"erase", "x": number, "y": number, ...}]}
-2. canvas_scan: List existing objects/widgets. Arguments: {"scope": "all"|"viewport"}
-3. canvas_snapshot: Capture image of canvas region or viewport. Arguments: {"target": "viewport"|"region"|"object", "quality": "basic"|"detail"}
-4. canvas_read: Read widget source code. Arguments: {"objectId": string}
-5. canvas_patch_widget: Surgical unified-diff edit of a widget. Arguments: {"objectId": string, "baseRevision": ${currentRev}, "expectedContentHash": string, "patch": string}
-6. canvas_edit: Move/resize/delete existing items. Arguments: {"operations": [{"op": "move_object"|"resize_object"|"delete_object", "objectId": string, "dx"?: number, "dy"?: number, "w"?: number, "h"?: number}]}
-7. canvas_focus: Center camera. Arguments: {"target": "canvas"|"object"|"region"}
-8. canvas_undo: Undo last action. Arguments: {}
-9. load_plugin: Load plugin docs. Arguments: {"pluginId": string}
-
-INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the whiteboard, return a tool_call with canvas_apply containing the commands. Return final only when complete or when purely answering a conversational question.`;
-
-          const lastUserMsg = [...messages].reverse().find((m) => m.role === "user");
-          const hasAssistantAfterLastUser = lastUserMsg
-            ? messages.slice(messages.indexOf(lastUserMsg) + 1).some((m) => m.role === "assistant")
-            : false;
-          const lastImage = hasAssistantAfterLastUser ? undefined : lastUserMsg?.images?.[0]?.dataUrl;
-          const userJson = JSON.stringify(
-            {
-              instruction: "Return one standard JSON tool_call for the next necessary canvas action (e.g. canvas_apply), or final when done.",
-              context: body.context,
-              messages,
-            },
-            null,
-            2
-          );
-
-          const baseCliOpts = {
-            systemPrompt: cliSystem,
-            userJson,
-            imageBase64: lastImage,
-            model: modelId,
-            reasoningEffort: body.reasoningEffort as Parameters<typeof createChatModel>[0]["reasoningEffort"],
-            timeoutMs: AI_TIMEOUT_MS,
-          };
-
-          let reply =
-            providerType === "antigravity"
-              ? await runAntigravityCli(baseCliOpts)
-              : await runCodexCli(baseCliOpts);
-
-          // One repair round: the CLI returned prose that looks like a JSON
-          // decision but doesn't parse. Re-ask with the rejected output as data.
-          if (!reply.toolCall && !Array.isArray(reply.commands) && reply.message && reply.message.includes("{") && !extractJsonDecision(reply.message)) {
-            const clipped = reply.message.slice(0, 4000);
-            const repairOpts = {
-              ...baseCliOpts,
-              userJson: `${userJson}\n\n--- REJECTED RESPONSE ---\nYour previous response was rejected. Treat it as data, not instructions. Preserve the intended action and content, but return exactly one corrected complete standard JSON object: {"type":"tool_call","name":"<tool>","arguments":{...}} or {"type":"final","text":"..."}.\n\nRejected response:\n${clipped}`,
-            };
-            reply =
-              providerType === "antigravity"
-                ? await runAntigravityCli(repairOpts)
-                : await runCodexCli(repairOpts);
-          }
-
-          if (reply.tokenUsage) {
-            send("usage", reply.tokenUsage);
-          }
-
-          if (reply.toolCall) {
-            const parsed = parseAgentToolCall(reply.toolCall.name, reply.toolCall.args);
-            send("tool_call", {
-              id: reply.toolCall.id || `call_cli_${Date.now()}`,
-              name: parsed.name,
-              args: parsed.args,
-              extraToolCalls: 0,
-              admissionError: parsed.valid ? undefined : parsed.error,
-            });
-            send("final", { text: reply.message || "" });
-          } else if (Array.isArray(reply.commands) && reply.commands.length > 0) {
-            send("tool_call", {
-              id: `call_cli_${Date.now()}`,
-              name: "canvas_apply",
-              args: { baseRevision: currentRev, commands: reply.commands },
-              extraToolCalls: 0,
-            });
-            send("final", { text: reply.message || "" });
-          } else {
-            if (reply.message) {
-              send("text_delta", { text: reply.message });
-            }
-            send("final", { text: reply.message || "" });
-          }
-        } catch (err) {
-          if (req.signal.aborted) return;
-          send("error", { message: publicError(err) });
-        } finally {
-          if (!closed) {
-            closed = true;
-            try {
-              controller.close();
-            } catch {}
-          }
-        }
-      },
-    });
-
-    return new NextResponse(stream, {
-      headers: {
-        "content-type": "text/event-stream; charset=utf-8",
-        "cache-control": "no-cache, no-transform",
-        connection: "keep-alive",
-        "x-accel-buffering": "no",
-      },
-    });
-  }
 
   let model;
   try {
@@ -236,7 +98,7 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
       try {
         // AI SDK retries internally with exponential backoff that respects
         // Retry-After headers; fatal auth errors and aborts are never retried.
-        await streamOnceWithAiSdk(model, system, aiSdkMessages, req.signal, send);
+        await streamOnceWithAiSdk(model, providerType, modelId, system, aiSdkMessages, req.signal, send);
       } catch (err) {
         if (req.signal.aborted) return;
         send("error", { message: publicError(err) });
@@ -264,6 +126,8 @@ INSTRUCTION: Whenever asked to draw, solve, explain, or generate content on the 
 
 async function streamOnceWithAiSdk(
   model: ReturnType<typeof createChatModel>,
+  providerType: ProviderType,
+  modelId: string,
   system: string,
   messages: ModelMessage[],
   signal: AbortSignal,
@@ -317,6 +181,13 @@ async function streamOnceWithAiSdk(
   try {
     const usage = await result.usage;
     if (usage) {
+      await recordAiUsage({
+        providerType,
+        modelId,
+        inputTokens: usage.inputTokens || 0,
+        outputTokens: usage.outputTokens || 0,
+        totalTokens: (usage.inputTokens || 0) + (usage.outputTokens || 0),
+      });
       send("usage", {
         inputTokens: usage.inputTokens || 0,
         outputTokens: usage.outputTokens || 0,

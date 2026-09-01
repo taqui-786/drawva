@@ -586,7 +586,7 @@ export class Conductor {
     if (this.messages.length <= COMPACT_KEEP) return;
     const config = this.deps.provider() ?? getProviderConfig();
     const model = getActiveModel();
-    if (!config || !model || config.type === "codex" || config.type === "antigravity") return;
+    if (!config || !model) return;
     this.emit({ kind: "compact" });
     const keep = this.messages.slice(-COMPACT_KEEP);
     // Providers require tool results to follow their assistant tool call, and

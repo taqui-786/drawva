@@ -229,7 +229,10 @@ function textColumnWidth(
   scale: number,
   viewportW: number
 ): number {
-  const cap = Math.max(80, Math.min(3200, Math.round(Math.max(1, viewportW) * 0.9)));
+  // Wrap-column ceiling. Capping at 3200 silently munged explicit model widths
+  // (w:3900 -> maxWidth:3200 -> orphan second line); text boxes are tight-shrunk
+  // to the longest wrapped line by the renderer, so a wide column is safe.
+  const cap = Math.max(80, Math.min(6000, Math.round(Math.max(1, viewportW) * 0.9)));
   const modelW = Number(rawWidth);
   if (Number.isFinite(modelW) && modelW >= 80) {
     return clampNum(modelW, 80, cap);

@@ -177,13 +177,13 @@ export class CloudSyncEngine {
     }, delayMs);
   }
 
-  public async flush(): Promise<boolean> {
+  public async flush(ignoreBusy = false): Promise<boolean> {
     if (!this.enabled || !this.isAuthenticated || !this.pendingSnapshot || this.isSyncing) {
       return false;
     }
 
     // Defer flush if user is actively drawing or AI is generating
-    if (this.isBusyCheck?.()) {
+    if (!ignoreBusy && this.isBusyCheck?.()) {
       if (!this.debounceTimer) {
         this.debounceTimer = setTimeout(() => {
           this.debounceTimer = null;
@@ -226,7 +226,7 @@ export class CloudSyncEngine {
         }, 3000);
         return true;
       } else {
-        this.setStatus("idle");
+        this.setStatus("error");
         return false;
       }
     } catch {
@@ -246,6 +246,11 @@ export class CloudSyncEngine {
         }
       }
     }
+  }
+
+  public syncNow(snapshot: ProjectSnapshot): Promise<boolean> {
+    this.pendingSnapshot = snapshot;
+    return this.flush(true);
   }
 
   public destroy() {
