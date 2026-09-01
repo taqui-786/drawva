@@ -16,6 +16,7 @@ import { diagramDocument } from "@/lib/canvas/diagram";
 import {
   READ_DEFAULT_LINES,
   READ_MAX_CHARS,
+  SCAN_MAX_ITEMS,
   SNAPSHOT_BASIC_MAX_EDGE,
   SNAPSHOT_DETAIL_MAX_EDGE,
 } from "./agentTools";
@@ -35,7 +36,6 @@ export interface ConductorToolDeps {
   camera: Camera;
   getRevision: () => number;
   afterBoardChange: () => void;
-  enabledPluginIds: () => string[];
   registerImage: (img: ActiveImage) => void;
   getInkBox?: () => Rect | null;
 }
@@ -91,16 +91,29 @@ function fnv1a(text: string): string {
   return (h >>> 0).toString(16);
 }
 
+function revisionConflict(currentRevision: number, args: Record<string, unknown>): Record<string, unknown> | null {
+  const base = args.baseRevision;
+  if (typeof base !== "number" || !Number.isFinite(base) || base === currentRevision) return null;
+  return toolError(
+    "REVISION_CONFLICT",
+    `Canvas revision is ${currentRevision}, but you acted on revision ${Math.floor(base)}. Run canvas_scan or canvas_snapshot again to see the current state, then retry with the fresh revision.`,
+    { currentRevision }
+  );
+}
+
 async function execScan(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const scope = args.scope === "viewport" ? "viewport" : "all";
   const viewport = deps.engine.camera.visibleWorldRect();
   const scene = scope === "viewport" ? visibleScene(deps.widgets, deps.objects, viewport) : buildScene(deps.widgets, deps.objects);
+  const total = scene.count;
+  const items = scene.items.slice(0, SCAN_MAX_ITEMS);
   return {
     revision: deps.getRevision(),
     canvasSize: SIZE,
     viewport,
     counts: { widgets: deps.widgets.all().length, objects: deps.objects.all().length },
-    items: scene.items,
+    items,
+    ...(total > items.length ? { truncated: true, totalItems: total, note: `Showing ${items.length} of ${total} items. Focus with scope=viewport or canvas_snapshot on a region for the rest.` } : {}),
   };
 }
 
@@ -162,13 +175,10 @@ function applyContext(deps: ConductorToolDeps): CommandValidationContext {
   const ink = deps.getInkBox?.();
   const changedBox = ink && ink.w > 4 && ink.h > 4 ? ink : undefined;
   const scene = buildScene(deps.widgets, deps.objects);
-  const plugins = new Set(deps.enabledPluginIds());
-  plugins.add("general");
   return {
     aiColor: "#2679b8",
     scale: Math.max(0.03, deps.engine.camera.scale || 1),
     widgetSlots: 8,
-    plugins,
     visibleRect,
     changedBox,
     sceneItems: scene.items,
@@ -202,6 +212,8 @@ function commandBox(cmd: CanvasCommand): { objectId: string; kind: string; box: 
 
 async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const currentRevision = deps.getRevision();
+  const conflict = revisionConflict(currentRevision, args);
+  if (conflict) return conflict;
   const raw = Array.isArray(args.commands) ? args.commands : [];
   const ctx = applyContext(deps);
   const { commands, rejected } = validateCommands(raw, ctx);
@@ -236,16 +248,84 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   if (applied.length === 0) {
     for (const c of commands) applied.push(commandBox(c));
   }
-  return { ok: true, revision: deps.getRevision(), applied, rejected: rejectedRows };
+  const widgetMutated =
+    commands.some((c) => c.tool === "html_widget" || c.tool === "diagram_source" || (c.tool === "animate_scene")) ||
+    applied.some((a) => a.kind === "html" || a.kind === "diagram" || a.kind === "removed_widget");
+  return { ok: true, revision: deps.getRevision(), applied, rejected: rejectedRows, ...(widgetMutated ? { widgetMutated: true } : {}) };
+}
+
+async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) {
+  const currentRevision = deps.getRevision();
+  const conflict = revisionConflict(currentRevision, args);
+  if (conflict) return conflict;
+  const ops = Array.isArray(args.operations) ? args.operations : [];
+  if (ops.length === 0) return toolError("INVALID_ARGUMENT", "operations[] is required (move_object, resize_object, delete_object).");
+  if (ops.length > 16) return toolError("INVALID_ARGUMENT", "At most 16 operations per canvas_edit.");
+
+  const results: { op: string; objectId: string; ok: boolean; reason?: string }[] = [];
+  let touched = false;
+  let widgetTouched = false;
+  deps.history.recordObjects();
+  deps.history.recordWidgets();
+  for (const raw of ops) {
+    const rec = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+    const op = String(rec.op || "");
+    const id = String(rec.objectId || "");
+    const widget = deps.widgets.get(id);
+    const object = widget ? null : deps.objects.get(id);
+    const item = widget || object;
+    if (!item) {
+      results.push({ op, objectId: id, ok: false, reason: "OBJECT_NOT_FOUND" });
+      continue;
+    }
+    if (widget) widgetTouched = true;
+    if (op === "move_object") {
+      const dx = Number(rec.dx);
+      const dy = Number(rec.dy);
+      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
+        results.push({ op, objectId: id, ok: false, reason: "dx,dy numbers required" });
+        continue;
+      }
+      if (widget) deps.widgets.move(id, dx, dy);
+      else deps.objects.move(id, dx, dy);
+      results.push({ op, objectId: id, ok: true });
+      touched = true;
+    } else if (op === "resize_object") {
+      const w = Number(rec.w);
+      const h = Number(rec.h);
+      if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
+        results.push({ op, objectId: id, ok: false, reason: "w,h numbers > 0 required" });
+        continue;
+      }
+      if (widget) deps.widgets.resize(id, w, h);
+      else deps.objects.resize(id, w, h);
+      results.push({ op, objectId: id, ok: true });
+      touched = true;
+    } else if (op === "delete_object") {
+      if (widget) deps.widgets.remove(id);
+      else deps.objects.remove(id);
+      results.push({ op, objectId: id, ok: true });
+      touched = true;
+    } else {
+      results.push({ op, objectId: id, ok: false, reason: `Unknown op: ${op}` });
+    }
+  }
+  if (touched) {
+    deps.afterBoardChange();
+  }
+  const failed = results.filter((r) => !r.ok).length;
+  return {
+    ...(failed === results.length ? { ok: false, code: "ALL_OPERATIONS_REJECTED" } : { ok: true }),
+    revision: deps.getRevision(),
+    operations: results,
+    ...(widgetTouched ? { widgetMutated: true } : {}),
+  };
 }
 
 async function execLoadPlugin(args: Record<string, unknown>, deps: ConductorToolDeps) {
+  void deps;
   const pluginId = String(args.pluginId || "").trim();
   if (!pluginId) return toolError("INVALID_ARGUMENT", "pluginId is required.");
-  const enabled = new Set(deps.enabledPluginIds());
-  if (!enabled.has(pluginId)) {
-    return { ok: false, code: "PLUGIN_NOT_ENABLED", message: `Plugin ${pluginId} is not enabled.` };
-  }
   const res = await fetch(`/api/plugins?doc=${encodeURIComponent(pluginId)}`);
   if (res.status === 404) {
     return { ok: false, code: "PLUGIN_NOT_FOUND", message: `Plugin ${pluginId} was not found.` };
@@ -304,16 +384,28 @@ async function execRead(args: Record<string, unknown>, deps: ConductorToolDeps) 
     startLine,
     endLine: Math.min(view.totalLines, endLine),
     content: view.text,
+    contentHash: fnv1a(content),
   };
 }
 
 async function execPatch(args: Record<string, unknown>, deps: ConductorToolDeps) {
+  const currentRevision = deps.getRevision();
+  const conflict = revisionConflict(currentRevision, args);
+  if (conflict) return conflict;
   const objectId = String(args.objectId || "");
   const widget = deps.widgets.get(objectId);
   if (!widget) return toolError("OBJECT_NOT_FOUND", `No widget with id ${objectId}.`, { objectId });
   const patch = String(args.patch || "");
   const pathGuess = /^(?:---|\+\+\+)\s+[ab]\/widget\.source/m.test(patch) ? "widget.source" : "widget.html";
   const current = pathGuess === "widget.source" ? widget.copyText || widget.html || "" : widget.html || "";
+  const expectedHash = typeof args.expectedContentHash === "string" ? args.expectedContentHash : "";
+  if (expectedHash && expectedHash !== fnv1a(current)) {
+    return toolError(
+      "CONTENT_CHANGED",
+      `Widget changed after it was read (expectedContentHash mismatch). canvas_read objectId "${objectId}" again, then rebuild the patch against the fresh contentHash.`,
+      { objectId }
+    );
+  }
   const result = applyWidgetPatch(current, patch);
   if (!result.ok) return result;
   if (result.content.length > MAX_WIDGET_HTML_LENGTH) {
@@ -348,6 +440,7 @@ async function execPatch(args: Record<string, unknown>, deps: ConductorToolDeps)
     revision: deps.getRevision(),
     linesChanged: result.linesChanged,
     newLineCount: result.newLineCount,
+    widgetMutated: true,
   };
 }
 
@@ -450,6 +543,8 @@ export async function executeTool(
       return execSnapshot(rec, deps);
     case "canvas_apply":
       return execApply(rec, deps);
+    case "canvas_edit":
+      return execEdit(rec, deps);
     case "load_plugin":
       return execLoadPlugin(rec, deps);
     case "canvas_read":

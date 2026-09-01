@@ -2,6 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { extractJsonDecision } from "./agentTools";
 import type { AgentReply } from "./types";
 import type { ReasoningEffort } from "./provider";
 
@@ -196,18 +197,8 @@ export async function runAntigravityCli(opts: AntigravityRunOptions): Promise<Ag
       rawResponse = stdout;
     }
 
-    // Extract JSON from response if available, or treat plain text as answer
-    let parsed: Record<string, unknown> = {};
-    const jsonMatch = rawResponse.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
-      } catch {
-        parsed = { message: rawResponse.trim(), commands: [] };
-      }
-    } else {
-      parsed = { message: rawResponse.trim(), commands: [] };
-    }
+    // Extract the first balanced JSON object from the response; plain text becomes an answer.
+    const parsed = extractJsonDecision(rawResponse) ?? { message: rawResponse.trim(), commands: [] };
 
     let toolCall: AgentReply["toolCall"] | undefined;
     if (parsed.type === "tool_call" || (typeof parsed.name === "string" && parsed.name)) {

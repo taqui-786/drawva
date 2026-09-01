@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef, useDeferredValue, memo } from "react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -56,6 +56,159 @@ interface ModelItem {
   capabilities: ModelCapabilities;
 }
 
+/** Rows rendered initially; more are appended on scroll. */
+const PAGE_SIZE = 40;
+/** Delay batch capability validation until the open animation finishes. */
+const VALIDATE_DELAY_MS = 350;
+
+const ModelRow = memo(function ModelRow({
+  item,
+  isActive,
+  isValidatingAll,
+  isValidatingThis,
+  onSelect,
+}: {
+  item: ModelItem;
+  isActive: boolean;
+  isValidatingAll: boolean;
+  isValidatingThis: boolean;
+  onSelect: (item: ModelItem) => void;
+}) {
+  const isVerifiedVision = item.capabilities.status === "verified_vision" || item.capabilities.vision;
+  const isVerifiedNoVision = item.capabilities.status === "verified_no_vision";
+  const isReasoning = item.capabilities.reasoning;
+
+  return (
+    <button
+      type="button"
+      disabled={isValidatingThis}
+      onClick={() => onSelect(item)}
+      className={cn(
+        "flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-left transition-all",
+        isActive
+          ? "bg-primary/10 border border-primary/30 text-foreground font-medium"
+          : isVerifiedVision
+          ? "hover:bg-muted/70 text-muted-foreground hover:text-foreground border border-transparent cursor-pointer"
+          : isVerifiedNoVision
+          ? "hover:bg-destructive/5 text-muted-foreground border border-destructive/20 opacity-80 cursor-pointer"
+          : "hover:bg-muted/50 text-muted-foreground border border-border/30 cursor-pointer"
+      )}
+    >
+      <div className="flex items-center gap-2.5 min-w-0">
+        <div
+          className={cn(
+            "flex size-6 shrink-0 items-center justify-center rounded-md text-xs",
+            isActive
+              ? "bg-primary text-primary-foreground"
+              : isVerifiedVision
+              ? "bg-muted text-muted-foreground"
+              : isVerifiedNoVision
+              ? "bg-destructive/10 text-destructive"
+              : "bg-muted text-muted-foreground"
+          )}
+        >
+          {isValidatingThis ? (
+            <HugeiconsIcon icon={Loading03Icon} className="size-3.5 animate-spin" />
+          ) : isActive ? (
+            <HugeiconsIcon icon={Tick02Icon} className="size-3.5" />
+          ) : isVerifiedNoVision ? (
+            <HugeiconsIcon icon={Alert02Icon} className="size-3.5" />
+          ) : (
+            <HugeiconsIcon icon={AiChipIcon} className="size-3.5" />
+          )}
+        </div>
+
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs text-foreground truncate">
+              {item.name}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+        {/* Vision Capability Badge */}
+        {isVerifiedVision ? (
+          <Badge
+            variant="outline"
+            className="bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20 text-[10px] py-0 px-1.5 gap-0.5"
+          >
+            <HugeiconsIcon icon={AiViewIcon} className="size-2.5" />
+            Vision
+          </Badge>
+        ) : isVerifiedNoVision ? (
+          <Badge
+            variant="outline"
+            className="bg-destructive/10 text-destructive border-destructive/30 text-[10px] py-0 px-1.5 gap-0.5"
+          >
+            <HugeiconsIcon icon={Alert02Icon} className="size-2.5" />
+            No Vision
+          </Badge>
+        ) : isValidatingAll ? (
+          <Badge
+            variant="outline"
+            className="bg-muted text-muted-foreground border-border/40 text-[10px] py-0 px-1.5 gap-0.5 animate-pulse"
+          >
+            <HugeiconsIcon icon={Loading03Icon} className="size-2.5 animate-spin" />
+            Checking...
+          </Badge>
+        ) : (
+          <Badge
+            variant="outline"
+            className="bg-muted text-muted-foreground border-border/40 text-[10px] py-0 px-1.5 gap-0.5"
+          >
+            Unverified
+          </Badge>
+        )}
+
+        {/* Reasoning Capability Badge */}
+        {isReasoning && (
+          <Badge
+            variant="outline"
+            className="bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20 text-[10px] py-0 px-1.5 gap-0.5"
+          >
+            <HugeiconsIcon icon={AiBrain01Icon} className="size-2.5" />
+            Reasoning
+          </Badge>
+        )}
+
+        {/* Tier Badge */}
+        {item.tier === "frontier" && (
+          <Badge
+            variant="secondary"
+            className="bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20 text-[10px] py-0 px-1.5"
+          >
+            Frontier
+          </Badge>
+        )}
+        {item.tier === "mid" && (
+          <Badge
+            variant="secondary"
+            className="bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20 text-[10px] py-0 px-1.5"
+          >
+            Mid-Tier
+          </Badge>
+        )}
+        {item.tier === "small" && (
+          <Badge
+            variant="secondary"
+            className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20 text-[10px] py-0 px-1.5"
+          >
+            Fast
+          </Badge>
+        )}
+
+        {isActive && (
+          <span className="text-[11px] font-semibold text-primary pl-1">
+            Active
+          </span>
+        )}
+      </div>
+    </button>
+  );
+});
+
 export function ModelSelectDialog({
   open,
   onOpenChange,
@@ -73,9 +226,11 @@ export function ModelSelectDialog({
   );
   const [isValidatingAll, setIsValidatingAll] = useState(false);
   const [validatingModelId, setValidatingModelId] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   const requestedModelsRef = useRef<Set<string>>(new Set());
   const inFlightRef = useRef(false);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   // Sync provider configuration on storage changes
   useEffect(() => {
@@ -87,11 +242,19 @@ export function ModelSelectDialog({
     return () => window.removeEventListener("storage", syncState);
   }, []);
 
-  // Single-batch background capability hydration when dialog opens
+  // Reset transient list state each time the dialog opens (render-phase reset,
+  // the React-endorsed pattern for adjusting state when a prop changes)
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    setVisibleCount(PAGE_SIZE);
+  }
+
+  // Single-batch background capability hydration when dialog opens.
+  // Deferred past the open animation so the first paint stays smooth.
   useEffect(() => {
     if (!open || models.length === 0) return;
 
-    // Check which models genuinely need verification from server
     const cached = getCachedModelCapabilities();
     const missing = models.filter((m) => {
       if (requestedModelsRef.current.has(m)) return false;
@@ -106,35 +269,42 @@ export function ModelSelectDialog({
 
     let cancelled = false;
     inFlightRef.current = true;
-    setIsValidatingAll(true);
-
-    fetch("/api/canvas/model-validate", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ modelIds: missing }),
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as { capabilities?: Record<string, ModelCapabilities> };
-        if (data.capabilities && !cancelled) {
-          const merged = { ...getCachedModelCapabilities(), ...data.capabilities };
-          // shouldNotify = false avoids dispatching storage event loop
-          setCachedModelCapabilities(merged, false);
-          setCapabilitiesMap(merged);
-        }
-      })
-      .catch((err) => {
-        console.warn("[ModelSelectDialog] Batch validation error:", err);
-      })
-      .finally(() => {
+    const timer = setTimeout(() => {
+      if (cancelled) {
         inFlightRef.current = false;
-        if (!cancelled) {
-          setIsValidatingAll(false);
-        }
-      });
+        return;
+      }
+      setIsValidatingAll(true);
+
+      fetch("/api/canvas/model-validate", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ modelIds: missing }),
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          const data = (await res.json()) as { capabilities?: Record<string, ModelCapabilities> };
+          if (data.capabilities && !cancelled) {
+            const merged = { ...getCachedModelCapabilities(), ...data.capabilities };
+            // shouldNotify = false avoids dispatching storage event loop
+            setCachedModelCapabilities(merged, false);
+            setCapabilitiesMap(merged);
+          }
+        })
+        .catch((err) => {
+          console.warn("[ModelSelectDialog] Batch validation error:", err);
+        })
+        .finally(() => {
+          inFlightRef.current = false;
+          if (!cancelled) {
+            setIsValidatingAll(false);
+          }
+        });
+    }, VALIDATE_DELAY_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [open, models]);
 
@@ -182,6 +352,21 @@ export function ModelSelectDialog({
     const small = modelItems.filter((m) => m.tier === "small").length;
     return { total, reasoning, frontier, mid, small };
   }, [modelItems]);
+
+  const visibleModels = useMemo(
+    () => filteredModels.slice(0, visibleCount),
+    [filteredModels, visibleCount]
+  );
+
+  const handleListScroll = useCallback(() => {
+    const el = listRef.current;
+    if (!el) return;
+    if (el.scrollTop + el.clientHeight < el.scrollHeight - 120) return;
+    setVisibleCount((n) => {
+      if (n >= filteredModels.length) return n;
+      return n + PAGE_SIZE;
+    });
+  }, [filteredModels.length]);
 
   const handleSelect = useCallback(
     async (item: ModelItem) => {
@@ -409,7 +594,11 @@ export function ModelSelectDialog({
         </DialogHeader>
 
         {/* Model List */}
-        <div className="max-h-[50vh] min-h-[160px] overflow-y-auto p-2 sm:p-3 divide-y divide-border/40">
+        <div
+          ref={listRef}
+          onScroll={handleListScroll}
+          className="max-h-[50vh] min-h-[160px] overflow-y-auto p-2 sm:p-3 divide-y divide-border/40"
+        >
           {filteredModels.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-10 text-center text-muted-foreground">
               <HugeiconsIcon icon={AiChipIcon} className="size-8 opacity-40 mb-2" />
@@ -454,146 +643,16 @@ export function ModelSelectDialog({
             </div>
           ) : (
             <div className="space-y-1">
-              {filteredModels.map((item) => {
-                const isActive = activeModel === item.id;
-                const isValidatingThis = validatingModelId === item.id;
-                const isVerifiedVision = item.capabilities.status === "verified_vision" || item.capabilities.vision;
-                const isVerifiedNoVision = item.capabilities.status === "verified_no_vision";
-                const isReasoning = item.capabilities.reasoning;
-
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    disabled={isValidatingThis}
-                    onClick={() => handleSelect(item)}
-                    className={cn(
-                      "flex w-full items-center justify-between gap-3 rounded-lg p-2.5 text-left transition-all",
-                      isActive
-                        ? "bg-primary/10 border border-primary/30 text-foreground font-medium"
-                        : isVerifiedVision
-                        ? "hover:bg-muted/70 text-muted-foreground hover:text-foreground border border-transparent cursor-pointer"
-                        : isVerifiedNoVision
-                        ? "hover:bg-destructive/5 text-muted-foreground border border-destructive/20 opacity-80 cursor-pointer"
-                        : "hover:bg-muted/50 text-muted-foreground border border-border/30 cursor-pointer"
-                    )}
-                  >
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      <div
-                        className={cn(
-                          "flex size-6 shrink-0 items-center justify-center rounded-md text-xs",
-                          isActive
-                            ? "bg-primary text-primary-foreground"
-                            : isVerifiedVision
-                            ? "bg-muted text-muted-foreground"
-                            : isVerifiedNoVision
-                            ? "bg-destructive/10 text-destructive"
-                            : "bg-muted text-muted-foreground"
-                        )}
-                      >
-                        {isValidatingThis ? (
-                          <HugeiconsIcon icon={Loading03Icon} className="size-3.5 animate-spin" />
-                        ) : isActive ? (
-                          <HugeiconsIcon icon={Tick02Icon} className="size-3.5" />
-                        ) : isVerifiedVision ? (
-                          <HugeiconsIcon icon={AiChipIcon} className="size-3.5" />
-                        ) : isVerifiedNoVision ? (
-                          <HugeiconsIcon icon={Alert02Icon} className="size-3.5" />
-                        ) : (
-                          <HugeiconsIcon icon={AiChipIcon} className="size-3.5" />
-                        )}
-                      </div>
-
-                      <div className="min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs text-foreground truncate">
-                            {item.name}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-                      {/* Vision Capability Badge */}
-                      {isVerifiedVision ? (
-                        <Badge
-                          variant="outline"
-                          className="bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/20 text-[10px] py-0 px-1.5 gap-0.5"
-                        >
-                          <HugeiconsIcon icon={AiViewIcon} className="size-2.5" />
-                          Vision
-                        </Badge>
-                      ) : isVerifiedNoVision ? (
-                        <Badge
-                          variant="outline"
-                          className="bg-destructive/10 text-destructive border-destructive/30 text-[10px] py-0 px-1.5 gap-0.5"
-                        >
-                          <HugeiconsIcon icon={Alert02Icon} className="size-2.5" />
-                          No Vision
-                        </Badge>
-                      ) : isValidatingAll ? (
-                        <Badge
-                          variant="outline"
-                          className="bg-muted text-muted-foreground border-border/40 text-[10px] py-0 px-1.5 gap-0.5 animate-pulse"
-                        >
-                          <HugeiconsIcon icon={Loading03Icon} className="size-2.5 animate-spin" />
-                          Checking...
-                        </Badge>
-                      ) : (
-                        <Badge
-                          variant="outline"
-                          className="bg-muted text-muted-foreground border-border/40 text-[10px] py-0 px-1.5 gap-0.5"
-                        >
-                          Unverified
-                        </Badge>
-                      )}
-
-                      {/* Reasoning Capability Badge */}
-                      {isReasoning && (
-                        <Badge
-                          variant="outline"
-                          className="bg-violet-500/10 text-violet-700 dark:text-violet-300 border-violet-500/20 text-[10px] py-0 px-1.5 gap-0.5"
-                        >
-                          <HugeiconsIcon icon={AiBrain01Icon} className="size-2.5" />
-                          Reasoning
-                        </Badge>
-                      )}
-
-                      {/* Tier Badge */}
-                      {item.tier === "frontier" && (
-                        <Badge
-                          variant="secondary"
-                          className="bg-purple-500/10 text-purple-700 dark:text-purple-300 border-purple-500/20 text-[10px] py-0 px-1.5"
-                        >
-                          Frontier
-                        </Badge>
-                      )}
-                      {item.tier === "mid" && (
-                        <Badge
-                          variant="secondary"
-                          className="bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/20 text-[10px] py-0 px-1.5"
-                        >
-                          Mid-Tier
-                        </Badge>
-                      )}
-                      {item.tier === "small" && (
-                        <Badge
-                          variant="secondary"
-                          className="bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/20 text-[10px] py-0 px-1.5"
-                        >
-                          Fast
-                        </Badge>
-                      )}
-
-                      {isActive && (
-                        <span className="text-[11px] font-semibold text-primary pl-1">
-                          Active
-                        </span>
-                      )}
-                    </div>
-                  </button>
-                );
-              })}
+              {visibleModels.map((item) => (
+                <ModelRow
+                  key={item.id}
+                  item={item}
+                  isActive={activeModel === item.id}
+                  isValidatingAll={isValidatingAll}
+                  isValidatingThis={validatingModelId === item.id}
+                  onSelect={handleSelect}
+                />
+              ))}
             </div>
           )}
         </div>

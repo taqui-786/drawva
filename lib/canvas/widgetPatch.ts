@@ -46,7 +46,10 @@ function hunkChanged(lines: string[]): number {
  * authored; only the counts are normalized.
  */
 function recountHunkHeaders(patch: string): string {
-  const lines = patch.split("\n");
+  // A patch ending in "\n" splits to a trailing "" element — that is the EOF
+  // newline, not a context line; drop it before counting or every hunk's
+  // recomputed counts come out one line too long and jsdiff refuses to parse.
+  const lines = patch.endsWith("\n") ? patch.slice(0, -1).split("\n") : patch.split("\n");
   const out: string[] = [];
   let i = 0;
   while (i < lines.length) {

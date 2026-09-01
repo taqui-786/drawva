@@ -49,7 +49,6 @@ import {
   getCachedModels,
   getProviderConfig,
   setActiveModel,
-  getEnabledPlugins,
   getReasoningEffort,
   setReasoningEffort,
   type ReasoningEffort,
@@ -1258,7 +1257,6 @@ export function CanvasApp() {
       provider: () => getProviderConfig(),
       getRevision: () => boardRevisionRef.current,
       onEvent: (e) => handleConductorEventRef.current(e),
-      enabledPluginIds: () => getEnabledPlugins(),
       afterBoardChange: () => afterBoardChangeRef.current(),
       getInkBox: () => inkBoxRef.current,
     });

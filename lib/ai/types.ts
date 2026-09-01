@@ -90,7 +90,6 @@ export interface AiRequest {
   model?: string;
   tier?: ModelTier;
   reasoningEffort?: ReasoningEffort;
-  enabledPluginIds?: string[];
   enabledPlugins?: PluginDescriptor[];
 }
 

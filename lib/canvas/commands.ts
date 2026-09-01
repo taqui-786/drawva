@@ -168,7 +168,8 @@ export interface CommandValidationContext {
   aiColor: string;
   scale: number;
   widgetSlots: number;
-  plugins: Set<string>;
+  /** Set of allowed plugin ids; when omitted, all plugins are allowed. */
+  plugins?: Set<string>;
   visibleRect?: { x: number; y: number; w: number; h: number };
   changedBox?: { x: number; y: number; w: number; h: number };
   keepPosition?: boolean;
@@ -211,10 +212,12 @@ function matchedTextFontSize(
     return Math.max(12, Math.min(650, Math.round(modelSize)));
   }
   const longForm = Array.from(String(text).replace(/\s/g, "")).length >= 10;
-  // If handwriting was drawn, scale relative to handwriting
+  // If handwriting was drawn, scale relative to handwriting.
   if (changedBoxHeight && changedBoxHeight > 20 && changedBoxHeight <= 600) {
     const size = Math.round(changedBoxHeight * 0.75);
-    return longForm ? Math.max(24, Math.round(size * 0.75)) : Math.max(20, size);
+    // Ink-height matching is for short completions beside the ink; a paragraph
+    // note matched to a tall question ink box renders as a giant narrow column.
+    return longForm ? Math.max(24, Math.min(64, size)) : Math.max(20, size);
   }
   // Standard whiteboard note font size default (contract: 36..48)
   return longForm ? 40 : 42;

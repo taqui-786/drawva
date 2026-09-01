@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { generateText } from "ai";
 import { createChatModel } from "@/lib/ai/model";
+import { COMPACT_KEEP } from "@/lib/ai/agentTools";
 import { AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
 import type { ProviderType } from "@/lib/ai/provider";
 
@@ -39,8 +40,7 @@ export async function POST(req: Request) {
   if (!apiKey || !modelId) return NextResponse.json({ error: "Missing API key or model." }, { status: 400 });
   if (!Array.isArray(body.messages)) return NextResponse.json({ error: "messages is required." }, { status: 400 });
 
-  const keep = 12;
-  const old = body.messages.length > keep ? body.messages.slice(0, -keep) : [];
+  const old = body.messages.length > COMPACT_KEEP ? body.messages.slice(0, -COMPACT_KEEP) : [];
   const digest = old
     .map((m) => {
       if (!m || typeof m !== "object") return "";

@@ -9,7 +9,6 @@ import type { AiLogEntry, AiLogStep } from "@/lib/ai/types";
 import { AGENT_SYSTEM_PROMPT } from "@/lib/ai/prompts";
 import {
   getActiveModel,
-  getEnabledPlugins,
   getProviderConfig,
   getReasoningEffort,
   type ProviderConfig,
@@ -26,10 +25,12 @@ import {
   AGENT_CONVERSATION_MAX_BYTES,
   AGENT_HISTORY_TOKEN_TRIGGER,
   AGENT_MAX_APPLIES_PER_TURN,
+  AGENT_MAX_EDITS_PER_TURN,
   AGENT_MAX_PATCHES_PER_TURN,
   AGENT_MAX_STEPS_PER_TURN,
   AGENT_MAX_TURN_IMAGES,
   AGENT_SCENE_JSON_MAX,
+  COMPACT_KEEP,
 } from "./agentTools";
 import { executeTool, fnv1a, type ActiveImage, type ConductorToolDeps } from "./conductorTools";
 
@@ -67,7 +68,6 @@ export interface ConductorDeps {
   provider: () => ProviderConfig | null;
   getRevision: () => number;
   onEvent: (e: ConductorEvent) => void;
-  enabledPluginIds: () => string[];
   afterBoardChange: () => void;
   getInkBox?: () => Rect | null;
   canvasId?: () => string | undefined;
@@ -78,6 +78,8 @@ interface StepToolCall {
   name: string;
   args: unknown;
   extraToolCalls?: number;
+  /** Admission-rejection reason from the server; when set the call is NOT executed. */
+  admissionError?: string;
 }
 
 interface StepResult {
@@ -97,6 +99,7 @@ export class Conductor {
   private images = new Map<string, ActiveImage>();
   private latestSnapshotId: string | null = null;
   private turnImageIds: string[] = [];
+  private atlasImageId: string | null = null;
   private listeners = new Set<(e: ConductorEvent) => void>();
   private turnUsage = { inputTokens: 0, outputTokens: 0 };
 
@@ -113,6 +116,7 @@ export class Conductor {
     this.messages = [];
     this.images.clear();
     this.latestSnapshotId = null;
+    this.atlasImageId = null;
     clearConversation(this.deps.canvasId?.());
   }
 
@@ -180,6 +184,7 @@ export class Conductor {
     this.images.clear();
     this.latestSnapshotId = null;
     this.turnImageIds = [];
+    this.atlasImageId = null;
     clearConversation(this.deps.canvasId?.());
   }
 
@@ -198,7 +203,6 @@ export class Conductor {
       camera: this.deps.camera,
       getRevision: this.deps.getRevision,
       afterBoardChange: this.deps.afterBoardChange,
-      enabledPluginIds: this.deps.enabledPluginIds,
       registerImage: (img) => {
         this.images.set(img.id, img);
         this.latestSnapshotId = img.id;
@@ -220,6 +224,7 @@ export class Conductor {
     this.abort = new AbortController();
     this.pendingSteer = [];
     this.turnImageIds = [];
+    this.atlasImageId = null;
     this.turnUsage = { inputTokens: 0, outputTokens: 0 };
     this.emit({ kind: "turn_start" });
 
@@ -266,6 +271,7 @@ export class Conductor {
               imageScale: atlas.imageScale,
               changedBox: atlas.changedBox,
             };
+            this.atlasImageId = id;
           }
         } catch (err) {
           console.warn("[Conductor] Failed to capture canvas snapshot:", err);
@@ -278,7 +284,12 @@ export class Conductor {
 
       let applies = 0;
       let patches = 0;
+      let edits = 0;
+      let layoutReviewNeeded = false;
       const stepsLog: AiLogStep[] = [];
+
+      const mutationBlocked = (name: string): boolean =>
+        (name === "canvas_apply" || name === "canvas_patch_widget" || name === "canvas_edit") && layoutReviewNeeded;
 
       while (steps < AGENT_MAX_STEPS_PER_TURN) {
         if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
@@ -312,27 +323,55 @@ export class Conductor {
 
         let result: unknown;
         let isError = false;
-        if (call.name === "canvas_apply" && applies >= AGENT_MAX_APPLIES_PER_TURN) {
-          result = {
-            code: "LIMIT_EXCEEDED",
-            message: "Apply budget reached; finish or undo.",
-          };
+        if (call.admissionError) {
+          // Decision admission: the server rejected this call's arguments before
+          // execution. Surface the schema error as feedback so the model retries in-turn.
           isError = true;
+          result = {
+            code: "DECISION_REJECTED",
+            message: `${call.admissionError} The tool was NOT executed. Return one corrected tool call with valid arguments, or a final answer when done.`,
+          };
+        } else if (mutationBlocked(call.name)) {
+          isError = true;
+          result = {
+            code: "LAYOUT_REVIEW_REQUIRED",
+            message:
+              "Widgets were just created or moved. Call canvas_snapshot with target=canvas, quality=basic to review the full layout before the next mutation.",
+          };
+        } else if (call.name === "canvas_apply" && applies >= AGENT_MAX_APPLIES_PER_TURN) {
+          result = {
+            ok: true,
+            code: "APPLY_BUDGET_REACHED",
+            message: `Apply budget reached (${AGENT_MAX_APPLIES_PER_TURN}/${AGENT_MAX_APPLIES_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
+          };
         } else if (call.name === "canvas_patch_widget" && patches >= AGENT_MAX_PATCHES_PER_TURN) {
           result = {
-            code: "LIMIT_EXCEEDED",
-            message: "Patch budget reached; finish or undo.",
+            ok: true,
+            code: "PATCH_BUDGET_REACHED",
+            message: `Patch budget reached (${AGENT_MAX_PATCHES_PER_TURN}/${AGENT_MAX_PATCHES_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
           };
-          isError = true;
+        } else if (call.name === "canvas_edit" && edits >= AGENT_MAX_EDITS_PER_TURN) {
+          result = {
+            ok: true,
+            code: "EDIT_BUDGET_REACHED",
+            message: `Edit budget reached (${AGENT_MAX_EDITS_PER_TURN}/${AGENT_MAX_EDITS_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
+          };
         } else {
           try {
             result = await executeTool(call.name, call.args, this.toolDeps());
             if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-            if (call.name === "canvas_apply" && result && typeof result === "object" && (result as { ok?: boolean }).ok) {
-              applies += 1;
-            }
-            if (call.name === "canvas_patch_widget" && result && typeof result === "object" && (result as { ok?: boolean }).ok) {
-              patches += 1;
+            if (result && typeof result === "object") {
+              const rec = result as Record<string, unknown>;
+              if (call.name === "canvas_apply" && rec.ok === true) applies += 1;
+              if (call.name === "canvas_patch_widget" && rec.ok === true) patches += 1;
+              if (call.name === "canvas_edit" && rec.ok === true) edits += 1;
+              // Layout-review gate: after any widget mutation the next mutation
+              // must wait for a fresh whole-canvas snapshot (penecho-style gate).
+              if (rec.widgetMutated === true) layoutReviewNeeded = true;
+              const snapRect = rec.sourceRect as { w?: number } | undefined;
+              if (call.name === "canvas_snapshot" && snapRect && typeof snapRect.w === "number" && snapRect.w >= SIZE) {
+                layoutReviewNeeded = false;
+              }
             }
           } catch (err) {
             isError = true;
@@ -377,27 +416,17 @@ export class Conductor {
         if ((call.extraToolCalls ?? 0) > 0) {
           this.messages.push({
             role: "system",
-            text: `One tool call per step. ${call.extraToolCalls} extra call(s) were not executed.`,
+            text: `One tool call per step. ${call.extraToolCalls} extra call(s) were not executed. Continue the task by issuing the next single tool call on the following step.`,
           });
-        }
-
-        // Single-step turn completion: For terminal canvas mutation tools (canvas_apply, canvas_undo, canvas_focus, or successful canvas_patch_widget),
-        // if the tool succeeded, finish immediately to cut redundant second-step roundtrips and token costs by 50%.
-        const isTerminalMutation = call.name === "canvas_apply" || call.name === "canvas_undo" || call.name === "canvas_focus";
-        const isSuccessfulPatch = call.name === "canvas_patch_widget" && !isError;
-        const hasExplanation = Boolean(step.text?.trim() || (call.args && typeof call.args === "object" && typeof (call.args as Record<string, unknown>).note === "string" && (call.args as Record<string, unknown>).note));
-
-        if (!isError && (isTerminalMutation || (isSuccessfulPatch && hasExplanation))) {
-          finished = true;
-          break;
         }
       }
 
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
+      const stepLimitMessage = `Step limit reached (${AGENT_MAX_STEPS_PER_TURN}/${AGENT_MAX_STEPS_PER_TURN}).`;
       if (finished) {
         this.emit({ kind: "turn_end", reason: "done" });
       } else {
-        this.emit({ kind: "turn_end", reason: "error", error: "Step limit reached (24/24)." });
+        this.emit({ kind: "turn_end", reason: "error", error: stepLimitMessage });
       }
 
       const config = this.deps.provider() ?? getProviderConfig();
@@ -418,7 +447,7 @@ export class Conductor {
         providerType: config?.type,
         attempts: Math.max(1, steps),
         status: finished ? "success" : "error",
-        errorMessage: finished ? undefined : "Step limit reached (24/24).",
+        errorMessage: finished ? undefined : stepLimitMessage,
         atlasImage: this.images.get(this.latestSnapshotId || "")?.dataUrl || "",
         systemPrompt: AGENT_SYSTEM_PROMPT,
         userPromptText: userText,
@@ -455,7 +484,9 @@ export class Conductor {
   private flushSteer(): void {
     if (this.pendingSteer.length === 0) return;
     const text = this.pendingSteer.splice(0).join("\n");
-    this.messages.push({ role: "user", text, images: undefined });
+    // Steering changes the canvas context: attach a fresh state digest so the
+    // next steps reason over current revision/scene, not the turn-opening view.
+    this.messages.push({ role: "user", text: `${text}\n\n${this.hostRefs()}`, images: undefined });
   }
 
   private hostRefs(atlasMeta?: { sourceRect: Rect; imageScale: number; changedBox?: Rect }): string {
@@ -483,6 +514,11 @@ export class Conductor {
   private activeImageIds(): Set<string> {
     const ids = new Set<string>(this.turnImageIds);
     if (this.latestSnapshotId) ids.add(this.latestSnapshotId);
+    // Once the agent takes a fresher snapshot, the turn-opening atlas is
+    // superseded — stop re-paying its vision tokens on every subsequent step.
+    if (this.latestSnapshotId && this.atlasImageId && this.latestSnapshotId !== this.atlasImageId) {
+      ids.delete(this.atlasImageId);
+    }
     return ids;
   }
 
@@ -505,7 +541,8 @@ export class Conductor {
 
   private serializeMessages(): StepMessage[] {
     const active = this.activeImageIds();
-    return this.messages.map((m) => {
+    const pruned = this.pruneOldToolResults(this.messages);
+    return pruned.map((m) => {
       if ((m.role === "user" || m.role === "tool") && m.images?.length) {
         const kept: { id: string; dataUrl: string }[] = [];
         const notes: string[] = [];
@@ -526,13 +563,32 @@ export class Conductor {
     });
   }
 
+  /**
+   * Deterministic context pressure relief: tool results older than the last
+   * 8 messages get their payload clipped to a head summary (penecho-style
+   * tool-result pruning, without a second compaction model call).
+   */
+  private pruneOldToolResults(messages: StepMessage[]): StepMessage[] {
+    const recentFrom = Math.max(0, messages.length - 8);
+    return messages.map((m, idx) => {
+      if (m.role !== "tool" || idx >= recentFrom) return m;
+      try {
+        const json = JSON.stringify(m.result ?? null);
+        if (json.length <= 2000) return m;
+        return { ...m, result: { code: "PRUNED", note: "Full result clipped for context budget; re-run the tool if details are needed.", summary: json.slice(0, 800) } };
+      } catch {
+        return { ...m, result: { code: "PRUNED" } };
+      }
+    });
+  }
+
   private async compactHistory(): Promise<void> {
-    if (this.messages.length <= 12) return;
+    if (this.messages.length <= COMPACT_KEEP) return;
     const config = this.deps.provider() ?? getProviderConfig();
     const model = getActiveModel();
     if (!config || !model || config.type === "codex" || config.type === "antigravity") return;
     this.emit({ kind: "compact" });
-    const keep = this.messages.slice(-12);
+    const keep = this.messages.slice(-COMPACT_KEEP);
     // Providers require tool results to follow their assistant tool call, and
     // most require the post-system conversation to open with a user turn — so
     // drop any leading orphaned tool/assistant messages after slicing.
@@ -583,7 +639,6 @@ export class Conductor {
       apiKey: config.apiKey,
       model,
       reasoningEffort: getReasoningEffort(),
-      enabledPluginIds: this.deps.enabledPluginIds().length ? this.deps.enabledPluginIds() : getEnabledPlugins(),
       messages: this.serializeMessages(),
       context: {
         revision: this.deps.getRevision(),
@@ -623,6 +678,9 @@ export class Conductor {
     } catch (err) {
       if (this.abort?.signal.aborted) throw err;
       if (isRetryableStepError(err)) {
+        // Server already retried with backoff; this client retry covers HTTP-level
+        // failures. Delay so a rate-limited provider gets breathing room.
+        await sleep(1500, this.abort?.signal);
         try {
           return await attempt();
         } catch (retryErr) {
@@ -632,6 +690,16 @@ export class Conductor {
       return { kind: "error", message: err instanceof Error ? err.message : "Agent step failed." };
     }
   }
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener("abort", () => {
+      clearTimeout(t);
+      resolve();
+    }, { once: true });
+  });
 }
 
 export function estimateTokens(messages: StepMessage[]): number {
@@ -755,6 +823,7 @@ function summarizeResult(result: unknown): string {
 function isFailedResult(result: unknown): boolean {
   if (!result || typeof result !== "object") return false;
   const rec = result as Record<string, unknown>;
+  if (rec.ok === true) return false;
   return rec.ok === false || typeof rec.code === "string";
 }
 
@@ -812,6 +881,7 @@ async function readStepSse(
               name: rec.name,
               args: rec.args,
               extraToolCalls: typeof rec.extraToolCalls === "number" ? rec.extraToolCalls : 0,
+              admissionError: typeof rec.admissionError === "string" ? rec.admissionError : undefined,
             };
           } else if (eventName === "final" && typeof rec.text === "string") {
             text = rec.text || text;

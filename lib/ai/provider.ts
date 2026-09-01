@@ -127,7 +127,6 @@ const MODELS_KEY = "drawva.aiModels";
 const MODEL_KEY = "drawva.aiModel";
 const MODEL_CAPABILITIES_KEY = "drawva.aiModelCapabilities";
 const REASONING_EFFORT_KEY = "drawva.aiReasoningEffort";
-const PLUGINS_KEY = "drawva.enabledPlugins";
 
 export function getReasoningEffort(): ReasoningEffort {
   const val = read<string>(REASONING_EFFORT_KEY, "default");
@@ -139,29 +138,6 @@ export function getReasoningEffort(): ReasoningEffort {
 
 export function setReasoningEffort(effort: ReasoningEffort): void {
   write(REASONING_EFFORT_KEY, effort);
-  notify();
-}
-
-export const DEFAULT_ENABLED_PLUGINS = [
-  "general",
-  "flowchart",
-  "weather",
-  "stocks",
-  "earthquakes",
-  "exchange-rates",
-  "github-pulse",
-  "image-search",
-  "natural-events",
-  "space-weather",
-  "tech-news",
-];
-
-export function getEnabledPlugins(): string[] {
-  return read<string[]>(PLUGINS_KEY, DEFAULT_ENABLED_PLUGINS);
-}
-
-export function setEnabledPlugins(pluginIds: string[]): void {
-  write(PLUGINS_KEY, Array.isArray(pluginIds) ? pluginIds : DEFAULT_ENABLED_PLUGINS);
   notify();
 }
 

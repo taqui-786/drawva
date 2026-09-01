@@ -4,6 +4,7 @@ import { z } from "zod";
 export const AGENT_MAX_STEPS_PER_TURN = 24;
 export const AGENT_MAX_APPLIES_PER_TURN = 6;
 export const AGENT_MAX_PATCHES_PER_TURN = 8;
+export const AGENT_MAX_EDITS_PER_TURN = 12;
 export const AGENT_MAX_TOOLS_PER_STEP = 1;
 export const SNAPSHOT_BASIC_MAX_EDGE = 1024;
 export const SNAPSHOT_DETAIL_MAX_EDGE = 2048;
@@ -14,6 +15,9 @@ export const AGENT_HISTORY_TOKEN_TRIGGER = 24_000;
 export const AGENT_MAX_TURN_IMAGES = 5;
 export const AGENT_SCENE_JSON_MAX = 8_000;
 export const AGENT_CONVERSATION_MAX_BYTES = 512 * 1024;
+export const SCAN_MAX_ITEMS = 60;
+/** Shared by conductor.ts and the compact route so the two never drift. */
+export const COMPACT_KEEP = 12;
 
 const regionSchema = z.object({
   x: z.coerce.number().describe("World X coordinate"),
@@ -35,6 +39,9 @@ const canvasSnapshotSchema = z.object({
 });
 
 const commandItemSchema = z.object({
+  // Optional on purpose: models often omit it; validateCommands infers the tool
+  // from payload keys (html→html_widget, latex→draw_formula, text→write_text).
+  // An explicitly WRONG value still fails this enum and is rejected at admission.
   tool: z.enum([
     "write_text",
     "draw_formula",
@@ -44,10 +51,7 @@ const commandItemSchema = z.object({
     "diagram_source",
     "draw",
     "erase",
-  ]).optional().describe("Tool identifier (e.g. 'draw_formula', 'write_text', 'html_widget')"),
-  command: z.string().optional().describe("Alias for tool identifier"),
-  type: z.string().optional().describe("Alias for tool identifier"),
-  name: z.string().optional().describe("Alias for tool identifier"),
+  ]).optional().describe("Tool identifier (e.g. 'write_text', 'draw_formula', 'html_widget')"),
   x: z.coerce.number().optional().describe("World X coordinate on canvas (0..20000)"),
   y: z.coerce.number().optional().describe("World Y coordinate on canvas (0..20000)"),
   w: z.coerce.number().optional().describe("Box width in canvas units"),
@@ -82,19 +86,34 @@ const commandItemSchema = z.object({
   maxWidth: z.coerce.number().optional().describe("Maximum width for wrapped text column (default ~1200-2000)"),
   lineHeight: z.coerce.number().optional().describe("Line height multiplier (default ~1.35)"),
   pluginId: z.string().optional().describe("Plugin identifier"),
-  points: z.array(z.any()).optional().describe("draw/erase: array of [x, y] coordinates"),
+  points: z.array(z.tuple([z.coerce.number(), z.coerce.number()])).optional().describe("draw/erase: array of [x, y] coordinate pairs"),
   size: z.coerce.number().optional().describe("draw/erase: stroke width or eraser brush size"),
   mode: z.enum(["rect", "path"]).optional().describe("erase: 'rect' or 'path'"),
   durationMs: z.coerce.number().optional().describe("animate_scene: animation loop duration in ms"),
   loop: z.boolean().optional().describe("animate_scene: whether animation loops"),
-  objects: z.array(z.any()).optional().describe("animate_scene: scene visual objects"),
-  motions: z.array(z.any()).optional().describe("animate_scene: object motion tracks"),
+  objects: z.array(z.any()).optional().describe("animate_scene: scene visual objects (circle/ellipse/rect/line/path/text/group)"),
+  motions: z.array(z.any()).optional().describe("animate_scene: object motion tracks (orbit/spin/translate/pulse/fade/keyframes)"),
 }).passthrough();
 
 const canvasApplySchema = z.object({
-  baseRevision: z.coerce.number().optional().describe("Base board revision for conflict safety"),
+  baseRevision: z.coerce.number().optional().describe("Base board revision for conflict safety — pass the revision from your latest canvas_scan/canvas_snapshot. Stale revisions are rejected."),
   commands: z.array(commandItemSchema).min(1).max(16).describe("Array of 1..16 canvas commands (write_text, draw_formula, diagram_source, html_widget, plot_function, animate_scene, draw, erase)"),
   note: z.string().optional().describe("Brief note explaining what this mutation achieves"),
+});
+
+const editOpSchema = z.object({
+  op: z.enum(["move_object", "resize_object", "delete_object"]).describe("Edit operation"),
+  objectId: z.string().describe("ID of the widget or object to edit"),
+  dx: z.coerce.number().optional().describe("move_object: X offset in canvas units"),
+  dy: z.coerce.number().optional().describe("move_object: Y offset in canvas units"),
+  w: z.coerce.number().optional().describe("resize_object: new width in canvas units"),
+  h: z.coerce.number().optional().describe("resize_object: new height in canvas units"),
+});
+
+const canvasEditSchema = z.object({
+  baseRevision: z.coerce.number().optional().describe("Base board revision for conflict safety — pass the revision from your latest canvas_scan/canvas_snapshot"),
+  operations: z.array(editOpSchema).min(1).max(16).describe("Array of 1..16 typed edit operations"),
+  note: z.string().optional().describe("Brief note explaining what this edit achieves"),
 });
 
 const loadPluginSchema = z.object({
@@ -111,6 +130,7 @@ const canvasReadSchema = z.object({
 const canvasPatchWidgetSchema = z.object({
   objectId: z.string().describe("ID of the widget to patch"),
   baseRevision: z.coerce.number().optional().describe("Base board revision"),
+  expectedContentHash: z.string().optional().describe("contentHash returned by the canvas_read this patch is based on — stale hashes are rejected"),
   patch: z.string().describe("Unified diff patch string with --- a/widget.html / +++ b/widget.html headers"),
 });
 
@@ -147,9 +167,15 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
     schema: canvasApplySchema,
   },
   {
+    name: "canvas_edit",
+    description:
+      "Lightweight typed edits on existing items: move_object (dx,dy), resize_object (w,h), delete_object. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes — never re-create or replace an item just to move/resize/delete it.",
+    schema: canvasEditSchema,
+  },
+  {
     name: "load_plugin",
     description:
-      "Load the full capability card for one enabled plugin id from the catalog. Call before using a plugin's APIs or HTML contract.",
+      "Load the full capability card for one plugin id from the catalog. Call before using a plugin's APIs or HTML contract.",
     schema: loadPluginSchema,
   },
   {
@@ -190,8 +216,13 @@ export function getAiSdkTools() {
       description: "Apply 1..16 validated canvas commands in one undo step. commands use write_text, draw_formula, plot_function, html_widget, diagram_source, draw, erase. Pass baseRevision from the latest scan/snapshot.",
       inputSchema: canvasApplySchema,
     }),
+    canvas_edit: tool({
+      description:
+        "Lightweight typed edits on existing items: move_object (dx,dy), resize_object (w,h), delete_object. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes.",
+      inputSchema: canvasEditSchema,
+    }),
     load_plugin: tool({
-      description: "Load the full capability card for one enabled plugin id from the catalog. Call before using a plugin's APIs or HTML contract.",
+      description: "Load the full capability card for one plugin id from the catalog. Call before using a plugin's APIs or HTML contract.",
       inputSchema: loadPluginSchema,
     }),
     canvas_read: tool({
@@ -238,4 +269,45 @@ export function parseAgentToolCall(name: string, rawArgs: unknown): ParsedAgentT
     return { name, args: typeof args === "object" && args !== null ? args : {}, valid: false, error: result.error.message };
   }
   return { name, args: result.data, valid: true };
+}
+
+/**
+ * Extract the first balanced JSON object/array from text that may be wrapped in
+ * prose or fences. A greedy first-{-to-last-} regex mis-slices multiple objects;
+ * this scans bracket pairs and returns the first candidate that parses.
+ */
+export function extractJsonDecision(text: string): Record<string, unknown> | null {
+  if (!text || !/[{\[]/.test(text)) return null;
+  const starts = ["{", "["];
+  let attempts = 0;
+  for (let i = 0; i < text.length && attempts < 256; i++) {
+    const ch = text[i];
+    if (!starts.includes(ch)) continue;
+    attempts++;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let j = i; j < text.length; j++) {
+      const c = text[j];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (c === "\\") escaped = true;
+        else if (c === '"') inString = false;
+        continue;
+      }
+      if (c === '"') inString = true;
+      else if (c === "{" || c === "[") depth++;
+      else if (c === "}" || c === "]") {
+        depth--;
+        if (depth === 0) {
+          try {
+            const parsed = JSON.parse(text.slice(i, j + 1));
+            if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+          } catch {}
+          break;
+        }
+      }
+    }
+  }
+  return null;
 }
