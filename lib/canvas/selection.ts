@@ -236,9 +236,14 @@ export class SelectionController {
   private moving: { id: number; start: Point; offset: Point } | null = null;
   private hasErasedOriginal = false;
   private inkListener: ((op: InkSyncOp) => void) | null = null;
+  private selectionListener: ((rect: Rect | null) => void) | null = null;
 
   setInkListener(fn: ((op: InkSyncOp) => void) | null): void {
     this.inkListener = fn;
+  }
+
+  setSelectionListener(fn: ((rect: Rect | null) => void) | null): void {
+    this.selectionListener = fn;
   }
 
   constructor(private engine: CanvasEngine) {
@@ -314,8 +319,10 @@ export class SelectionController {
       this.selection = { rect, snapshot: captureRegion(this.engine, rect) };
       this.hasErasedOriginal = false;
       this.engine.requestInteractionRender({ ...rect, x: rect.x - 4, y: rect.y - 4, w: rect.w + 8, h: rect.h + 8 });
+      this.selectionListener?.(rect);
       return true;
     }
+    this.selectionListener?.(null);
     return false;
   }
 
@@ -344,6 +351,7 @@ export class SelectionController {
     if (rect.w >= 6 && rect.h >= 6) {
       this.selection = { rect, snapshot: captureRegion(this.engine, rect) };
       this.hasErasedOriginal = false;
+      this.selectionListener?.(rect);
     } else {
       this.clearSelection();
     }
@@ -402,9 +410,11 @@ export class SelectionController {
         snapshot: captureRegion(this.engine, newRect),
       };
       this.hasErasedOriginal = false;
+      this.selectionListener?.(newRect);
       this.engine.requestInteractionRender(unionRect(oldRect, newRect));
       return moved;
     }
+    this.selectionListener?.(sel.rect);
     this.engine.requestInteractionRender(sel.rect);
     return moved;
   }
@@ -437,6 +447,7 @@ export class SelectionController {
     this.hasErasedOriginal = false;
     this.marquering = null;
     this.current = null;
+    this.selectionListener?.(null);
     this.engine.requestInteractionRender();
   }
 }

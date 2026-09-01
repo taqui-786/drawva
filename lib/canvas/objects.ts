@@ -326,6 +326,11 @@ export class ObjectManager {
     if (this.shells.has(item.id)) {
       this.unmount(item.id);
     }
+    const min = minimumObjectSize(item.kind);
+    item.w = Math.max(min.w, Math.min(SIZE, item.w));
+    item.h = Math.max(min.h, Math.min(SIZE, item.h));
+    item.x = Math.max(0, Math.min(Math.max(0, SIZE - item.w), item.x));
+    item.y = Math.max(0, Math.min(Math.max(0, SIZE - item.h), item.y));
     this.items.set(item.id, item);
     this.mount(item);
     this.position(item);
@@ -368,6 +373,10 @@ export class ObjectManager {
       if (item) return item;
     }
     return null;
+  }
+
+  getAll(): ObjectItem[] {
+    return Array.from(this.items.values());
   }
 
   setMode(mode: CanvasMode): void {
@@ -457,8 +466,10 @@ export class ObjectManager {
   move(id: string, dx: number, dy: number): void {
     const i = this.items.get(id);
     if (!i) return;
-    i.x = Math.max(0, Math.min(SIZE - i.w, i.x + dx));
-    i.y = Math.max(0, Math.min(SIZE - i.h, i.y + dy));
+    const maxX = Math.max(0, SIZE - i.w);
+    const maxY = Math.max(0, SIZE - i.h);
+    i.x = Math.max(0, Math.min(maxX, i.x + dx));
+    i.y = Math.max(0, Math.min(maxY, i.y + dy));
     this.position(i);
   }
 
@@ -466,8 +477,8 @@ export class ObjectManager {
     const i = this.items.get(id);
     if (!i) return;
     const min = minimumObjectSize(i.kind);
-    i.w = Math.max(min.w, Math.min(SIZE - i.x, Math.round(newW)));
-    i.h = Math.max(min.h, Math.min(SIZE - i.y, Math.round(newH)));
+    i.w = Math.max(min.w, Math.min(Math.max(min.w, SIZE - i.x), Math.round(newW)));
+    i.h = Math.max(min.h, Math.min(Math.max(min.h, SIZE - i.y), Math.round(newH)));
     this.position(i);
   }
 

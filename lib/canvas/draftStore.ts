@@ -51,7 +51,16 @@ export class DraftManager {
     return applied;
   }
 
+  notifyInkErase(rect: Rect): void {
+    this.inkListener?.({ kind: "erase", rect });
+  }
+
   private async apply(engine: CanvasEngine, c: CanvasCommand): Promise<boolean> {
+    const customRenderer = this.renderers.get(c.tool);
+    if (customRenderer) {
+      await customRenderer(engine, c);
+      return true;
+    }
     switch (c.tool) {
       case "draw":
         drawPolyline(engine, c.points, c.size, c.color);
@@ -76,12 +85,8 @@ export class DraftManager {
           return true;
         }
         return false;
-      default: {
-        const renderer = this.renderers.get(c.tool);
-        if (!renderer) return false;
-        await renderer(engine, c);
-        return true;
-      }
+      default:
+        return false;
     }
   }
 }

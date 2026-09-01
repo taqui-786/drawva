@@ -56,6 +56,10 @@ export class ToolManager {
     this.picker = picker;
   }
 
+  setSelectionListener(fn: ((rect: import("./types").Rect | null) => void) | null): void {
+    this.selection.setSelectionListener(fn);
+  }
+
   get isInteracting(): boolean {
     return (
       this.pan !== null ||

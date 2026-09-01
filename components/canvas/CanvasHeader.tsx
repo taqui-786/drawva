@@ -74,11 +74,13 @@ import {
   Wifi01Icon,
   ScreenRotationIcon,
   Logout01Icon,
+  Analytics01Icon,
   CloudSyncIcon,
   CloudSavingDone01Icon,
   CloudAlertIcon,
   CloudOffIcon,
 } from "@hugeicons/core-free-icons";
+import type { ElementGeometryData } from "./GeometryInspectorDialog";
 import { useSession, signOut } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
 import { cn } from "@/lib/utils";
@@ -216,6 +218,8 @@ export function CanvasHeader({
   onOpenConnect,
   onOpenLogs,
   onOpenManual,
+  onOpenInspector,
+  selectedElement,
   onTidy,
   cloudStatus = "idle",
   onTriggerCloudSync,
@@ -258,6 +262,8 @@ export function CanvasHeader({
   onOpenConnect: () => void;
   onOpenLogs?: () => void;
   onOpenManual?: () => void;
+  onOpenInspector?: () => void;
+  selectedElement?: ElementGeometryData | null;
   onTidy?: () => void;
   cloudStatus?: CloudSyncStatus;
   onTriggerCloudSync?: () => void;
@@ -376,6 +382,12 @@ export function CanvasHeader({
                 <HugeiconsIcon icon={PeerToPeer01Icon} />
                 Live P2P Sync
               </DropdownMenuItem>
+              {onOpenInspector && (
+                <DropdownMenuItem onClick={onOpenInspector}>
+                  <HugeiconsIcon icon={Analytics01Icon} />
+                  <span>Geometry Inspector</span>
+                </DropdownMenuItem>
+              )}
               {onOpenLogs && (
                 <DropdownMenuItem onClick={onOpenLogs}>
                   <HugeiconsIcon icon={TerminalIcon} />
@@ -927,6 +939,40 @@ export function CanvasHeader({
                   />
                   <TooltipContent>
                     Ask AI to observe the canvas and generate answers or widgets
+                  </TooltipContent>
+                </Tooltip>
+              )}
+
+              {onOpenInspector && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size={selectedElement ? "sm" : "icon-sm"}
+                        variant={selectedElement ? "secondary" : "ghost"}
+                        onClick={onOpenInspector}
+                        data-icon={!selectedElement ? "true" : undefined}
+                        aria-label="Geometry & AI Inspector"
+                        className={cn(
+                          "shrink-0 h-8 gap-1.5 px-2 text-xs transition-all cursor-pointer",
+                          selectedElement
+                            ? "border border-primary/40 bg-primary/10 text-primary font-medium shadow-2xs hover:bg-primary/20"
+                            : "size-8 p-0 text-muted-foreground hover:text-foreground"
+                        )}
+                      >
+                        <HugeiconsIcon icon={Analytics01Icon} className="size-4 text-foreground shrink-0" />
+                        {selectedElement && (
+                          <span className="hidden text-foreground  sm:inline font-mono text-[11px] truncate max-w-[110px]">
+                            {Math.round(selectedElement.x)},{Math.round(selectedElement.y)}
+                          </span>
+                        )}
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>
+                    {selectedElement
+                      ? `Geometry Inspector (${selectedElement.tool}: x=${Math.round(selectedElement.x)}, y=${Math.round(selectedElement.y)}, ${Math.round(selectedElement.w)}×${Math.round(selectedElement.h)})`
+                      : "Element Geometry & AI Output Inspector (Logger)"}
                   </TooltipContent>
                 </Tooltip>
               )}

@@ -91,7 +91,7 @@ CORE PERCEPTION, GESTURES & SPATIAL PLACEMENT:
     1. Measure the container pixel bounds in the screenshot image.
     2. Convert to global canvas coordinates using COORDINATE_CONTRACT:
        globalX = round(sourceRect.x + px / imageScale), globalY = round(sourceRect.y + py / imageScale)
-    3. Place the output (e.g. write_text, draw_formula, diagram_source, or html_widget) directly inside that target container.
+    3. Place the output (e.g. write_text with tool: "write_text" and maxWidth matching container width, draw_formula, diagram_source, or html_widget) directly inside that target container.
   * POINTING TO AN EXISTING DRAWING: When an arrow points to a drawing/circuit/maze with "Solve this", "Animate", "Trace path":
     - Overlay the solution directly onto that drawing region (placement: "in_place" or "match_sketch").
 

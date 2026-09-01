@@ -350,7 +350,73 @@ async function streamOnceWithAiSdk(
     return;
   }
 
+  const fallback = extractFallbackToolCall(fullText);
+  if (fallback) {
+    const parsed = parseAgentToolCall(fallback.name, fallback.args);
+    send("tool_call", {
+      id: `call_synth_${Date.now()}`,
+      name: parsed.name,
+      args: parsed.args,
+      extraToolCalls: 0,
+    });
+    send("final", { text: fallback.message || "" });
+    return;
+  }
+
   send("final", { text: fullText });
+}
+
+function extractFallbackToolCall(text: string): { name: string; args: unknown; message?: string } | null {
+  if (!text || !text.includes("{")) return null;
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) return null;
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== "object") return null;
+
+    if (parsed.type === "tool_call" && typeof parsed.name === "string") {
+      return {
+        name: parsed.name,
+        args: parsed.arguments || parsed.args || {},
+        message: typeof parsed.text === "string" ? parsed.text : typeof parsed.message === "string" ? parsed.message : undefined,
+      };
+    }
+
+    if (Array.isArray(parsed.commands) && parsed.commands.length > 0) {
+      return {
+        name: "canvas_apply",
+        args: {
+          commands: parsed.commands,
+          baseRevision: parsed.baseRevision,
+          note: typeof parsed.spatialPlan === "string" ? parsed.spatialPlan : typeof parsed.note === "string" ? parsed.note : undefined,
+        },
+        message: typeof parsed.message === "string" ? parsed.message : typeof parsed.text === "string" ? parsed.text : undefined,
+      };
+    }
+
+    const toolName = String(parsed.tool || parsed.command || parsed.type || "");
+    const validTools = ["write_text", "draw_formula", "plot_function", "animate_scene", "html_widget", "diagram_source", "draw", "erase"];
+    if (validTools.includes(toolName)) {
+      return {
+        name: "canvas_apply",
+        args: {
+          commands: [parsed],
+          baseRevision: parsed.baseRevision,
+        },
+        message: typeof parsed.message === "string" ? parsed.message : typeof parsed.text === "string" ? parsed.text : undefined,
+      };
+    }
+
+    const agentTools = ["canvas_scan", "canvas_snapshot", "canvas_apply", "load_plugin", "canvas_read", "canvas_patch_widget", "canvas_undo", "canvas_focus"];
+    if (typeof parsed.name === "string" && agentTools.includes(parsed.name)) {
+      return {
+        name: parsed.name,
+        args: parsed.args || parsed.arguments || {},
+        message: typeof parsed.message === "string" ? parsed.message : undefined,
+      };
+    }
+  } catch {}
+  return null;
 }
 
 function parseMessages(raw: unknown): StepMessage[] | null {

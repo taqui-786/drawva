@@ -44,14 +44,16 @@ export function renderTextBlock(
   text: string,
   color: string,
   fontSize: number,
-  maxWidth: number
+  maxWidth: number,
+  lineHeightMultiplier = 1.35
 ): { canvas: HTMLCanvasElement; w: number; h: number } {
   const off = document.createElement("canvas");
   const ctx = off.getContext("2d")!;
   ctx.font = `${fontSize}px ${FONT_FAMILY}`;
 
   const lines = layoutTextLines(text, ctx, maxWidth);
-  const lineHeight = fontSize * 1.35;
+  const effectiveMultiplier = Number.isFinite(lineHeightMultiplier) && lineHeightMultiplier >= 1 ? lineHeightMultiplier : 1.35;
+  const lineHeight = fontSize * effectiveMultiplier;
   const lineWidths = lines.map((l) => (l ? ctx.measureText(l).width : 0));
   const w = Math.max(1, Math.ceil(Math.max(0, ...lineWidths)));
   const h = Math.max(1, Math.ceil(Math.max(1, lines.length) * lineHeight));

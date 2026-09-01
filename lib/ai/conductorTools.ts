@@ -160,7 +160,7 @@ async function execSnapshot(args: Record<string, unknown>, deps: ConductorToolDe
 function applyContext(deps: ConductorToolDeps): CommandValidationContext {
   const visibleRect = deps.engine.camera.visibleWorldRect();
   const ink = deps.getInkBox?.();
-  const changedBox = ink && ink.w > 4 && ink.h > 4 ? ink : visibleRect;
+  const changedBox = ink && ink.w > 4 && ink.h > 4 ? ink : undefined;
   const scene = buildScene(deps.widgets, deps.objects);
   const plugins = new Set(deps.enabledPluginIds());
   plugins.add("general");
@@ -180,8 +180,19 @@ function commandBox(cmd: CanvasCommand): { objectId: string; kind: string; box: 
   const rec = cmd as CanvasCommand & { x?: number; y?: number; w?: number; h?: number; targetId?: string };
   const x = Number(rec.x) || 0;
   const y = Number(rec.y) || 0;
-  const w = Number(rec.w) || Number((cmd as { maxWidth?: number }).maxWidth) || 0;
-  const h = Number(rec.h) || 0;
+  let w = Number(rec.w) || 0;
+  let h = Number(rec.h) || 0;
+  if (cmd.tool === "write_text") {
+    w = Number((cmd as { maxWidth?: number }).maxWidth) || 0;
+    const fs = Number((cmd as { fontSize?: number }).fontSize) || 24;
+    const lh = Number((cmd as { lineHeight?: number }).lineHeight) || 1.35;
+    h = Math.round(fs * lh * 4);
+  } else if (cmd.tool === "draw_formula") {
+    const fs = Number((cmd as { fontSize?: number }).fontSize) || 24;
+    const latex = String((cmd as { latex?: string }).latex || "");
+    w = Math.round(Math.min(5000, Math.max(fs * 2, latex.length * fs * 0.72)));
+    h = Math.round(fs * 1.8);
+  }
   return {
     objectId: typeof rec.targetId === "string" ? rec.targetId : cmd.tool,
     kind: cmd.tool,
@@ -208,11 +219,19 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   deps.afterBoardChange();
 
   const applied: { objectId: string; kind: string; box: Rect }[] = [];
+  const afterW = new Set(deps.widgets.all().map((w) => w.id));
+  const afterO = new Set(deps.objects.all().map((o) => o.id));
   for (const w of deps.widgets.all()) {
     if (!beforeW.has(w.id)) applied.push({ objectId: w.id, kind: w.kind, box: { x: w.x, y: w.y, w: w.w, h: w.h } });
   }
   for (const o of deps.objects.all()) {
     if (!beforeO.has(o.id)) applied.push({ objectId: o.id, kind: o.kind, box: { x: o.x, y: o.y, w: o.w, h: o.h } });
+  }
+  for (const wid of beforeW) {
+    if (!afterW.has(wid)) applied.push({ objectId: wid, kind: "removed_widget", box: { x: 0, y: 0, w: 0, h: 0 } });
+  }
+  for (const oid of beforeO) {
+    if (!afterO.has(oid)) applied.push({ objectId: oid, kind: "removed_object", box: { x: 0, y: 0, w: 0, h: 0 } });
   }
   if (applied.length === 0) {
     for (const c of commands) applied.push(commandBox(c));

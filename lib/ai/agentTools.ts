@@ -16,10 +16,10 @@ export const AGENT_SCENE_JSON_MAX = 8_000;
 export const AGENT_CONVERSATION_MAX_BYTES = 512 * 1024;
 
 const regionSchema = z.object({
-  x: z.number().describe("World X coordinate"),
-  y: z.number().describe("World Y coordinate"),
-  w: z.number().describe("Box width"),
-  h: z.number().describe("Box height"),
+  x: z.coerce.number().describe("World X coordinate"),
+  y: z.coerce.number().describe("World Y coordinate"),
+  w: z.coerce.number().describe("Box width"),
+  h: z.coerce.number().describe("Box height"),
 });
 
 const canvasScanSchema = z.object({
@@ -48,10 +48,10 @@ const commandItemSchema = z.object({
   command: z.string().optional().describe("Alias for tool identifier"),
   type: z.string().optional().describe("Alias for tool identifier"),
   name: z.string().optional().describe("Alias for tool identifier"),
-  x: z.number().optional().describe("World X coordinate on canvas (0..20000)"),
-  y: z.number().optional().describe("World Y coordinate on canvas (0..20000)"),
-  w: z.number().optional().describe("Box width in canvas units"),
-  h: z.number().optional().describe("Box height in canvas units"),
+  x: z.coerce.number().optional().describe("World X coordinate on canvas (0..20000)"),
+  y: z.coerce.number().optional().describe("World Y coordinate on canvas (0..20000)"),
+  w: z.coerce.number().optional().describe("Box width in canvas units"),
+  h: z.coerce.number().optional().describe("Box height in canvas units"),
   placement: z.enum([
     "below",
     "right",
@@ -78,21 +78,21 @@ const commandItemSchema = z.object({
     "geojson",
   ]).optional().describe("diagram_source format"),
   title: z.string().optional().describe("Title for widget or diagram header"),
-  fontSize: z.number().optional().describe("Font size in canvas units"),
-  maxWidth: z.number().optional().describe("Maximum width for wrapped text column (default ~1200-2000)"),
-  lineHeight: z.number().optional().describe("Line height multiplier (default ~1.35)"),
+  fontSize: z.coerce.number().optional().describe("Font size in canvas units"),
+  maxWidth: z.coerce.number().optional().describe("Maximum width for wrapped text column (default ~1200-2000)"),
+  lineHeight: z.coerce.number().optional().describe("Line height multiplier (default ~1.35)"),
   pluginId: z.string().optional().describe("Plugin identifier"),
   points: z.array(z.any()).optional().describe("draw/erase: array of [x, y] coordinates"),
-  size: z.number().optional().describe("draw/erase: stroke width or eraser brush size"),
+  size: z.coerce.number().optional().describe("draw/erase: stroke width or eraser brush size"),
   mode: z.enum(["rect", "path"]).optional().describe("erase: 'rect' or 'path'"),
-  durationMs: z.number().optional().describe("animate_scene: animation loop duration in ms"),
+  durationMs: z.coerce.number().optional().describe("animate_scene: animation loop duration in ms"),
   loop: z.boolean().optional().describe("animate_scene: whether animation loops"),
   objects: z.array(z.any()).optional().describe("animate_scene: scene visual objects"),
   motions: z.array(z.any()).optional().describe("animate_scene: object motion tracks"),
 }).passthrough();
 
 const canvasApplySchema = z.object({
-  baseRevision: z.number().optional().describe("Base board revision for conflict safety"),
+  baseRevision: z.coerce.number().optional().describe("Base board revision for conflict safety"),
   commands: z.array(commandItemSchema).min(1).max(16).describe("Array of 1..16 canvas commands (write_text, draw_formula, diagram_source, html_widget, plot_function, animate_scene, draw, erase)"),
   note: z.string().optional().describe("Brief note explaining what this mutation achieves"),
 });
@@ -104,13 +104,13 @@ const loadPluginSchema = z.object({
 const canvasReadSchema = z.object({
   objectId: z.string().describe("ID of the widget or canvas object to inspect"),
   resource: z.enum(["text", "html", "source"]).optional().describe("Resource format to read: 'text' (default), 'html', or 'source'"),
-  startLine: z.number().optional().describe("1-indexed start line number"),
-  endLine: z.number().optional().describe("1-indexed end line number"),
+  startLine: z.coerce.number().optional().describe("1-indexed start line number"),
+  endLine: z.coerce.number().optional().describe("1-indexed end line number"),
 });
 
 const canvasPatchWidgetSchema = z.object({
   objectId: z.string().describe("ID of the widget to patch"),
-  baseRevision: z.number().optional().describe("Base board revision"),
+  baseRevision: z.coerce.number().optional().describe("Base board revision"),
   patch: z.string().describe("Unified diff patch string with --- a/widget.html / +++ b/widget.html headers"),
 });
 

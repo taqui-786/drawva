@@ -133,6 +133,25 @@ export class Camera {
     };
   }
 
+  centerOnBox(box: Rect, padding = 80): void {
+    if (this.viewport.w <= 0 || this.viewport.h <= 0) return;
+    const targetScale = Math.max(
+      MIN_SCALE,
+      Math.min(
+        1.5,
+        Math.min(
+          (this.viewport.w - padding * 2) / Math.max(10, box.w),
+          (this.viewport.h - padding * 2) / Math.max(10, box.h)
+        )
+      )
+    );
+    const centerX = box.x + box.w / 2;
+    const centerY = box.y + box.h / 2;
+    this.state.scale = targetScale;
+    this.state.panX = this.viewport.w / 2 - centerX * targetScale;
+    this.state.panY = this.viewport.h / 2 - centerY * targetScale;
+  }
+
   visibleWorldRect(): Rect {
     const l = Math.max(0, -this.state.panX / this.state.scale);
     const t = Math.max(0, -this.state.panY / this.state.scale);

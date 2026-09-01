@@ -94,6 +94,8 @@ export interface EraseCommand {
   y?: number;
   w?: number;
   h?: number;
+  objectId?: string;
+  targetId?: string;
 }
 
 export interface HtmlWidgetCommand {
@@ -186,16 +188,15 @@ function matchedFontSize(
   scale: number,
   changedBoxHeight?: number
 ): number {
-  const effectiveScale = Number.isFinite(scale) && scale > 0 ? scale : 0.25;
-  const screenReadable = Math.round(42 / Math.max(0.03, Math.min(3, effectiveScale)));
   const size = Number(value);
-  if (Number.isFinite(size) && size > 0) {
-    return Math.max(16, Math.min(650, Math.round(size)));
+  if (Number.isFinite(size) && size >= 12) {
+    return Math.max(12, Math.min(650, Math.round(size)));
   }
-  if (changedBoxHeight && changedBoxHeight > 20) {
+  // Only match ink box height if it is a reasonable handwriting stroke height (20px to 600px).
+  if (changedBoxHeight && changedBoxHeight > 20 && changedBoxHeight <= 600) {
     return Math.max(20, Math.min(650, Math.round(changedBoxHeight * 0.75)));
   }
-  return Math.max(20, Math.min(650, screenReadable));
+  return 42;
 }
 
 function matchedTextFontSize(
@@ -204,18 +205,19 @@ function matchedTextFontSize(
   scale: number,
   changedBoxHeight?: number
 ): number {
-  const effectiveScale = Number.isFinite(scale) && scale > 0 ? scale : 0.25;
   const modelSize = Number(value);
-  const longForm = Array.from(String(text).replace(/\s/g, "")).length >= 10;
-  if (Number.isFinite(modelSize) && modelSize > 0) {
-    // Honor the model's size for body copy. Only bump if it would be unreadably
-    // small on screen (~18px). Do not floor to the 42px short-answer size —
-    // that turns a compact notes column into a viewport-wide slab.
-    const minWorld = Math.round((longForm ? 18 : 32) / Math.max(0.03, Math.min(3, effectiveScale)));
-    return Math.max(24, Math.min(650, Math.max(Math.round(modelSize), minWorld)));
+  if (Number.isFinite(modelSize) && modelSize >= 12) {
+    // 100% honor the model's explicitly specified font size in world units
+    return Math.max(12, Math.min(650, Math.round(modelSize)));
   }
-  const size = matchedFontSize(value, scale, changedBoxHeight);
-  return longForm ? Math.max(24, Math.round(size * 0.5)) : size;
+  const longForm = Array.from(String(text).replace(/\s/g, "")).length >= 10;
+  // If handwriting was drawn, scale relative to handwriting
+  if (changedBoxHeight && changedBoxHeight > 20 && changedBoxHeight <= 600) {
+    const size = Math.round(changedBoxHeight * 0.75);
+    return longForm ? Math.max(24, Math.round(size * 0.75)) : Math.max(20, size);
+  }
+  // Standard whiteboard note font size default (contract: 36..48)
+  return longForm ? 40 : 42;
 }
 
 function textColumnWidth(
@@ -224,13 +226,13 @@ function textColumnWidth(
   scale: number,
   viewportW: number
 ): number {
-  const cap = Math.max(280, Math.min(3200, Math.round(Math.max(1, viewportW) * 0.9)));
+  const cap = Math.max(80, Math.min(3200, Math.round(Math.max(1, viewportW) * 0.9)));
   const modelW = Number(rawWidth);
-  if (Number.isFinite(modelW) && modelW >= 280) {
-    return clampNum(modelW, 280, cap);
+  if (Number.isFinite(modelW) && modelW >= 80) {
+    return clampNum(modelW, 80, cap);
   }
-  const fallback = Math.max(Math.round(fontSize * 18), Math.round(650 / Math.max(0.05, scale)));
-  return clampNum(fallback, 280, cap);
+  const fallback = Math.max(Math.round(fontSize * 28), 1200);
+  return clampNum(fallback, 80, cap);
 }
 
 function textContentBox(
@@ -249,7 +251,7 @@ function textContentBox(
     const chars = Math.max(1, Array.from(line).length);
     return n + Math.max(1, Math.ceil((chars * avgChar) / Math.max(1, w)));
   }, 0);
-  const h = Math.round(fontSize * lineHeight * Math.min(16, Math.max(1, wrapLines)));
+  const h = Math.round(fontSize * lineHeight * Math.max(1, wrapLines));
   return { w: Math.round(w), h };
 }
 
@@ -620,11 +622,12 @@ export function fitWidgetGeometry(
   },
   visibleRect?: Box,
   changedBox?: Box,
-  reposition = true,
+  _reposition = true,
   widgetEditBox?: Box,
   sceneItems?: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>,
   widgetGeometry?: { max?: { w?: number; h?: number } } | null
 ): Box | null {
+  void _reposition;
   const placement = String(cmd.placement || "").toLowerCase();
   const widgetItems = Array.isArray(sceneItems)
     ? sceneItems.filter((i) => i.kind === "diagram" || i.kind === "html")
@@ -684,10 +687,7 @@ export function fitWidgetGeometry(
       widgetGeometry
     );
     if (!box) return null;
-    if (isTargetPlacement || placement === "in_place") {
-      return box;
-    }
-    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems }, reposition && !isTargetExplicit);
+    return box;
   }
 
   const anchor = placementAnchor(changedBox, visibleRect);
@@ -781,15 +781,7 @@ function fitAnimationGeometry(
     const x = clampNum(rawX, 0, SIZE - w);
     const y = clampNum(rawY, 0, SIZE - h);
 
-    if (isOverlayPlacement) {
-      return { x, y, w, h };
-    }
-    return rescueCollision(
-      { x, y, w, h },
-      placement,
-      ctx,
-      !ctx.keepPosition
-    );
+    return { x, y, w, h };
   }
 
   const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
@@ -879,14 +871,8 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
   let x: number;
   let y: number;
   if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
-    const rescued = rescueCollision(
-      { x: clampNum(rawX, 0, SIZE - w), y: clampNum(rawY, 0, SIZE - h), w, h },
-      String(c.placement || "").toLowerCase(),
-      ctx,
-      true
-    );
-    x = rescued.x;
-    y = rescued.y;
+    x = clampNum(rawX, 0, SIZE - w);
+    y = clampNum(rawY, 0, SIZE - h);
   } else {
     const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
     if (anchor) {
@@ -1100,10 +1086,7 @@ export function extractLatex(input: unknown, depth = 0): string {
       "formula",
       "equation",
       "math",
-      "text",
-      "content",
-      "value",
-      "expression",
+      "tex",
       "code",
       "params",
       "args",
@@ -1209,23 +1192,36 @@ export function validateCommand(
   if (!["html_widget", "write_text", "draw_formula", "plot_function", "animate_scene", "diagram_source", "draw", "erase"].includes(tool)) {
     if (Array.isArray(c.objects) && Array.isArray(c.motions)) {
       tool = "animate_scene";
+    } else if (Array.isArray(c.points) && c.points.length > 0) {
+      tool = c.mode === "rect" || c.mode === "path" ? "erase" : "draw";
+    } else if (c.html !== undefined || c.pluginId !== undefined) {
+      tool = "html_widget";
+    } else if (c.source !== undefined || c.sourceFormat !== undefined || c.diagram !== undefined) {
+      tool = "diagram_source";
+    } else if (c.latex !== undefined || c.math !== undefined || c.tex !== undefined) {
+      tool = "draw_formula";
+    } else if (c.text !== undefined || c.markdown !== undefined || c.message !== undefined || c.explanation !== undefined) {
+      tool = "write_text";
+    } else if (c.formula !== undefined || c.equation !== undefined) {
+      tool = "draw_formula";
+    } else if (c.expression !== undefined || c.expr !== undefined || c.fn !== undefined) {
+      tool = "plot_function";
     } else {
       const potentialHtml = extractHtmlOrSvg(c);
       if (potentialHtml && (potentialHtml.includes("<svg") || potentialHtml.includes("<html") || potentialHtml.includes("<!DOCTYPE") || potentialHtml.includes("<div") || potentialHtml.includes("<canvas"))) {
         tool = "html_widget";
       } else {
-        const hasExplicitMathKey = Boolean(c.latex !== undefined || c.formula !== undefined || c.equation !== undefined || c.math !== undefined);
-        const potentialLatex = extractLatex(c);
-        if (potentialLatex && (hasExplicitMathKey || potentialLatex.includes("\\") || potentialLatex.includes("^") || potentialLatex.includes("_") || potentialLatex.includes("="))) {
-          tool = "draw_formula";
+        const potentialDiagram = extractDiagramSource(c);
+        if (potentialDiagram && (potentialDiagram.startsWith("graph ") || potentialDiagram.startsWith("flowchart ") || potentialDiagram.startsWith("sequenceDiagram") || potentialDiagram.startsWith("digraph "))) {
+          tool = "diagram_source";
         } else {
-          const potentialExpr = extractExpression(c);
-          if (potentialExpr && /[a-z0-9]/.test(potentialExpr) && (potentialExpr.includes("x") || potentialExpr.includes("sin") || potentialExpr.includes("cos"))) {
-            tool = "plot_function";
+          const potentialText = extractText(c);
+          if (potentialText) {
+            tool = "write_text";
           } else {
-            const potentialText = extractText(c);
-            if (potentialText) {
-              tool = "write_text";
+            const potentialLatex = extractLatex(c);
+            if (potentialLatex) {
+              tool = "draw_formula";
             }
           }
         }
@@ -1250,8 +1246,8 @@ export function validateCommand(
       let x = near.x;
       let y = near.y;
 
-      x = Math.max(0, Math.min(SIZE - maxWidth, Math.round(x)));
-      y = Math.max(0, Math.min(SIZE - fontSize * lineHeight * 2, Math.round(y)));
+      x = Math.max(0, Math.min(Math.max(0, SIZE - content.w), Math.round(x)));
+      y = Math.max(0, Math.min(Math.max(0, SIZE - content.h), Math.round(y)));
 
       return {
         tool: "write_text",
@@ -1276,8 +1272,8 @@ export function validateCommand(
       let x = near.x;
       let y = near.y;
 
-      x = Math.max(0, Math.min(SIZE - estimatedWidth, Math.round(x)));
-      y = Math.max(0, Math.min(SIZE - fontSize * 1.8, Math.round(y)));
+      x = Math.max(0, Math.min(Math.max(0, SIZE - estimatedWidth), Math.round(x)));
+      y = Math.max(0, Math.min(Math.max(0, SIZE - formulaH), Math.round(y)));
 
       return {
         tool: "draw_formula",
@@ -1442,25 +1438,89 @@ export function validateCommand(
       };
     }
     case "erase": {
-      if (c.mode === "path") {
-        if (
-          !Array.isArray(c.points) ||
-          (c.points as unknown[]).length < 1 ||
-          (c.points as unknown[]).length > 200 ||
-          !(c.points as unknown[]).every((p) => isPoint(p))
-        ) {
-          return fail("erase.path.bad");
-        }
-        const size = Math.max(2, Math.min(300, Number(c.size) || 80));
-        const xs = (c.points as [number, number][]).map((p) => p[0]);
-        const ys = (c.points as [number, number][]).map((p) => p[1]);
-        if (Math.max(...xs) - Math.min(...xs) > 3000 || Math.max(...ys) - Math.min(...ys) > 3000) return fail("erase.path.span");
-        return { tool: "erase", mode: "path", points: c.points as [number, number][], size };
+      const targetId =
+        typeof c.objectId === "string" && c.objectId.trim()
+          ? c.objectId.trim()
+          : typeof c.targetId === "string" && c.targetId.trim()
+          ? c.targetId.trim()
+          : undefined;
+      const explicitMode = typeof c.mode === "string" ? c.mode.toLowerCase() : "";
+
+      if (explicitMode === "path" && Array.isArray(c.points) && c.points.length > 0) {
+        const pts = (c.points as unknown[])
+          .map((p) =>
+            isPointPair(p)
+              ? p
+              : p && typeof p === "object" && typeof (p as { x?: number }).x === "number" && typeof (p as { y?: number }).y === "number"
+              ? ([(p as { x: number }).x, (p as { y: number }).y] as [number, number])
+              : null
+          )
+          .filter((p): p is [number, number] => p !== null && n(p[0]) && n(p[1]));
+        if (pts.length < 1 || pts.length > 600) return fail("erase.path.bad");
+        const size = Math.max(2, Math.min(600, Number(c.size) || 80));
+        const xs = pts.map((p) => p[0]);
+        const ys = pts.map((p) => p[1]);
+        if (Math.max(...xs) - Math.min(...xs) > 6000 || Math.max(...ys) - Math.min(...ys) > 6000) return fail("erase.path.span");
+        return {
+          tool: "erase",
+          mode: "path",
+          points: pts,
+          size,
+          ...(targetId ? { objectId: targetId, targetId } : {}),
+        };
       }
-      if (!n(c.x) || !n(c.y) || !n(c.w, 1, SIZE) || !n(c.h, 1, SIZE) || (c.x as number) + (c.w as number) > SIZE || (c.y as number) + (c.h as number) > SIZE) {
+
+      let rectX = typeof c.x === "number" && Number.isFinite(c.x) ? c.x : undefined;
+      let rectY = typeof c.y === "number" && Number.isFinite(c.y) ? c.y : undefined;
+      let rectW = typeof c.w === "number" && Number.isFinite(c.w) && c.w > 0 ? c.w : undefined;
+      let rectH = typeof c.h === "number" && Number.isFinite(c.h) && c.h > 0 ? c.h : undefined;
+
+      if (targetId && (rectX === undefined || rectY === undefined || rectW === undefined || rectH === undefined)) {
+        const found = ctx.sceneItems?.find((s) => s.id === targetId);
+        if (found) {
+          rectX = found.x;
+          rectY = found.y;
+          rectW = Math.max(10, found.w);
+          rectH = Math.max(10, found.h);
+        }
+      }
+
+      if ((rectX === undefined || rectY === undefined || rectW === undefined || rectH === undefined) && Array.isArray(c.points) && c.points.length >= 2) {
+        const xs = (c.points as unknown[])
+          .map((p) => (isPointPair(p) ? p[0] : (p as { x?: number })?.x))
+          .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+        const ys = (c.points as unknown[])
+          .map((p) => (isPointPair(p) ? p[1] : (p as { y?: number })?.y))
+          .filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+        if (xs.length >= 2 && ys.length >= 2) {
+          rectX = Math.min(...xs);
+          rectY = Math.min(...ys);
+          rectW = Math.max(10, Math.max(...xs) - rectX);
+          rectH = Math.max(10, Math.max(...ys) - rectY);
+        }
+      }
+
+      if (rectX === undefined || rectY === undefined || rectW === undefined || rectH === undefined) {
+        if (targetId) {
+          return { tool: "erase", mode: "rect", x: 0, y: 0, w: 0, h: 0, objectId: targetId, targetId };
+        }
         return fail("erase.rect.bad");
       }
-      return { tool: "erase", mode: "rect", x: c.x as number, y: c.y as number, w: c.w as number, h: c.h as number };
+
+      const clampedX = Math.max(0, Math.min(SIZE, rectX));
+      const clampedY = Math.max(0, Math.min(SIZE, rectY));
+      const clampedW = Math.max(1, Math.min(SIZE - clampedX, rectW));
+      const clampedH = Math.max(1, Math.min(SIZE - clampedY, rectH));
+
+      return {
+        tool: "erase",
+        mode: "rect",
+        x: clampedX,
+        y: clampedY,
+        w: clampedW,
+        h: clampedH,
+        ...(targetId ? { objectId: targetId, targetId } : {}),
+      };
     }
     case "draw": {
       const pts = Array.isArray(c.points) ? (c.points as unknown[]) : [];
@@ -1490,10 +1550,6 @@ export function validateCommand(
     if (onReject) onReject(reason);
     return null;
   }
-}
-
-function isPoint(v: unknown): boolean {
-  return Array.isArray(v) && v.length === 2 && n(v[0]) && n(v[1]);
 }
 
 function isPointPair(v: unknown): v is [number, number] {
@@ -1704,8 +1760,10 @@ export function canonicalToolName(value: unknown): string {
 /** Bounding box of a placed command, so later siblings can avoid it. */
 function commandBounds(cmd: CanvasCommand): Box | null {
   switch (cmd.tool) {
-    case "write_text":
-      return { x: cmd.x, y: cmd.y, w: cmd.maxWidth, h: Math.round(cmd.fontSize * cmd.lineHeight * 2) };
+    case "write_text": {
+      const content = textContentBox(cmd.text, cmd.fontSize, cmd.lineHeight, cmd.maxWidth);
+      return { x: cmd.x, y: cmd.y, w: content.w, h: content.h };
+    }
     case "draw_formula":
       return {
         x: cmd.x,
@@ -1737,7 +1795,7 @@ export function validateCommands(
   if (!Array.isArray(rawCmds)) return { commands: [], rejected: ["not-array"] };
   const acceptedTools = new Set(["write_text", "draw_formula", "plot_function", "animate_scene", "draw", "erase"]);
   acceptedTools.add("html_widget"); // General HTML is mandatory and always enabled
-  if (ctx.plugins.has("flowchart") || ctx.plugins.size === 0) acceptedTools.add("diagram_source");
+  if (!ctx.plugins || ctx.plugins.has("flowchart") || ctx.plugins.size === 0) acceptedTools.add("diagram_source");
 
   let widgetSlots = ctx.widgetSlots;
   const plotBudget = { used: 0 };
