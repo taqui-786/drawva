@@ -23,8 +23,8 @@ const REFINEMENT_SYSTEM_PROMPT = `You refine and beautify canvas content inside 
    (e.g. "Hey", words, sentences, notes, headings, numbers, algebraic equations like "E=mc^2" or "y = ax^2 + bx + c")
    -> MUST RETURN native_canvas!
    -> DO NOT convert simple handwriting or text into an HTML widget iframe card.
-   -> Return native_canvas with "texts": [{"text": "...", "normX": 0, "normY": 0, "fontSize": 48, "color": "#0f172a"}] (or "formulas": [{"latex": "..."}] for math equations).
-   -> Use the dominant color from the provided ink palette (or #0f172a / #000000). Set fontSize proportional to selection rectangle height (e.g. fontSize = ~0.6 * selectionRect.h for single-line text, e.g. 40px - 140px depending on selection height).
+   -> Return native_canvas with "texts": [{"text": "...", "normX": 0, "normY": 0, "fontSize": 48}] (or "formulas": [{"latex": "..."}] for math equations).
+   -> Omit "color" to inherit the app's theme ink color, or set it to the dominant color from the provided ink palette when the user's handwriting is deliberately colored. Set fontSize proportional to selection rectangle height (e.g. fontSize = ~0.6 * selectionRect.h for single-line text, e.g. 40px - 140px depending on selection height).
 
 2. ROUGH DIAGRAMS, PHYSICS / MATH SKETCHES, GEOMETRY, WIREFRAMES & SCHEMATICS:
    (e.g. projectile motion with coordinate axes and parabolic curve, velocity vectors, launch angles, geometric figures, triangles, circles, electrical circuits, free-body diagrams, annotated graphs, UI wireframes, flow concepts)
@@ -50,10 +50,10 @@ const REFINEMENT_SYSTEM_PROMPT = `You refine and beautify canvas content inside 
   <div id="stage"><svg viewBox="0 0 W H" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0f172a"/>
+        <path d="M 0 1.5 L 8 5 L 0 8.5 z" style="fill:var(--foreground)"/>
       </marker>
-      <marker id="arrow-blue" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb"/>
+      <marker id="arrow-accent" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+        <path d="M 0 1.5 L 8 5 L 0 8.5 z" style="fill:var(--chart-3)"/>
       </marker>
     </defs>
     <!-- Vector elements: axes, paths, curves, lines, arcs, markers, labels -->
@@ -62,23 +62,25 @@ const REFINEMENT_SYSTEM_PROMPT = `You refine and beautify canvas content inside 
 - Transparent Background: The container and stage must have background: transparent; with no outer card border or box-shadow, so the diagram integrates seamlessly into the whiteboard.
 - Precision Geometry:
   * Straight axes with clean tick marks and arrow markers.
-  * Smooth mathematical curves using quadratic/cubic Bézier paths: <path d="M ... Q ..." fill="none" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="6 4"/> for trajectory curves.
-  * Angle arcs with angle labels (e.g. <path d="M ... A ..." fill="none" stroke="#d97706" stroke-width="2"/><text ...>θ = 30°</text>).
-  * Velocity / vector arrows with arrowheads (e.g. marker-end="url(#arrow-blue)").
-  * Typeset labels & formulas: <text font-family="system-ui, -apple-system, sans-serif" font-size="14" font-weight="600" fill="#0f172a"> with accurate notation (v₀, v₀x, v₀y, y(x), x(t)).
-  * Color palette: Primary axes/lines in slate/navy (#0f172a), vectors in blue (#2563eb), angle arcs in amber (#d97706), measurements in emerald (#059669).
+  * Smooth mathematical curves using quadratic/cubic Bézier paths: <path d="M ... Q ..." fill="none" style="stroke:var(--chart-3)" stroke-width="2.5" stroke-dasharray="6 4"/> for trajectory curves.
+  * Angle arcs with angle labels (e.g. <path d="M ... A ..." fill="none" style="stroke:var(--chart-2)" stroke-width="2"/><text ...>θ = 30°</text>).
+  * Velocity / vector arrows with arrowheads (e.g. marker-end="url(#arrow-accent)").
+  * Typeset labels & formulas: <text style="font-family:var(--font-sans);fill:var(--foreground)" font-size="14" font-weight="600"> with accurate notation (v₀, v₀x, v₀y, y(x), x(t)).
+  * Theme tokens only — the widget iframe receives the app theme on :root. Primary axes, outlines, and labels var(--foreground); secondary labels and ticks var(--muted-foreground); gridlines var(--border); vectors, curves, and data series var(--chart-1)..var(--chart-5); errors or negatives var(--destructive); an opaque backing (only when contrast demands it) var(--card) with var(--card-foreground). Never invent hex, rgb, or gradients. In SVG var() resolves in CSS only: style="fill:var(--chart-1)", never fill="var(--chart-1)".
 
 == 4. RESPONSE FORMAT (MANDATORY) ==
 Return ONLY a valid JSON object matching one of the schemas:
-- For handwriting / text / formulas: {"kind": "native_canvas", "texts": [{"text": "Hey", "normX": 0, "normY": 0, "fontSize": 40, "color": "#000000"}]} or {"kind": "native_canvas", "formulas": [{"latex": "..."}]}
+- For handwriting / text / formulas: {"kind": "native_canvas", "texts": [{"text": "Hey", "normX": 0, "normY": 0, "fontSize": 40}]} or {"kind": "native_canvas", "formulas": [{"latex": "..."}]}
 - For html_widget (diagrams only): {"kind": "html_widget", "title": "...", "html": "<div id=\\"stage\\"><svg ...>...</svg></div>"}
 - For diagram_widget: {"kind": "diagram_widget", "sourceFormat": "mermaid|dot|vega-lite|smiles|bpmn-xml|cytoscape-json|geojson", "title": "...", "source": "..."}
 - For widget_patch: {"kind": "widget_patch", "targetId": "...", "expectedContentHash": "...", "patch": "..."}
 - For reject: {"kind": "reject", "reason": "..."}`;
 
+// `color` is intentionally default-free: when the model omits it the client
+// falls back to the app's theme ink color instead of a hardcoded slate.
 const refinedStrokeSchema = z.object({
   points: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(2).max(200),
-  color: z.string().min(1).max(30).optional().default("#000000"),
+  color: z.string().min(1).max(30).optional(),
   width: z.number().min(0.5).max(20).optional().default(2),
 });
 
@@ -87,7 +89,7 @@ const refinedTextSchema = z.object({
   normX: z.number().min(0).max(1).optional().default(0),
   normY: z.number().min(0).max(1).optional().default(0),
   fontSize: z.number().min(8).max(200).optional().default(32),
-  color: z.string().min(1).max(30).optional().default("#000000"),
+  color: z.string().min(1).max(30).optional(),
 });
 
 const refinedFormulaSchema = z.object({
@@ -95,7 +97,7 @@ const refinedFormulaSchema = z.object({
   normX: z.number().min(0).max(1).optional().default(0),
   normY: z.number().min(0).max(1).optional().default(0),
   fontSize: z.number().min(8).max(200).optional().default(32),
-  color: z.string().min(1).max(30).optional().default("#000000"),
+  color: z.string().min(1).max(30).optional(),
 });
 
 const refinementResultSchema = z.discriminatedUnion("kind", [

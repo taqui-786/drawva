@@ -76,6 +76,7 @@ import {
 } from "@/lib/canvas/refinement";
 import { applyWidgetPatch } from "@/lib/canvas/widgetPatch";
 import { buildAtlas } from "@/lib/canvas/atlas";
+import { resolveThemeColor } from "@/lib/canvas/theme";
 import type { RefinementManifest } from "@/lib/canvas/refinement";
 
 function findInPlaceWidget(
@@ -910,12 +911,15 @@ export function CanvasApp() {
           toast.error("AI returned empty refinement. Nothing was replaced.");
           return false;
         }
+        // Raster paths cannot resolve var(), so the theme ink color is resolved
+        // to a concrete value here and used whenever the model omits a color.
+        const inkColor = resolveThemeColor("foreground", "#0f172a");
         for (const s of strokes) {
           const pts = s.points.map((p) => ({
             x: rect.x + p.x * rect.w,
             y: rect.y + p.y * rect.h,
           }));
-          const strokeColor = s.color || "#0f172a";
+          const strokeColor = s.color || inkColor;
           const strokeSize = s.width || 2;
           for (let i = 1; i < pts.length; i++) {
             strokeSegment(eng, pts[i - 1], pts[i], { erase: false, size: strokeSize, color: strokeColor });
@@ -923,7 +927,7 @@ export function CanvasApp() {
         }
         for (const t of texts) {
           const fontSize = computeOptimalTextFontSize(t.text, rect, t.fontSize);
-          const textColor = t.color || "#0f172a";
+          const textColor = t.color || inkColor;
           const block = renderTextBlock(t.text, textColor, fontSize, rect.w);
           let tx = Math.round(rect.x + (t.normX ?? 0) * rect.w);
           let ty = Math.round(rect.y + (t.normY ?? 0) * rect.h);
@@ -937,7 +941,7 @@ export function CanvasApp() {
         }
         for (const f of formulas) {
           const fontSize = computeOptimalTextFontSize(f.latex, rect, f.fontSize);
-          const formulaColor = f.color || "#0f172a";
+          const formulaColor = f.color || inkColor;
           const rendered = await renderFormula(f.latex, fontSize, formulaColor);
           let fx = Math.round(rect.x + (f.normX ?? 0) * rect.w);
           let fy = Math.round(rect.y + (f.normY ?? 0) * rect.h);

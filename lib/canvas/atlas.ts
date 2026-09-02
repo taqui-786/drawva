@@ -1,5 +1,6 @@
 import { CanvasEngine } from "./engine";
 import { SIZE, TILE } from "./constants";
+import { widgetThemeStyleTag } from "./theme";
 import type { Rect } from "./types";
 import { WidgetManager, type WidgetItem } from "./widgets";
 import { ObjectManager, type ObjectItem } from "./objects";
@@ -128,7 +129,7 @@ async function renderHtmlToContext(
 
     doc.open();
     doc.write(
-      `<!doctype html><html><head><meta charset="utf-8"><style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style></head><body>${widget.html}</body></html>`
+      `<!doctype html><html><head><meta charset="utf-8">${widgetThemeStyleTag()}<style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style></head><body>${widget.html}</body></html>`
     );
     doc.close();
     await new Promise((resolve) => window.setTimeout(resolve, 80));

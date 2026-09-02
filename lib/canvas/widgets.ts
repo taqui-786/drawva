@@ -1,5 +1,6 @@
 import { Camera } from "./camera";
 import { SIZE } from "./constants";
+import { readWidgetTheme, type WidgetTheme } from "./theme";
 import type { CanvasMode, Point } from "./types";
 import {
   MAX_CONTENT_H,
@@ -96,6 +97,21 @@ export class WidgetManager {
   private styleSizeKey = new Map<string, string>();
   private lastRenderState = new Map<string, string>();
   private lastContentFit = new Map<string, { w: number; h: number; grows: number }>();
+  private theme: WidgetTheme = readWidgetTheme();
+  private themeKey = JSON.stringify(this.theme);
+  private themeObserver: MutationObserver | null = null;
+
+  /**
+   * The manager can be constructed before the app stylesheet has applied, which
+   * would cache an empty theme. Re-read until tokens actually resolve.
+   */
+  private currentTheme(): WidgetTheme {
+    if (Object.keys(this.theme).length === 0) {
+      this.theme = readWidgetTheme();
+      this.themeKey = JSON.stringify(this.theme);
+    }
+    return this.theme;
+  }
 
   private onPointerMove = (e: PointerEvent) => {
     const cb = this.opts.callbacks;
@@ -331,6 +347,15 @@ export class WidgetManager {
     window.addEventListener("message", this.onMessage);
     window.addEventListener("pointermove", this.onPointerMove);
     window.addEventListener("pointerup", this.onPointerUp);
+    // Mirrors the engine's theme observer in CanvasProvider: `.dark` toggles on
+    // <html> have to reach widget iframes, which cannot see the app stylesheet.
+    if (typeof MutationObserver === "function") {
+      this.themeObserver = new MutationObserver(() => this.syncTheme());
+      this.themeObserver.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "style"],
+      });
+    }
   }
 
   private onMessage = (e: MessageEvent) => {
@@ -519,6 +544,26 @@ export class WidgetManager {
     return [...this.widgets.values()];
   }
 
+  /**
+   * Re-read the app theme and push it into every mounted widget frame.
+   * Custom-property writes only — no remount, so live widget state, animation
+   * timers, and measured geometry survive a theme switch untouched.
+   */
+  syncTheme(): void {
+    const next = readWidgetTheme();
+    const key = JSON.stringify(next);
+    if (key === this.themeKey) return;
+    this.themeKey = key;
+    this.theme = next;
+    for (const shell of this.shells.values()) {
+      const frame = shell.querySelector("iframe");
+      frame?.contentWindow?.postMessage(
+        { type: "drawva-widget-theme", theme: this.theme },
+        location.origin
+      );
+    }
+  }
+
   clear(): void {
     for (const id of [...this.widgets.keys()]) this.remove(id);
     this.selectedId = null;
@@ -528,6 +573,8 @@ export class WidgetManager {
     window.removeEventListener("message", this.onMessage);
     window.removeEventListener("pointermove", this.onPointerMove);
     window.removeEventListener("pointerup", this.onPointerUp);
+    this.themeObserver?.disconnect();
+    this.themeObserver = null;
     this.clear();
     this.hostRoot.remove();
     this.style.remove();
@@ -634,7 +681,7 @@ export class WidgetManager {
       initSent = true;
       const target = typeof origin === "string" && origin !== "null" ? origin : location.origin;
       targetWindow.postMessage(
-        { type: "drawva-widget-init", title: widget.title, html: widget.html },
+        { type: "drawva-widget-init", title: widget.title, html: widget.html, theme: this.currentTheme() },
         target
       );
       targetWindow.postMessage(

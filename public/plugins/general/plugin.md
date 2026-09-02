@@ -29,6 +29,7 @@ Generated HTML may access public HTTPS endpoints with fetch(url, { credentials: 
 
 ## Runtime rules
 Load third-party HTTPS scripts/fonts/styles only when needed. Do not use cookies, storage, forms, or navigation. Call window.parent.postMessage({ type: "drawva-widget-updated" }, "*") after render.
+Colors must come from the injected app theme variables (see WIDGET THEME in the system prompt); never hardcode hex or gradients.
 
 ## One-shot example
 User draws two figures and writes "throw ball between them": measure anchor pixels, compute global bounds, and emit one html_widget containing transparent SVG with animated projectile arc connecting the two figures.
