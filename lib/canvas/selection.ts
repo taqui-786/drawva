@@ -68,6 +68,147 @@ export function eraseRegion(engine: CanvasEngine, rect: Rect): void {
   engine.requestRender();
 }
 
+/**
+ * Erase ONLY the ink strokes whose connected components are primarily/wholly inside rect.
+ * Strokes that originate outside or extend significantly beyond rect into the padding
+ * (such as pointing arrows or touching outer annotations) are preserved intact.
+ */
+export function eraseContainedInk(engine: CanvasEngine, rect: Rect): void {
+  const pad = 32;
+  const extRect = clipRect({
+    x: rect.x - pad,
+    y: rect.y - pad,
+    w: rect.w + pad * 2,
+    h: rect.h + pad * 2,
+  });
+  if (extRect.w <= 0 || extRect.h <= 0) return;
+
+  const snapshot = captureRegion(engine, extRect);
+  const ctx = snapshot.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    eraseRegion(engine, rect);
+    return;
+  }
+  const w = snapshot.width;
+  const h = snapshot.height;
+  let imgData: ImageData;
+  try {
+    imgData = ctx.getImageData(0, 0, w, h);
+  } catch {
+    eraseRegion(engine, rect);
+    return;
+  }
+  const data = imgData.data;
+
+  const innerMinX = Math.round(rect.x - extRect.x);
+  const innerMinY = Math.round(rect.y - extRect.y);
+  const innerMaxX = innerMinX + Math.round(rect.w);
+  const innerMaxY = innerMinY + Math.round(rect.h);
+
+  const totalPixels = w * h;
+  const visited = new Uint8Array(totalPixels);
+  const toErase = new Uint8Array(totalPixels);
+  let hasAnyInnerErase = false;
+
+  for (let startY = 0; startY < h; startY++) {
+    for (let startX = 0; startX < w; startX++) {
+      const startIdx = startY * w + startX;
+      if (visited[startIdx] || data[startIdx * 4 + 3] <= 10) continue;
+
+      const queue: number[] = [startIdx];
+      visited[startIdx] = 1;
+      let head = 0;
+      let compInside = 0;
+      let compOutside = 0;
+
+      while (head < queue.length) {
+        const idx = queue[head++];
+        const x = idx % w;
+        const y = Math.floor(idx / w);
+
+        if (x >= innerMinX && x < innerMaxX && y >= innerMinY && y < innerMaxY) {
+          compInside++;
+        } else {
+          compOutside++;
+        }
+
+        if (x > 0) {
+          const n = idx - 1;
+          if (!visited[n] && data[n * 4 + 3] > 10) { visited[n] = 1; queue.push(n); }
+        }
+        if (x < w - 1) {
+          const n = idx + 1;
+          if (!visited[n] && data[n * 4 + 3] > 10) { visited[n] = 1; queue.push(n); }
+        }
+        if (y > 0) {
+          const n = idx - w;
+          if (!visited[n] && data[n * 4 + 3] > 10) { visited[n] = 1; queue.push(n); }
+        }
+        if (y < h - 1) {
+          const n = idx + w;
+          if (!visited[n] && data[n * 4 + 3] > 10) { visited[n] = 1; queue.push(n); }
+        }
+      }
+
+      // If a component extends into the outer margin, it belongs to an outside context stroke: keep it.
+      // If it is almost entirely inside the selection (<= 15px outside and < 10% outside), it is an inner element: erase it.
+      const isInner = compInside > 0 && (compOutside === 0 || (compOutside <= 15 && compOutside / queue.length < 0.1));
+
+      if (isInner) {
+        hasAnyInnerErase = true;
+        for (let i = 0; i < queue.length; i++) {
+          const idx = queue[i];
+          const x = idx % w;
+          const y = Math.floor(idx / w);
+          if (x >= innerMinX && x < innerMaxX && y >= innerMinY && y < innerMaxY) {
+            toErase[idx] = 1;
+          }
+        }
+      }
+    }
+  }
+
+  if (!hasAnyInnerErase) {
+    return;
+  }
+
+  const maskCanvas = document.createElement("canvas");
+  maskCanvas.width = w;
+  maskCanvas.height = h;
+  const maskCtx = maskCanvas.getContext("2d")!;
+  const maskImgData = maskCtx.createImageData(w, h);
+  const maskData = maskImgData.data;
+
+  for (let i = 0; i < totalPixels; i++) {
+    if (toErase[i]) {
+      maskData[i * 4 + 3] = 255;
+    }
+  }
+  maskCtx.putImageData(maskImgData, 0, 0);
+
+  const x0 = Math.floor(extRect.x / TILE);
+  const y0 = Math.floor(extRect.y / TILE);
+  const x1 = Math.floor((extRect.x + extRect.w) / TILE);
+  const y1 = Math.floor((extRect.y + extRect.h) / TILE);
+
+  for (let ty = y0; ty <= y1; ty++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      const c = engine.tiles.get(tx, ty);
+      if (!c) continue;
+      engine.noteTileWrite(tx, ty);
+      const q = c.getContext("2d")!;
+      q.save();
+      q.globalCompositeOperation = "destination-out";
+      const dstX = extRect.x - tx * TILE;
+      const dstY = extRect.y - ty * TILE;
+      q.drawImage(maskCanvas, dstX, dstY);
+      q.restore();
+    }
+  }
+
+  engine.requestRender();
+}
+
 export function snapshotToDataUrl(canvas: HTMLCanvasElement): string {
   try {
     return canvas.toDataURL("image/webp", 0.82);

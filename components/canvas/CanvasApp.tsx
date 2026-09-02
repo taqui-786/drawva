@@ -43,7 +43,7 @@ import { computeTidyMoves } from "@/lib/canvas/tidy";
 import { resizeWidgetGeometry } from "@/lib/canvas/widgetGeometry";
 import type { AiLogEntry } from "@/lib/ai/types";
 import type { PlotFunctionCommand, EraseCommand } from "@/lib/canvas/commands";
-import type { Point, Rect } from "@/lib/canvas/types";
+import type { Point, Rect, CanvasMode } from "@/lib/canvas/types";
 import {
   getActiveModel,
   getCachedModels,
@@ -65,7 +65,18 @@ import { ConnectDialog } from "./ConnectDialog";
 import { GeometryInspectorDialog, type ElementGeometryData } from "./GeometryInspectorDialog";
 import { MobileOrientationPrompt } from "./MobileOrientationPrompt";
 import { strokeSegment } from "@/lib/canvas/strokes";
-import { eraseRegion, pasteDataUrl } from "@/lib/canvas/selection";
+import { eraseRegion, eraseContainedInk, pasteDataUrl, captureRegion, pasteRegion } from "@/lib/canvas/selection";
+import {
+  buildRefinementManifest,
+  validateRefinementTarget,
+  canvasFromDataUrl,
+  encodeCanvas,
+  markSelectionOnCanvas,
+  samplePalette,
+} from "@/lib/canvas/refinement";
+import { applyWidgetPatch } from "@/lib/canvas/widgetPatch";
+import { buildAtlas } from "@/lib/canvas/atlas";
+import type { RefinementManifest } from "@/lib/canvas/refinement";
 
 function findInPlaceWidget(
   wm: WidgetManager,
@@ -77,6 +88,64 @@ function findInPlaceWidget(
   if (!opts.targetId) return null;
   return wm.get(opts.targetId) ?? null;
 }
+
+function fnv1aHash(text: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(16);
+}
+
+function computeOptimalTextFontSize(
+  text: string,
+  rect: { w: number; h: number },
+  requestedFontSize?: number
+): number {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  const numLines = Math.max(1, lines.length);
+  const maxChars = Math.max(1, ...lines.map((l) => l.length));
+
+  // Natural font size to fit handwriting proportionally within selection bounds:
+  const heightBased = (rect.h * 0.68) / (numLines * 1.35);
+  const widthBased = (rect.w * 0.92) / (maxChars * 0.62);
+  const naturalSize = Math.max(18, Math.min(heightBased, widthBased));
+
+  // If LLM returned a tiny generic size (< 24), use naturalSize:
+  if (!requestedFontSize || requestedFontSize < 24) {
+    return Math.round(naturalSize);
+  }
+
+  // If LLM specified a custom size, clamp it to fit the box without overflowing:
+  return Math.round(Math.min(requestedFontSize, naturalSize * 1.25));
+}
+
+interface RefineStroke {
+  points: { x: number; y: number }[];
+  color?: string;
+  width?: number;
+}
+interface RefineText {
+  text: string;
+  normX?: number;
+  normY?: number;
+  fontSize?: number;
+  color?: string;
+}
+interface RefineFormula {
+  latex: string;
+  normX?: number;
+  normY?: number;
+  fontSize?: number;
+  color?: string;
+}
+type RefineResult =
+  | { kind: "widget_patch"; targetId: string; expectedContentHash: string; patch: string }
+  | { kind: "native_canvas"; strokes?: RefineStroke[]; texts?: RefineText[]; formulas?: RefineFormula[] }
+  | { kind: "diagram_widget"; sourceFormat: string; source: string; title: string }
+  | { kind: "html_widget"; html: string; title: string }
+  | { kind: "reject"; reason: string };
 
 export function CanvasApp() {
   const { engine, mountRef } = useCanvas();
@@ -232,6 +301,17 @@ export function CanvasApp() {
   const boardRevisionRef = useRef(0);
   const conductorRef = useRef<Conductor | null>(null);
   const [agentRunning, setAgentRunning] = useState(false);
+
+  // --- Refine feature state ---
+  const [refineRect, setRefineRect] = useState<Rect | null>(null);
+  const [refineState, setRefineState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const refineStateRef = useRef(refineState);
+  useEffect(() => {
+    refineStateRef.current = refineState;
+  }, [refineState]);
+  const refineOpRef = useRef<{ id: string; abort: AbortController } | null>(null);
+  const inkSnapshotRef = useRef<HTMLCanvasElement | null>(null);
+  const refreshRefineRectRef = useRef<() => void>(() => {});
   const inkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
   const lastStrokeTimeRef = useRef<number>(0);
@@ -565,6 +645,386 @@ export function CanvasApp() {
       "Observe the canvas handwriting, formulas, diagrams, questions, and drawings. Provide the appropriate continuation, solution, calculation, diagram, or interactive widget.";
     void agent.send(prompt);
   }, []);
+
+  const captureRegionForRefine = useCallback(
+    (rect: Rect): HTMLCanvasElement | null => {
+      if (!engine) return null;
+      return captureRegion(engine, rect);
+    },
+    [engine]
+  );
+  const captureRegionRef = useRef(captureRegionForRefine);
+  useEffect(() => {
+    captureRegionRef.current = captureRegionForRefine;
+  });
+
+  const runRefine = useCallback(async () => {
+    const eng = engine;
+    const tm = tools.current;
+    if (!eng || !tm) return;
+    const selRect = refineRect;
+    if (!selRect || refineState === "loading") return;
+
+    const config = getProviderConfig();
+    const model = getActiveModel();
+    if (!config || !model || !config.apiKey) {
+      setSettingsOpen(true);
+      toast.info("Please configure an AI provider and select a model.");
+      return;
+    }
+
+    const inkSnapshot = inkSnapshotRef.current;
+    const manifest = buildRefinementManifest(
+      selRect,
+      boardRevisionRef.current,
+      widgets.current,
+      objects.current,
+      inkSnapshot
+    );
+    const targetError = validateRefinementTarget(manifest);
+    if (targetError) {
+      toast.error(targetError);
+      return;
+    }
+    if (!manifest.inkPresent && manifest.containedWidgets.length === 0) {
+      toast.error("Nothing to refine in this selection.");
+      return;
+    }
+
+    const opId = `refine-${Date.now()}`;
+    const abort = new AbortController();
+    refineOpRef.current = { id: opId, abort };
+    setRefineState("loading");
+
+    const timeoutTimer = setTimeout(() => {
+      if (refineOpRef.current?.id === opId) {
+        abort.abort();
+        toast.error("Refinement timed out (45s). Your AI provider took too long to respond.");
+      }
+    }, 45000);
+
+    try {
+      // 1. Capture crop with padding (context, not mutation area).
+      const pad = Math.min(160, Math.max(selRect.w, selRect.h) * 0.25);
+      const cropRect: Rect = {
+        x: selRect.x - pad,
+        y: selRect.y - pad,
+        w: selRect.w + pad * 2,
+        h: selRect.h + pad * 2,
+      };
+      const atlas = await buildAtlas(eng, cropRect, null, widgets.current, objects.current, {
+        captureFullViewport: true,
+      });
+      if (refineOpRef.current?.id !== opId) return;
+      const raw = await canvasFromDataUrl(atlas.atlasImage);
+      if (refineOpRef.current?.id !== opId) return;
+      markSelectionOnCanvas(raw, atlas.sourceRect, selRect, atlas.imageScale);
+      const cropDataUrl = encodeCanvas(raw);
+
+      // 2. Build request body.
+      const targetWidget = manifest.containedWidgets[0];
+      let target: Record<string, unknown> | undefined;
+      if (targetWidget) {
+        const source = targetWidget.kind === "diagram" ? targetWidget.copyText || "" : targetWidget.html || "";
+        target = {
+          id: targetWidget.id,
+          kind: targetWidget.kind,
+          sourceFormat: targetWidget.sourceFormat,
+          box: { x: targetWidget.x, y: targetWidget.y, w: targetWidget.w, h: targetWidget.h },
+          source: source.slice(0, 8000),
+          html: targetWidget.kind === "html" ? (targetWidget.html || "").slice(0, 8000) : undefined,
+          contentHash: fnv1aHash(source),
+        };
+      } else if (manifest.containedObjects.length > 0 && !manifest.inkPresent) {
+        const o = manifest.containedObjects[0];
+        target = {
+          id: o.id,
+          kind: o.kind,
+          box: { x: o.x, y: o.y, w: o.w, h: o.h },
+          source: (o.source || "").slice(0, 4000),
+        };
+      }
+      const palette = samplePalette(inkSnapshot);
+
+      // 3. Call refine API.
+      const res = await fetch("/api/canvas/refine", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerType: config.type,
+          baseUrl: config.baseUrl,
+          apiKey: config.apiKey,
+          model,
+          cropDataUrl,
+          selectionRect: selRect,
+          imageScale: atlas.imageScale,
+          baseRevision: boardRevisionRef.current,
+          fingerprint: manifest.fingerprint,
+          target,
+          containedItems: [
+            ...manifest.containedWidgets.map((w) => ({ id: w.id, kind: w.kind, x: w.x, y: w.y, w: w.w, h: w.h })),
+            ...manifest.containedObjects.map((o) => ({ id: o.id, kind: o.kind, x: o.x, y: o.y, w: o.w, h: o.h })),
+          ],
+          nearbyItems: manifest.contextItems.slice(0, 10),
+          palette,
+        }),
+        signal: abort.signal,
+      });
+      if (refineOpRef.current?.id !== opId) return;
+      if (!res.ok) {
+        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error || `Refine request failed (${res.status}).`);
+      }
+      const data = (await res.json()) as { ok: boolean; result?: RefineResult; error?: string };
+      if (!data.ok || !data.result) throw new Error(data.error || "Refinement returned no result.");
+      const result = data.result;
+
+      // 4. Preflight & apply.
+      const applied = await applyRefinement(manifest, result, opId);
+      if (applied) {
+        setRefineState("success");
+        setTimeout(() => setRefineState((prev) => (prev === "success" ? "idle" : prev)), 2000);
+      } else if (refineOpRef.current?.id === opId) {
+        setRefineState("idle");
+      }
+    } catch (err) {
+      if (refineOpRef.current?.id !== opId) return;
+      if (abort.signal.aborted) {
+        setRefineState("idle");
+        return;
+      }
+      setRefineState("error");
+      toast.error(err instanceof Error ? err.message : "Refinement failed.");
+      setTimeout(() => setRefineState((prev) => (prev === "error" ? "idle" : prev)), 3000);
+    } finally {
+      clearTimeout(timeoutTimer);
+      if (refineOpRef.current?.id === opId) refineOpRef.current = null;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engine, refineRect, refineState]);
+
+  const cancelRefine = useCallback(() => {
+    refineOpRef.current?.abort.abort();
+    refineOpRef.current = null;
+    setRefineState("idle");
+  }, []);
+
+  /** Preflight all fallible work, then mutate the board in one pass. Returns true if applied. */
+  const applyRefinement = useCallback(
+    async (manifest: RefinementManifest, result: RefineResult, opId: string): Promise<boolean> => {
+      const eng = engine;
+      const wm = widgets.current;
+      const om = objects.current;
+      const hist = history.current;
+      if (!eng || !wm || !om || !hist) return false;
+
+      if (result.kind === "reject") {
+        toast.info(result.reason || "AI could not refine this selection.");
+        return false;
+      }
+
+      // Rebuild manifest and verify the region hasn't changed mid-request.
+      const fresh = buildRefinementManifest(
+        manifest.rect,
+        boardRevisionRef.current,
+        widgets.current,
+        objects.current,
+        inkSnapshotRef.current
+      );
+      if (fresh.fingerprint !== manifest.fingerprint) {
+        toast.error("This selection changed while it was being refined. Nothing was replaced.");
+        return false;
+      }
+
+      // --- Preflight per result kind (all fallible work BEFORE any mutation). ---
+      let preparedHtml: string | null = null;
+      let preparedCopyText: string | undefined;
+      let widgetToPatch: WidgetItem | null = null;
+
+      if (result.kind === "widget_patch") {
+        if (manifest.containedWidgets.length !== 1 || manifest.containedWidgets[0].id !== result.targetId) {
+          toast.error("Refinement target mismatch. Nothing was replaced.");
+          return false;
+        }
+        widgetToPatch = manifest.containedWidgets[0];
+        const source = widgetToPatch.kind === "diagram" ? widgetToPatch.copyText || widgetToPatch.html || "" : widgetToPatch.html || "";
+        if (result.expectedContentHash && result.expectedContentHash !== fnv1aHash(source)) {
+          toast.error("Widget content changed since capture. Nothing was replaced.");
+          return false;
+        }
+        const patchResult = applyWidgetPatch(source, result.patch);
+        if (!patchResult.ok) {
+          toast.error(`Patch failed: ${patchResult.message}`);
+          return false;
+        }
+        if (widgetToPatch.kind === "diagram" && widgetToPatch.sourceFormat) {
+          try {
+            const doc = await diagramDocument(widgetToPatch.sourceFormat, patchResult.content, widgetToPatch.diagramKind, widgetToPatch.title);
+            preparedHtml = typeof doc === "string" ? doc : doc.html;
+            preparedCopyText = patchResult.content;
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Diagram rebuild failed. Nothing was replaced.");
+            return false;
+          }
+        } else {
+          preparedHtml = patchResult.content;
+        }
+      }
+
+      // Final cancellation check before mutating.
+      if (refineOpRef.current?.id !== opId) return false;
+
+      // --- Apply (one history transaction via afterBoardChange). ---
+      const rect = manifest.rect;
+      hist.captureRect(rect);
+      if (widgetToPatch) hist.recordWidgets();
+      if (manifest.containedObjects.length > 0) hist.recordObjects();
+
+      // A. Erase ink in the rect (selective: preserves touching outside context/arrows).
+      eraseContainedInk(eng, rect);
+      syncManager.current?.broadcast({ type: "SYNC_INK_ERASE", ...rect });
+
+      // B. Remove contained items only for non-patch kinds.
+      const removeWidgetIds: string[] = [];
+      const removeObjectIds: string[] = [];
+      if (result.kind !== "widget_patch") {
+        for (const o of manifest.containedObjects) removeObjectIds.push(o.id);
+        for (const w of manifest.containedWidgets) removeWidgetIds.push(w.id);
+      }
+
+      // C. Add replacement content.
+      try {
+        if (result.kind === "widget_patch" && widgetToPatch && preparedHtml) {
+          const next: WidgetItem = {
+            ...widgetToPatch,
+            html: preparedHtml,
+            ...(preparedCopyText !== undefined ? { copyText: preparedCopyText } : {}),
+          };
+          wm.add(next);
+          syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(next) });
+      } else if (result.kind === "native_canvas") {
+        const strokes = result.strokes || [];
+        const texts = result.texts || [];
+        const formulas = result.formulas || [];
+        if (strokes.length === 0 && texts.length === 0 && formulas.length === 0) {
+          toast.error("AI returned empty refinement. Nothing was replaced.");
+          return false;
+        }
+        for (const s of strokes) {
+          const pts = s.points.map((p) => ({
+            x: rect.x + p.x * rect.w,
+            y: rect.y + p.y * rect.h,
+          }));
+          const strokeColor = s.color || "#0f172a";
+          const strokeSize = s.width || 2;
+          for (let i = 1; i < pts.length; i++) {
+            strokeSegment(eng, pts[i - 1], pts[i], { erase: false, size: strokeSize, color: strokeColor });
+          }
+        }
+        for (const t of texts) {
+          const fontSize = computeOptimalTextFontSize(t.text, rect, t.fontSize);
+          const textColor = t.color || "#0f172a";
+          const block = renderTextBlock(t.text, textColor, fontSize, rect.w);
+          let tx = Math.round(rect.x + (t.normX ?? 0) * rect.w);
+          let ty = Math.round(rect.y + (t.normY ?? 0) * rect.h);
+          if (t.normX === undefined || t.normX < 0.05) {
+            tx = Math.round(rect.x + Math.max(0, (rect.w - block.w) / 2));
+          }
+          if (t.normY === undefined || t.normY < 0.05) {
+            ty = Math.round(rect.y + Math.max(0, (rect.h - block.h) / 2));
+          }
+          pasteRegion(eng, block.canvas, tx, ty);
+        }
+        for (const f of formulas) {
+          const fontSize = computeOptimalTextFontSize(f.latex, rect, f.fontSize);
+          const formulaColor = f.color || "#0f172a";
+          const rendered = await renderFormula(f.latex, fontSize, formulaColor);
+          let fx = Math.round(rect.x + (f.normX ?? 0) * rect.w);
+          let fy = Math.round(rect.y + (f.normY ?? 0) * rect.h);
+          if (f.normX === undefined || f.normX < 0.05) {
+            fx = Math.round(rect.x + Math.max(0, (rect.w - rendered.logicalWidth) / 2));
+          }
+          if (f.normY === undefined || f.normY < 0.05) {
+            fy = Math.round(rect.y + Math.max(0, (rect.h - rendered.logicalHeight) / 2));
+          }
+          pasteRegion(eng, rendered.canvas, fx, fy);
+        }
+      } else if (result.kind === "diagram_widget") {
+          const doc = await diagramDocument(result.sourceFormat, result.source, undefined, result.title);
+          const html = typeof doc === "string" ? doc : doc.html;
+          const base = manifest.containedWidgets[0] || manifest.containedObjects[0];
+          const item: WidgetItem = {
+            id: base?.id || `diagram-${Date.now()}`,
+            kind: "diagram",
+            pluginId: result.sourceFormat,
+            sourceFormat: result.sourceFormat,
+            x: base?.x ?? rect.x,
+            y: base?.y ?? rect.y,
+            w: base?.w ?? rect.w,
+            h: base?.h ?? rect.h,
+            contentW: base?.contentW ?? rect.w,
+            contentH: base?.contentH ?? rect.h,
+            title: result.title,
+            html,
+            copyText: result.source,
+            copyLabel: copyLabel(result.sourceFormat),
+            status: "draft",
+            userResized: base && "userResized" in base ? base.userResized : false,
+          };
+          for (const id of removeWidgetIds) {
+            wm.remove(id);
+            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id });
+          }
+          wm.add(item);
+          syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
+        } else if (result.kind === "html_widget") {
+          const base = manifest.containedWidgets[0] || manifest.containedObjects[0];
+          const item: WidgetItem = {
+            id: base?.id || `widget-${Date.now()}`,
+            kind: "html",
+            pluginId: "html",
+            x: base?.x ?? rect.x,
+            y: base?.y ?? rect.y,
+            w: base?.w ?? rect.w,
+            h: base?.h ?? rect.h,
+            contentW: base?.contentW ?? rect.w,
+            contentH: base?.contentH ?? rect.h,
+            title: result.title,
+            html: result.html,
+            status: "draft",
+            userResized: false,
+          };
+          for (const id of removeWidgetIds) {
+            wm.remove(id);
+            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id });
+          }
+          wm.add(item);
+          syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
+        }
+
+        for (const id of removeObjectIds) {
+          om.remove(id);
+          syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id });
+        }
+
+        // Drop the selection so the old ink snapshot stops rendering over the new content.
+        tools.current?.clearSelection();
+
+        afterBoardChangeRef.current();
+        return true;
+      } catch (err) {
+        // ponytail: best-effort undo rollback; if it fails, the committed entry stays
+        // on the undo stack so manual Ctrl+Z still recovers.
+        console.error("[refine] apply failed:", err);
+        try {
+          await hist.undo();
+        } catch {}
+        toast.error("Refinement failed to apply. Original content restored.");
+        return false;
+      }
+    },
+    [engine]
+  );
 
   const scheduleAi = useCallback((_box: Rect | null, userPrompt?: string) => {
     if (aiTimer.current) clearTimeout(aiTimer.current);
@@ -954,11 +1414,35 @@ export function CanvasApp() {
 
     tm.setSelectionListener((rect) => {
       if (!rect) {
+        if (refineStateRef.current === "loading") {
+          // Keep active refinement frame and request intact
+          return;
+        }
         if (!wm.getSelectedId() && !om.getSelectedId()) {
           setSelectedElementRef.current(null);
         }
+        setRefineRect(null);
+        inkSnapshotRef.current = null;
+        lastRefinePosRef.current = "";
+        setRefineBtnPos(null);
+        if (refineOpRef.current) {
+          refineOpRef.current.abort.abort();
+          refineOpRef.current = null;
+        }
+        setRefineState("idle");
         return;
       }
+      if (refineStateRef.current === "loading") return;
+      setRefineState((prev) => (prev === "loading" ? prev : "idle"));
+      setRefineRect(rect);
+      const sel = tm.selection;
+      inkSnapshotRef.current =
+        sel && sel.rect ? captureRegionRef.current(sel.rect) : null;
+      // Show the button immediately — endMarquee only triggers the dirty-interaction
+      // render path, which never reaches postFrame listeners.
+      const p = engine.camera.worldToScreen(rect.x + rect.w, rect.y);
+      lastRefinePosRef.current = `${Math.round(p.x)}|${Math.round(p.y)}`;
+      setRefineBtnPos({ x: p.x, y: p.y });
       wm.setSelected(null);
       om.setSelected(null);
       const roundedX = Math.round(rect.x);
@@ -1892,6 +2376,7 @@ export function CanvasApp() {
     const onKey = (e: KeyboardEvent) => {
       const t = (e.target as HTMLElement)?.tagName;
       if (t === "TEXTAREA" || t === "INPUT") return;
+      if (refineStateRef.current === "loading") return;
       const k = e.key.toLowerCase();
       if (e.shiftKey && k === "h") setMode("highlighter");
       else if (k === "v") setMode("select");
@@ -2170,11 +2655,50 @@ export function CanvasApp() {
     engine.requestRender();
   };
 
+  // Refine overlay position follows the selection rect through camera changes.
+  const [refineBtnPos, setRefineBtnPos] = useState<{ x: number; y: number } | null>(null);
+  const lastRefinePosRef = useRef("");
+  useEffect(() => {
+    refreshRefineRectRef.current = () => {
+      const r = tools.current?.selection.rect;
+      if (r && mode === "select") {
+        setRefineRect((prev) =>
+          prev && prev.x === r.x && prev.y === r.y && prev.w === r.w && prev.h === r.h ? prev : { ...r }
+        );
+        const p = engine?.camera.worldToScreen(r.x + r.w, r.y);
+        if (p) {
+          const key = `${Math.round(p.x)}|${Math.round(p.y)}`;
+          if (key !== lastRefinePosRef.current) {
+            lastRefinePosRef.current = key;
+            setRefineBtnPos({ x: p.x, y: p.y });
+          }
+        }
+      } else if (!tools.current?.selection.hasSelection) {
+        lastRefinePosRef.current = "";
+        setRefineBtnPos((prev) => (prev === null ? prev : null));
+      }
+    };
+  });
+  useEffect(() => {
+    if (!engine) return;
+    const unsub = engine.onPostFrame(() => refreshRefineRectRef.current());
+    return unsub;
+  }, [engine]);
+
+  const handleModeChange = useCallback((newMode: CanvasMode) => {
+    if (refineStateRef.current === "loading") {
+      toast.info("Refinement in progress. Please wait or cancel before switching tools.");
+      return;
+    }
+    setMode(newMode);
+  }, []);
+
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
       <CanvasHeader
         mode={mode}
-        onMode={setMode}
+        onMode={handleModeChange}
+        toolsLocked={refineState === "loading"}
         color={color}
         onColor={setColor}
         pen={pen}
@@ -2254,6 +2778,54 @@ export function CanvasApp() {
                 : "crosshair",
           }}
         />
+
+        {refineRect && mode === "select" && refineBtnPos && (
+          <div
+            className="absolute z-40 flex items-center gap-1"
+            style={{
+              left: refineBtnPos.x,
+              top: refineBtnPos.y,
+              transform: "translate(8px, -44px)",
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {refineState === "loading" ? (
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-2 rounded-lg border border-primary/40 bg-background/95 px-3 text-sm shadow-lg"
+                onClick={cancelRefine}
+              >
+                <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                Refining… Cancel
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-primary/40 bg-background/95 px-3 text-sm font-medium shadow-lg hover:bg-accent"
+                onClick={runRefine}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.993 6.36 2.64L21 8" />
+                  <path d="M21 3v5h-5" />
+                </svg>
+                {refineState === "error" ? "Retry Refine" : refineState === "success" ? "Refined ✓" : "Refine"}
+              </button>
+            )}
+          </div>
+        )}
+
+        {refineRect && refineState === "loading" && engine && (
+          <div
+            className="pointer-events-none absolute z-30 animate-pulse rounded-md border-2 border-primary/50 bg-primary/5"
+            style={{
+              left: engine.camera.worldToScreen(refineRect.x, refineRect.y).x,
+              top: engine.camera.worldToScreen(refineRect.x, refineRect.y).y,
+              width: refineRect.w * engine.camera.scale,
+              height: refineRect.h * engine.camera.scale,
+            }}
+          />
+        )}
 
         {textOpen && anchorCss && (
           <Textarea

@@ -146,6 +146,7 @@ function ToolButton({
   mode,
   tool,
   onMode,
+  disabled = false,
 }: {
   mode: CanvasMode;
   tool: {
@@ -155,6 +156,7 @@ function ToolButton({
     icon: typeof CursorIcon;
   };
   onMode: (m: CanvasMode) => void;
+  disabled?: boolean;
 }) {
   const active = mode === tool.mode;
   return (
@@ -165,16 +167,23 @@ function ToolButton({
             size="icon-sm"
             variant={active ? "secondaryPrimary" : "ghost"}
             aria-pressed={active}
-            onClick={() => onMode(tool.mode)}
+            disabled={disabled}
+            onClick={() => {
+              if (!disabled) onMode(tool.mode);
+            }}
             data-icon="true"
-            className="shrink-0 size-7 sm:size-8 p-0"
+            className={cn("shrink-0 size-7 sm:size-8 p-0", disabled && "opacity-50 pointer-events-none")}
           >
             <HugeiconsIcon icon={tool.icon} className="size-4" />
           </Button>
         }
       />
       <TooltipContent>
-        {tool.label} <span className="kbd">{tool.kbd}</span>
+        {disabled ? "Tools locked during refinement" : (
+          <>
+            {tool.label} <span className="kbd">{tool.kbd}</span>
+          </>
+        )}
       </TooltipContent>
     </Tooltip>
   );
@@ -223,9 +232,11 @@ export function CanvasHeader({
   onTidy,
   cloudStatus = "idle",
   onTriggerCloudSync,
+  toolsLocked = false,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
+  toolsLocked?: boolean;
   color: string;
   onColor: (c: string) => void;
   pen: number;
@@ -547,7 +558,7 @@ export function CanvasHeader({
       <div className="flex items-center gap-0.5 sm:gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5 px-0.5">
         {/* Handy Tools (Select, Hand, Pen, Highlighter, Eraser) */}
         {PRIMARY_TOOLS.slice(0, 5).map((t) => (
-          <ToolButton key={t.mode} mode={mode} tool={t} onMode={onMode} />
+          <ToolButton key={t.mode} mode={mode} tool={t} onMode={onMode} disabled={toolsLocked} />
         ))}
 
         {/* Compact Shapes Selector */}
@@ -559,7 +570,8 @@ export function CanvasHeader({
                 variant={isShapeActive ? "secondaryPrimary" : "ghost"}
                 aria-label="Shapes"
                 data-icon="true"
-                className="shrink-0 size-7 sm:size-8 p-0"
+                disabled={toolsLocked}
+                className={cn("shrink-0 size-7 sm:size-8 p-0", toolsLocked && "opacity-50 pointer-events-none")}
               >
                 <HugeiconsIcon icon={activeShapeTool.icon} className="size-4" />
               </Button>
@@ -569,7 +581,10 @@ export function CanvasHeader({
             {SHAPE_TOOLS.map((s) => (
               <DropdownMenuItem
                 key={s.mode}
-                onClick={() => onMode(s.mode)}
+                onClick={() => {
+                  if (!toolsLocked) onMode(s.mode);
+                }}
+                disabled={toolsLocked}
                 className="gap-2"
               >
                 <HugeiconsIcon icon={s.icon} />
@@ -581,7 +596,7 @@ export function CanvasHeader({
         </DropdownMenu>
 
         {/* Text Tool */}
-        <ToolButton mode={mode} tool={PRIMARY_TOOLS[5]} onMode={onMode} />
+        <ToolButton mode={mode} tool={PRIMARY_TOOLS[5]} onMode={onMode} disabled={toolsLocked} />
 
         {/* Style Popover: Color + Stroke Width */}
         <Popover>

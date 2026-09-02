@@ -2,6 +2,7 @@ import type { CanvasEngine } from "./engine";
 import type { WidgetItem, WidgetManager } from "./widgets";
 import type { ObjectItem, ObjectManager } from "./objects";
 import { renderObject } from "./persistence";
+import { SIZE, TILE } from "./constants";
 
 export const MAX_HISTORY = 30;
 
@@ -124,6 +125,21 @@ export class BoardHistory {
     }
     this.recordWidgets();
     this.recordObjects();
+  }
+
+  /** Record "before" tile state for tiles intersecting the given world rect. */
+  captureRect(rect: { x: number; y: number; w: number; h: number }): void {
+    const eng = this.engine;
+    if (!eng) return;
+    const x0 = Math.max(0, Math.floor(rect.x / TILE));
+    const y0 = Math.max(0, Math.floor(rect.y / TILE));
+    const x1 = Math.min(Math.ceil(SIZE / TILE) - 1, Math.floor((rect.x + rect.w) / TILE));
+    const y1 = Math.min(Math.ceil(SIZE / TILE) - 1, Math.floor((rect.y + rect.h) / TILE));
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        this.recordTileBefore(tx, ty);
+      }
+    }
   }
 
   async undo(): Promise<boolean> {
