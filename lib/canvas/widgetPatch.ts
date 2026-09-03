@@ -132,9 +132,11 @@ export function applyWidgetPatch(currentContent: string, patch: string): PatchRe
   if (/^diff --git /m.test(patch) || /^index /m.test(patch) || /^new file mode /m.test(patch)) {
     return fail("INVALID_HEADER", "Git metadata lines (diff --git, index, new file mode) are not allowed.");
   }
-  if (/^@@[ \t]*$/m.test(patch)) {
+  const bareMatch = /^@@[ \t]*$/m.exec(patch);
+  if (bareMatch) {
     // ponytail: no relocation inference for bare @@ headers; reject-with-diagnostic, add if models struggle
-    return fail("INVALID_HUNK", "Bare @@ hunk headers are not allowed. Use @@ -oldStart,oldCount +newStart,newCount @@.");
+    const line = patch.slice(0, bareMatch.index).split("\n").length;
+    return fail("INVALID_HUNK", `Bare @@ hunk header on line ${line} has no coordinates. Use @@ -oldStart,oldCount +newStart,newCount @@, e.g. @@ -1,3 +1,3 @@. Re-read the range first so the counts match.`);
   }
 
   let parsed: StructuredPatch[];

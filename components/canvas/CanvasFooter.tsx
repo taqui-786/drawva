@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useSnapshot } from "valtio";
 import { appState } from "@/lib/state";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,6 @@ import {
   ZoomInAreaIcon,
   ZoomOutAreaIcon,
   Refresh01Icon,
-  TerminalIcon,
 } from "@hugeicons/core-free-icons";
 import { motion, AnimatePresence } from "motion/react";
 import { useSession } from "@/lib/auth-client";
@@ -21,6 +21,8 @@ export interface GenerationTickerState {
   status: "idle" | "running" | "done" | "error";
   currentMessage: string;
   messageId: number;
+  /** Live tail of the model's streamed text / tool args (already truncated server-side by state). */
+  detail?: string;
 }
 
 export function CanvasFooter({
@@ -28,13 +30,11 @@ export function CanvasFooter({
   onZoomOut,
   onReset,
   tickerState,
-  onOpenLogs,
 }: {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onReset: () => void;
   tickerState?: GenerationTickerState;
-  onOpenLogs?: () => void;
 }) {
   const { zoom, center } = useSnapshot(appState);
   const { data: session } = useSession();
@@ -84,15 +84,13 @@ export function CanvasFooter({
       <div className="flex-1 flex items-center justify-center min-w-0 px-2 overflow-hidden">
         <AnimatePresence mode="wait">
           {tickerState && tickerState.status !== "idle" && (
-            <motion.button
-              type="button"
+            <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 4 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 4 }}
               transition={{ duration: 0.18 }}
-              onClick={onOpenLogs}
-              className="group inline-flex items-center gap-2 px-1.5 py-0.5 text-xs cursor-pointer select-none max-w-full bg-transparent border-none shadow-none hover:bg-transparent outline-none focus:outline-none"
-              title="Click to inspect full AI Request Logs"
+              className="inline-flex items-center gap-2 px-1.5 py-0.5 text-xs select-none max-w-full"
+              title={tickerState.detail || tickerState.currentMessage}
             >
               {tickerState.status === "running" ? (
                 <RoseTwoLoader size={24} className="shrink-0" />
@@ -114,15 +112,16 @@ export function CanvasFooter({
                     className="text-[11px] font-mono truncate text-foreground/90 leading-none absolute inset-x-0"
                   >
                     {tickerState.currentMessage}
+                    {tickerState.detail ? (
+                      <span className="text-muted-foreground"> · {truncateTail(tickerState.detail)}</span>
+                    ) : null}
+                    {tickerState.status === "running" ? (
+                      <ElapsedTimer key={tickerState.messageId} />
+                    ) : null}
                   </motion.div>
                 </AnimatePresence>
               </div>
-
-              <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-muted-foreground opacity-60 group-hover:opacity-100 transition-opacity shrink-0 font-mono ml-1">
-                <HugeiconsIcon icon={TerminalIcon} className="size-3" />
-                <span>Logs</span>
-              </span>
-            </motion.button>
+            </motion.div>
           )}
         </AnimatePresence>
       </div>
@@ -165,4 +164,21 @@ export function CanvasFooter({
       </div>
     </footer>
   );
+}
+
+/** Show the live tail of a long stream; the newest tokens matter most. */
+function truncateTail(text: string, max = 140): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > max ? `…${clean.slice(-max + 1)}` : clean;
+}
+
+/** Live seconds since mount — keyed by messageId so a quiet model still reads as working, not stuck. */
+function ElapsedTimer() {
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    const t0 = Date.now();
+    const id = setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 500);
+    return () => clearInterval(id);
+  }, []);
+  return <span className="text-muted-foreground/60 tabular-nums"> · {elapsed}s</span>;
 }

@@ -5,6 +5,8 @@ export const AGENT_MAX_STEPS_PER_TURN = 24;
 export const AGENT_MAX_APPLIES_PER_TURN = 6;
 export const AGENT_MAX_PATCHES_PER_TURN = 8;
 export const AGENT_MAX_EDITS_PER_TURN = 12;
+export const AGENT_MAX_SNAPSHOTS_PER_TURN = 10;
+export const AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN = 4;
 export const AGENT_MAX_TOOLS_PER_STEP = 1;
 /** Capture quality tiers (long-edge / pixel / webp-quality / byte budgets). */
 export const SNAPSHOT_BASIC: CapturePolicy = {

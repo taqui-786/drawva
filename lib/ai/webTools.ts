@@ -68,7 +68,9 @@ interface SearchHit {
 }
 
 export function tinyfishKey(): string {
-  return (process.env.TINYFISH_API_KEY ?? "").trim();
+  // .env.local values are often pasted with surrounding quotes — the API
+  // rejects those literally, so strip them instead of 401ing silently.
+  return (process.env.TINYFISH_API_KEY ?? "").trim().replace(/^['"]|['"]$/g, "");
 }
 
 export function hasTinyfishKey(): boolean {
@@ -82,6 +84,16 @@ function webError(code: string, message: string, extra?: Record<string, unknown>
 function clip(value: unknown, max: number): string {
   const text = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
   return text.length > max ? `${text.slice(0, max)}…` : text;
+}
+
+function causeOf(err: unknown): string {
+  // Node fetch throws TypeError "fetch failed" with the real reason (ENOTFOUND,
+  // ECONNREFUSED, timeout) on `cause` — surface it or every outage is a mystery.
+  const cause = (err as { cause?: unknown } | null)?.cause;
+  const text =
+    cause instanceof Error ? cause.message || cause.name : typeof cause === "string" ? cause : "";
+  const message = err instanceof Error ? err.message : String(err);
+  return clip(text ? `${message} (${text})` : message, 160);
 }
 
 function bounded(value: unknown, fallback: number, min: number, max: number): number {
@@ -408,22 +420,28 @@ async function webSearch(args: Record<string, unknown>, ctx: WebToolContext): Pr
   let provider = "tinyfish";
 
   if (ctx.tinyfishKey) {
-    const search = await tinyfishSearch(
-      ctx.tinyfishKey,
-      {
-        query,
-        domain_type: domainType,
-        purpose: clip(args.purpose, 200) || undefined,
-        include_domains: clip(args.includeDomains, 200) || undefined,
-        exclude_domains: clip(args.excludeDomains, 200) || undefined,
-        recency_minutes: RECENCY_MINUTES[freshness],
-      },
-      ctx.signal
-    );
-    if (search.ok) {
-      hits = dedupeHits(search.results.map(shapeSearchHit).filter((hit): hit is SearchHit => hit !== null), limit);
-    } else {
-      notes.push(search.message);
+    // A TinyFish outage must degrade to the DuckDuckGo fallback below, not
+    // fail the whole tool — so a throw here becomes a note, not an error.
+    try {
+      const search = await tinyfishSearch(
+        ctx.tinyfishKey,
+        {
+          query,
+          domain_type: domainType,
+          purpose: clip(args.purpose, 200) || undefined,
+          include_domains: clip(args.includeDomains, 200) || undefined,
+          exclude_domains: clip(args.excludeDomains, 200) || undefined,
+          recency_minutes: RECENCY_MINUTES[freshness],
+        },
+        ctx.signal
+      );
+      if (search.ok) {
+        hits = dedupeHits(search.results.map(shapeSearchHit).filter((hit): hit is SearchHit => hit !== null), limit);
+      } else {
+        notes.push(search.message);
+      }
+    } catch (err) {
+      notes.push(`TinyFish Search unreachable (${causeOf(err)}); trying DuckDuckGo fallback.`);
     }
   } else {
     notes.push("No TINYFISH_API_KEY on the server, so this ran on the DuckDuckGo fallback only.");
@@ -449,12 +467,16 @@ async function webSearch(args: Record<string, unknown>, ctx: WebToolContext): Pr
       notes.push("fetchPages needs TINYFISH_API_KEY; returned search results only.");
     } else {
       const targets = selectFetchTargets(hits);
-      const fetched = await tinyfishFetch(ctx.tinyfishKey, targets.map((hit) => hit.url), query, ctx.signal);
-      if (!fetched.ok) notes.push(fetched.message);
-      else {
-        out.pages = fetched.pages.map((page) => shapePage(page, PAGE_CHARS_DEFAULT));
-        out.pageSelection = targets.some((hit) => isWikipedia(hit.url)) ? "wikipedia" : "top2";
-        if (fetched.failed.length) out.failed = fetched.failed;
+      try {
+        const fetched = await tinyfishFetch(ctx.tinyfishKey, targets.map((hit) => hit.url), query, ctx.signal);
+        if (!fetched.ok) notes.push(fetched.message);
+        else {
+          out.pages = fetched.pages.map((page) => shapePage(page, PAGE_CHARS_DEFAULT));
+          out.pageSelection = targets.some((hit) => isWikipedia(hit.url)) ? "wikipedia" : "top2";
+          if (fetched.failed.length) out.failed = fetched.failed;
+        }
+      } catch (err) {
+        notes.push(`TinyFish Fetch unreachable (${causeOf(err)}); returned search results only.`);
       }
     }
   }
@@ -715,11 +737,10 @@ export async function runWebTool(
     }
   } catch (err) {
     if (ctx.signal?.aborted) throw err;
-    const message = err instanceof Error ? err.message : String(err);
     const aborted = err instanceof Error && (err.name === "AbortError" || err.name === "TimeoutError");
     return webError(
       aborted ? "TIMEOUT" : "WEB_TOOL_FAILED",
-      aborted ? `${name} timed out before the source responded.` : `${name} failed: ${clip(message, 200)}`
+      aborted ? `${name} timed out before the source responded.` : `${name} failed: ${causeOf(err)}`
     );
   }
 }

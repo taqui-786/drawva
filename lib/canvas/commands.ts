@@ -1863,7 +1863,10 @@ export function validateCommands(
       }
     }
     if (!acceptedTools.has(tool)) {
-      reportReject(`not-allowed:${tool}`);
+      const received = Object.keys(c).filter((k) => k !== "tool").join(",") || "(no fields)";
+      reportReject(
+        `not-allowed:${tool || "(missing tool)"} (received keys: ${received}; allowed tools: ${[...acceptedTools].join(",")}; hint: set tool explicitly, e.g. {"tool":"write_text","x":0,"y":0,"text":"..."} or {"tool":"animate_scene","x":0,"y":0,"w":100,"h":100,"objects":[],"motions":[]})`
+      );
       continue;
     }
     // A draw command carrying an animate_scene-style objects array is a common

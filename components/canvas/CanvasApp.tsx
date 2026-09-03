@@ -20,6 +20,7 @@ import { rasterizeText, renderTextBlock } from "@/lib/canvas/textTool";
 import { placeImageAt } from "@/lib/canvas/images";
 import { CanvasHeader, type AiRunState } from "./CanvasHeader";
 import { Conductor, type ConductorEvent } from "@/lib/ai/conductor";
+import { AGENT_MAX_STEPS_PER_TURN } from "@/lib/ai/agentTools";
 import { SettingsDialog } from "./SettingsDialog";
 import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
@@ -98,6 +99,12 @@ function fnv1aHash(text: string): string {
     h = Math.imul(h, 16777619);
   }
   return (h >>> 0).toString(16);
+}
+
+/** Bound a live stream tail for ticker state: collapse whitespace, keep the newest ~320 chars. */
+function tickerTail(text: string, max = 320): string {
+  const clean = text.replace(/\s+/g, " ").trim();
+  return clean.length > max ? clean.slice(-max) : clean;
 }
 
 function computeOptimalTextFontSize(
@@ -324,6 +331,8 @@ export function CanvasApp() {
   const inkSnapshotRef = useRef<HTMLCanvasElement | null>(null);
   const refreshRefineRectRef = useRef<() => void>(() => {});
   const inkBoxRef = useRef<Rect | null>(null);
+  /** Trigger-cause box captured at scheduleAi time — the live ref may be stale by turn start. */
+  const scheduledInkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
   const lastStrokeTimeRef = useRef<number>(0);
   const activeEditTargetRef = useRef<string | null>(null);
@@ -518,6 +527,14 @@ export function CanvasApp() {
 
   const handleConductorEvent = useCallback((e: ConductorEvent) => {
     if (e.kind === "turn_start") {
+      // Fold the schedule-time trigger box into the live ref (consumed once so
+      // mid-turn applies keep reading fresh unions, not a stale snapshot).
+      if (scheduledInkBoxRef.current) {
+        inkBoxRef.current = inkBoxRef.current
+          ? unionRect(inkBoxRef.current, scheduledInkBoxRef.current)
+          : scheduledInkBoxRef.current;
+        scheduledInkBoxRef.current = null;
+      }
       setAgentRunning(true);
       setAiStatus("thinking");
       setAiRun({
@@ -530,13 +547,15 @@ export function CanvasApp() {
         status: "running",
         currentMessage: "Observing canvas & handwriting…",
         messageId: prev.messageId + 1,
+        detail: undefined,
       }));
     } else if (e.kind === "step_start") {
       setAiStatus("thinking");
       setTickerState((prev) => ({
         status: "running",
-        currentMessage: `Reasoning step #${e.stepNumber}…`,
+        currentMessage: `Reasoning step ${e.stepNumber}/${AGENT_MAX_STEPS_PER_TURN}…`,
         messageId: prev.messageId + 1,
+        detail: undefined,
       }));
     } else if (e.kind === "tool_start") {
       setAiStatus("thinking");
@@ -558,6 +577,7 @@ export function CanvasApp() {
         status: "running",
         currentMessage: label,
         messageId: prev.messageId + 1,
+        detail: e.argsSummary ? tickerTail(e.argsSummary) : undefined,
       }));
     } else if (e.kind === "tool_end") {
       const summaryText = e.ok ? `Done: ${e.summary || e.name}` : `Failed: ${e.name}`;
@@ -565,21 +585,22 @@ export function CanvasApp() {
         status: "running",
         currentMessage: summaryText,
         messageId: prev.messageId + 1,
+        detail: undefined,
       }));
-    } else if (e.kind === "text_delta") {
-      setTickerState((prev) => {
-        if (prev.currentMessage === "Composing response…") return prev;
-        return {
-          status: "running",
-          currentMessage: "Composing response…",
-          messageId: prev.messageId + 1,
-        };
-      });
+    } else if (e.kind === "text_delta" || e.kind === "reasoning_delta") {
+      const label = e.kind === "text_delta" ? "Composing response…" : "Reasoning…";
+      setTickerState((prev) => ({
+        status: "running",
+        currentMessage: label,
+        messageId: prev.currentMessage === label ? prev.messageId : prev.messageId + 1,
+        detail: tickerTail(`${prev.currentMessage === label ? prev.detail || "" : ""}${e.text}`),
+      }));
     } else if (e.kind === "compact") {
       setTickerState((prev) => ({
         status: "running",
         currentMessage: "Compacting context…",
         messageId: prev.messageId + 1,
+        detail: undefined,
       }));
     } else if (e.kind === "compact_failed") {
       setTickerState((prev) => ({
@@ -603,6 +624,7 @@ export function CanvasApp() {
           status: "done",
           currentMessage: "AI generation complete",
           messageId: prev.messageId + 1,
+          detail: e.message ? tickerTail(e.message) : undefined,
         }));
         setTimeout(() => {
           setAiStatus("idle");
@@ -621,6 +643,7 @@ export function CanvasApp() {
           status: "error",
           currentMessage: e.error ? `Error: ${e.error}` : "Generation failed",
           messageId: prev.messageId + 1,
+          detail: undefined,
         }));
         toast.error(e.error || "Agent turn failed.");
         setTimeout(() => {
@@ -675,6 +698,7 @@ export function CanvasApp() {
       status: "running",
       currentMessage: "Observing canvas & handwriting…",
       messageId: prev.messageId + 1,
+      detail: undefined,
     }));
 
     const prompt =
@@ -1065,8 +1089,9 @@ export function CanvasApp() {
     [engine]
   );
 
-  const scheduleAi = useCallback((_box: Rect | null, userPrompt?: string) => {
+  const scheduleAi = useCallback((box: Rect | null, userPrompt?: string) => {
     if (aiTimer.current) clearTimeout(aiTimer.current);
+    scheduledInkBoxRef.current = box ? { ...box } : null;
     aiTimer.current = setTimeout(() => {
       aiTimer.current = null;
       const agent = conductorRef.current;
@@ -1818,7 +1843,7 @@ export function CanvasApp() {
       getRevisionAudit: () => Object.fromEntries(revisionAuditRef.current),
       onEvent: (e) => handleConductorEventRef.current(e),
       afterBoardChange: () => afterBoardChangeRef.current(),
-      getInkBox: () => inkBoxRef.current,
+      getInkBox: () => scheduledInkBoxRef.current ?? inkBoxRef.current,
     });
     conductorRef.current = agent;
 
@@ -2936,7 +2961,6 @@ export function CanvasApp() {
         onZoomOut={() => zoomBy(100)}
         onReset={resetView}
         tickerState={tickerState}
-        onOpenLogs={() => setLogsOpen(true)}
       />
 
       <input

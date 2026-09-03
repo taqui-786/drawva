@@ -27,9 +27,11 @@ import {
 import {
   AGENT_CONVERSATION_MAX_BYTES,
   AGENT_MAX_APPLIES_PER_TURN,
+  AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN,
   AGENT_MAX_EDITS_PER_TURN,
   AGENT_MAX_LOADED_PLUGINS,
   AGENT_MAX_PATCHES_PER_TURN,
+  AGENT_MAX_SNAPSHOTS_PER_TURN,
   AGENT_MAX_STEPS_PER_TURN,
   AGENT_MAX_TURN_IMAGES,
   AGENT_SCENE_JSON_MAX,
@@ -59,7 +61,8 @@ export type ConductorEvent =
   | { kind: "tool_start"; name: string; argsSummary: string }
   | { kind: "tool_end"; name: string; ok: boolean; summary: string }
   | { kind: "text_delta"; text: string }
-  | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string }
+  | { kind: "reasoning_delta"; text: string }
+  | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string; message?: string }
   | { kind: "usage"; usage: { inputTokens: number; outputTokens: number } }
   | { kind: "compact" }
   | { kind: "compact_failed"; message: string }
@@ -102,6 +105,13 @@ interface StepResult {
   text?: string;
   message?: string;
 }
+
+/**
+ * TESTING KILL-SWITCH: one model step per turn, no ReAct loop. The turn runs a
+ * single step (one tool call at most), then ends. Flip back to false to
+ * restore the full agent loop.
+ */
+export const AGENT_SINGLE_STEP_TEST = false;
 
 export class Conductor {
   private messages: StepMessage[] = [];
@@ -315,6 +325,7 @@ export class Conductor {
     let userText = text.trim();
     let steps = 0;
     let finished = false;
+    let finalText = "";
 
     try {
       const images: { id: string; dataUrl: string }[] = [];
@@ -370,6 +381,9 @@ export class Conductor {
       let applies = 0;
       let patches = 0;
       let edits = 0;
+      let snapshots = 0;
+      let detailSnapshots = 0;
+      let readOnlyStreak = 0;
       let layoutReviewNeeded = false;
       const stepsLog: AiLogStep[] = [];
 
@@ -378,7 +392,8 @@ export class Conductor {
 
       const compactionTrigger = compactionTriggerTokens(getActiveModel() || "");
 
-      while (steps < AGENT_MAX_STEPS_PER_TURN) {
+      const maxSteps = AGENT_SINGLE_STEP_TEST ? 1 : AGENT_MAX_STEPS_PER_TURN;
+      while (steps < maxSteps) {
         if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
         this.flushSteer();
         if (estimateTokens(this.serializeMessages()) > compactionTrigger) {
@@ -395,6 +410,7 @@ export class Conductor {
         }
         if (step.kind === "final") {
           this.messages.push({ role: "assistant", text: step.text || "" });
+          finalText = step.text || "";
           stepsLog.push({
             stepNumber: steps + 1,
             text: step.text || "",
@@ -444,6 +460,22 @@ export class Conductor {
             code: "EDIT_BUDGET_REACHED",
             message: `Edit budget reached (${AGENT_MAX_EDITS_PER_TURN}/${AGENT_MAX_EDITS_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
           };
+        } else if (call.name === "canvas_snapshot" && snapshots >= AGENT_MAX_SNAPSHOTS_PER_TURN) {
+          result = {
+            ok: true,
+            code: "SNAPSHOT_BUDGET_REACHED",
+            message: `Snapshot budget reached (${AGENT_MAX_SNAPSHOTS_PER_TURN}/${AGENT_MAX_SNAPSHOTS_PER_TURN}). You have seen the board — act on what you have (apply/edit/patch) or finish with a final answer.`,
+          };
+        } else if (
+          call.name === "canvas_snapshot" &&
+          (call.args as { quality?: string } | null)?.quality === "detail" &&
+          detailSnapshots >= AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN
+        ) {
+          isError = true;
+          result = {
+            code: "DETAIL_BUDGET_REACHED",
+            message: `Detail-snapshot budget reached (${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}/${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}). Use quality=basic or act on the detail you already have.`,
+          };
         } else {
           // Any board change (apply, user ink, rollback) invalidates replays:
           // cached scan/snapshot results embed revision-scoped state and a
@@ -474,13 +506,14 @@ export class Conductor {
                 if (call.name === "canvas_apply" && rec.ok === true) applies += 1;
                 if (call.name === "canvas_patch_widget" && rec.ok === true) patches += 1;
                 if (call.name === "canvas_edit" && rec.ok === true) edits += 1;
-                // Layout-review gate: after any widget mutation the next mutation
-                // waits for a fresh content-covering snapshot at the current revision.
+                if (call.name === "canvas_snapshot" && rec.ok !== false) {
+                  snapshots += 1;
+                  if ((call.args as { quality?: string } | null)?.quality === "detail") detailSnapshots += 1;
+                }
+                // Layout-review gate: only a content-covering snapshot proves the
+                // layout — a zoomed region/object view cannot verify composition.
                 if (rec.widgetMutated === true) layoutReviewNeeded = true;
-                if (
-                  call.name === "canvas_snapshot" &&
-                  rec.ok !== false
-                ) {
+                if (call.name === "canvas_snapshot" && rec.ok !== false && rec.coversContent === true) {
                   layoutReviewNeeded = false;
                 }
               }
@@ -541,12 +574,29 @@ export class Conductor {
             text: `One tool call per step. ${call.extraToolCalls} extra call(s) were not executed. Continue the task by issuing the next single tool call on the following step.`,
           });
         }
+        // ponytail: streak heuristic instead of pixel-overlap cache; overlap tracking if jitter persists past budgets
+        if (call.name === "canvas_scan" || call.name === "canvas_snapshot" || call.name === "canvas_read" || call.name === "canvas_focus") {
+          readOnlyStreak += 1;
+        } else {
+          readOnlyStreak = 0;
+        }
+        if (readOnlyStreak === 4) {
+          readOnlyStreak = 0;
+          this.messages.push({
+            role: "system",
+            text: "4 reads without a mutation. You have enough context — act now (canvas_apply/canvas_edit/canvas_patch_widget) or finish with a final answer. Do not take another snapshot of a region you already saw.",
+          });
+        }
       }
 
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-      const stepLimitMessage = `Step limit reached (${AGENT_MAX_STEPS_PER_TURN}/${AGENT_MAX_STEPS_PER_TURN}).`;
+      const stepLimitMessage = `Step limit reached (${maxSteps}/${maxSteps}).`;
       if (finished) {
-        this.emit({ kind: "turn_end", reason: "done" });
+        this.emit({ kind: "turn_end", reason: "done", message: finalText || undefined });
+      } else if (AGENT_SINGLE_STEP_TEST) {
+        // Single-step test mode: the one allowed step ran — end quietly, no error toast.
+        this.emit({ kind: "turn_end", reason: "done", message: finalText || "Single-step test: loop disabled after 1 step." });
+        finished = true;
       } else {
         this.emit({ kind: "turn_end", reason: "error", error: stepLimitMessage });
       }
@@ -1084,6 +1134,9 @@ async function readStepSse(
           if (eventName === "text_delta" && typeof rec.text === "string") {
             text += rec.text;
             onEvent({ kind: "text_delta", text: rec.text });
+          } else if (eventName === "reasoning" && typeof rec.text === "string") {
+            // Reasoning tokens never become the final answer — detail only.
+            onEvent({ kind: "reasoning_delta", text: rec.text });
           } else if (eventName === "tool_call" && typeof rec.name === "string") {
             toolCall = {
               id: String(rec.id || `call-${Date.now()}`),
