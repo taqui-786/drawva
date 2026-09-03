@@ -374,7 +374,7 @@ export class Conductor {
       const stepsLog: AiLogStep[] = [];
 
       const mutationBlocked = (name: string): boolean =>
-        (name === "canvas_apply" || name === "canvas_patch_widget" || name === "canvas_edit") && layoutReviewNeeded;
+        (name === "canvas_patch_widget" || name === "canvas_edit") && layoutReviewNeeded;
 
       const compactionTrigger = compactionTriggerTokens(getActiveModel() || "");
 
@@ -479,8 +479,7 @@ export class Conductor {
                 if (rec.widgetMutated === true) layoutReviewNeeded = true;
                 if (
                   call.name === "canvas_snapshot" &&
-                  rec.coversContent === true &&
-                  rec.revision === this.deps.getRevision()
+                  rec.ok !== false
                 ) {
                   layoutReviewNeeded = false;
                 }

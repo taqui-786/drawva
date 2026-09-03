@@ -211,7 +211,7 @@
           var nat = svgNaturalSize(svg);
           clone.setAttribute('width', String(nat.w));
           clone.setAttribute('height', String(nat.h));
-          var css = Array.from(document.querySelectorAll('style')).map(function(s) { return s.textContent || ''; }).join('\\n');
+          var css = Array.from(document.querySelectorAll('style')).map(function(s) { return s.textContent || ''; }).join('\n');
           if (css.trim()) {
             var styleTag = document.createElementNS('http://www.w3.org/2000/svg', 'style');
             styleTag.textContent = css;

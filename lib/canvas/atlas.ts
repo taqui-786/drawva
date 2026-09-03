@@ -272,6 +272,14 @@ async function renderHtmlToContext(
         clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
         const foreignObjects = Array.from(clone.querySelectorAll("foreignObject"));
         for (const fo of foreignObjects) fo.remove();
+        const styles = Array.from(doc.querySelectorAll("style"))
+          .map((s) => s.textContent || "")
+          .join("\n");
+        if (styles.trim()) {
+          const styleEl = doc.createElementNS("http://www.w3.org/2000/svg", "style");
+          styleEl.textContent = styles;
+          clone.insertBefore(styleEl, clone.firstChild);
+        }
         const sSource = new XMLSerializer().serializeToString(clone);
         const sBlob = new Blob([sSource], { type: "image/svg+xml;charset=utf-8" });
         const sUrl = URL.createObjectURL(sBlob);

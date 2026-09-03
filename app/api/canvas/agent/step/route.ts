@@ -195,6 +195,7 @@ async function streamOnceWithAiSdk(
       },
       openai: {
         ...(reasoning.openai as Record<string, unknown> | undefined),
+        parallelToolCalls: false,
         promptCacheKey: "drawva-agent-system-v1",
       },
     },
