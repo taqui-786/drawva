@@ -8,8 +8,15 @@ import {
   reasoningProviderOptions,
 } from "@/lib/ai/model";
 import { AGENT_MAX_LOADED_PLUGINS } from "@/lib/ai/agentTools";
-import { AGENT_SYSTEM_PROMPT, AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
-import { extractJsonDecision, getAiSdkTools, parseAgentToolCall } from "@/lib/ai/agentTools";
+import { AGENT_SYSTEM_PROMPT, AI_TIMEOUT_MS, MAX_BODY_BYTES, webAccessStatus } from "@/lib/ai/prompts";
+import {
+  AGENT_TOOL_DEFS,
+  extractJsonDecision,
+  getAiSdkTools,
+  parseAgentToolCall,
+  type WebToolFlags,
+} from "@/lib/ai/agentTools";
+import { hasTinyfishKey } from "@/lib/ai/webTools";
 import { getEnabledPluginDescriptors, getPluginMetadataList } from "@/lib/plugins/registry";
 import { requireSession } from "@/lib/api-guard";
 import { recordAiUsage } from "@/lib/actions/usage";
@@ -26,6 +33,7 @@ interface StepRequest {
   reasoningEffort?: string;
   messages?: unknown;
   loadedPluginIds?: unknown;
+  webSearch?: boolean;
   context?: { revision?: number; viewport?: unknown; canvasSize?: number };
 }
 
@@ -92,7 +100,8 @@ export async function POST(req: Request) {
           .map((p) => `\n\n=== PLUGIN CONTRACT (durable): ${p.id} v${p.version} ===\n${p.document}`)
           .join("")
       : "";
-  const system = `${AGENT_SYSTEM_PROMPT}\n\nPLUGIN CATALOG (load full docs with load_plugin):\n${catalogBlock || "(none)"}${contractBlock}`;
+  const webTools: WebToolFlags = { tinyfish: hasTinyfishKey(), search: body.webSearch !== false };
+  const system = `${AGENT_SYSTEM_PROMPT}\n\n${webAccessStatus(webTools.search === true, webTools.tinyfish === true)}\n\nPLUGIN CATALOG (load full docs with load_plugin):\n${catalogBlock || "(none)"}${contractBlock}`;
 
   const messages = parseMessages(body.messages);
   if (!messages) return json({ error: "messages is invalid." }, 400);
@@ -129,7 +138,7 @@ export async function POST(req: Request) {
       try {
         // AI SDK retries internally with exponential backoff that respects
         // Retry-After headers; fatal auth errors and aborts are never retried.
-        await streamOnceWithAiSdk(model, providerType, modelId, system, aiSdkMessages, req.signal, send, reasoningEffort);
+        await streamOnceWithAiSdk(model, providerType, modelId, system, aiSdkMessages, req.signal, send, reasoningEffort, webTools);
       } catch (err) {
         if (req.signal.aborted) return;
         send("error", { message: publicError(err) });
@@ -163,9 +172,10 @@ async function streamOnceWithAiSdk(
   messages: ModelMessage[],
   signal: AbortSignal,
   send: (event: string, data: unknown) => void,
-  reasoningEffort: ReasoningEffort
+  reasoningEffort: ReasoningEffort,
+  webTools: WebToolFlags
 ): Promise<void> {
-  const tools = getAiSdkTools();
+  const tools = getAiSdkTools(webTools);
   const safeMessages = messages.length > 0 ? messages : [{ role: "user" as const, content: "Proceed with the canvas task." }];
   const reasoning = reasoningProviderOptions(providerType, modelId, reasoningEffort);
 
@@ -330,7 +340,7 @@ function extractFallbackToolCall(text: string): { name: string; args: unknown; m
     };
   }
 
-  const agentTools = ["canvas_scan", "canvas_snapshot", "canvas_apply", "canvas_edit", "load_plugin", "canvas_read", "canvas_patch_widget", "canvas_undo", "canvas_focus"];
+  const agentTools = AGENT_TOOL_DEFS.map((d) => d.name);
   if (typeof parsed.name === "string" && agentTools.includes(parsed.name)) {
     return {
       name: parsed.name,

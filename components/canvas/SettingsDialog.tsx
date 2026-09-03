@@ -51,6 +51,8 @@ import {
   setCachedModels,
   setCachedModelCapabilities,
   setActiveModel,
+  getWebSearchEnabled,
+  setWebSearchEnabled,
   PROVIDER_INFOS,
   type ProviderType,
   type ProviderConfig,
@@ -434,7 +436,63 @@ function ProviderTabContent({
           </div>
         </CardContent>
       </Card>
+
+      <WebSearchCard />
     </div>
+  );
+}
+
+function WebSearchCard() {
+  const [enabled, setEnabled] = useState<boolean>(() => getWebSearchEnabled());
+
+  const choose = (next: boolean) => {
+    setEnabled(next);
+    setWebSearchEnabled(next);
+  };
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Internet Search</CardTitle>
+        <CardDescription>
+          Lets the agent search the web, papers, GitHub, and market data before it draws. Reading a URL you paste stays
+          available either way. Results are treated as untrusted data and cited by source.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          {[
+            { value: true, label: "Enabled", hint: "Search tools offered every step" },
+            { value: false, label: "Disabled", hint: "Answers from the model only" },
+          ].map((opt) => (
+            <Button
+              key={String(opt.value)}
+              type="button"
+              aria-pressed={enabled === opt.value}
+              variant={enabled === opt.value ? "default" : "outline"}
+              className="h-auto flex-col items-start p-3 text-left"
+              onClick={() => choose(opt.value)}
+            >
+              <div className="flex items-center justify-between w-full">
+                <span className="font-semibold text-sm">{opt.label}</span>
+                {enabled === opt.value && <HugeiconsIcon icon={Tick02Icon} />}
+              </div>
+              <span
+                className={`text-xs ${
+                  enabled === opt.value ? "text-primary-foreground/80" : "text-muted-foreground"
+                }`}
+              >
+                {opt.hint}
+              </span>
+            </Button>
+          ))}
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Search and page reading need a TINYFISH_API_KEY on the server; without it the agent falls back to a keyless
+          web search and tells you what it could not reach.
+        </p>
+      </CardContent>
+    </Card>
   );
 }
 

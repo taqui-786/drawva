@@ -109,6 +109,16 @@ const MODELS_KEY = "drawva.aiModels";
 const MODEL_KEY = "drawva.aiModel";
 const MODEL_CAPABILITIES_KEY = "drawva.aiModelCapabilities";
 const REASONING_EFFORT_KEY = "drawva.aiReasoningEffort";
+const WEB_SEARCH_KEY = "drawva.aiWebSearch";
+
+export function getWebSearchEnabled(): boolean {
+  return read<boolean>(WEB_SEARCH_KEY, true) !== false;
+}
+
+export function setWebSearchEnabled(enabled: boolean): void {
+  write(WEB_SEARCH_KEY, enabled);
+  notify();
+}
 
 export function getReasoningEffort(): ReasoningEffort {
   const val = read<string>(REASONING_EFFORT_KEY, "default");

@@ -20,6 +20,7 @@ import {
   SCAN_MAX_ITEMS,
   SNAPSHOT_BASIC,
   SNAPSHOT_DETAIL,
+  isWebToolName,
   type CapturePolicy,
 } from "./agentTools";
 
@@ -841,6 +842,21 @@ function drawCoordinateGrid(canvas: HTMLCanvasElement, region: Rect): void {
   ctx.restore();
 }
 
+async function execWebTool(name: string, args: Record<string, unknown>): Promise<unknown> {
+  try {
+    const res = await fetch("/api/canvas/web", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, args }),
+    });
+    const payload = await res.json().catch(() => null);
+    if (payload && typeof payload === "object") return payload;
+    return toolError("WEB_TOOL_FAILED", `${name} returned an unreadable response (HTTP ${res.status}).`);
+  } catch (err) {
+    return toolError("WEB_TOOL_FAILED", `${name} could not reach the server: ${(err as Error).message}`);
+  }
+}
+
 export async function executeTool(
   name: string,
   args: unknown,
@@ -867,6 +883,7 @@ export async function executeTool(
     case "canvas_focus":
       return execFocus(rec, deps);
     default:
+      if (isWebToolName(name)) return execWebTool(name, rec);
       return toolError("INVALID_ARGUMENT", `Unknown tool: ${name}.`);
   }
 }

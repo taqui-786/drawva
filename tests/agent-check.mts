@@ -2,7 +2,7 @@
  * Drawva Agent verification suite — run with `pnpm test:agent`.
  * No test framework: plain asserts, one process. Section A–F:
  *   A. widgetPatch pure unit cases
- *   B. agentTools schema/limit cases
+ *   B. agentTools + web tool schema/gate/limit cases
  *   C. prompt/constant contracts
  *   D. repo hygiene (anti-clone greps, mutation-path audit)
  *   E. concurrency & step economy (fingerprint conflict protocol, layout gate,
@@ -20,8 +20,18 @@ import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { applyWidgetPatch } from "../lib/canvas/widgetPatch";
-import { AGENT_TOOL_DEFS, MAX_PATCH_BYTES, AGENT_MAX_STEPS_PER_TURN, parseAgentToolCall } from "../lib/ai/agentTools";
-import { AGENT_SYSTEM_PROMPT, COORDINATE_CONTRACT, SYSTEM_PROMPT } from "../lib/ai/prompts";
+import {
+  AGENT_TOOL_DEFS,
+  MAX_PATCH_BYTES,
+  AGENT_MAX_STEPS_PER_TURN,
+  parseAgentToolCall,
+  getAiSdkTools,
+  isWebToolName,
+  WEB_TOOL_NAMES,
+  type WebToolFlags,
+} from "../lib/ai/agentTools";
+import { isWikipedia, safeUrl, selectFetchTargets, WEB_READ_MAX_URLS } from "../lib/ai/webTools";
+import { AGENT_SYSTEM_PROMPT, COORDINATE_CONTRACT, SYSTEM_PROMPT, webAccessStatus } from "../lib/ai/prompts";
 
 // .env.local drives the Next server too; we need DATABASE_URL + BETTER_AUTH_SECRET
 // to seed a real session for the authenticated API routes.
@@ -190,10 +200,10 @@ await test("A16 multibyte UTF-8 patch byte length enforcement", () => {
 // ---------------------------------------------------------------------------
 console.log("\nB. agentTools");
 
-await test("B1 exactly 9 tools with unique names", () => {
-  assert.equal(AGENT_TOOL_DEFS.length, 9);
+await test("B1 exactly 15 tools with unique names", () => {
+  assert.equal(AGENT_TOOL_DEFS.length, 15);
   const names = AGENT_TOOL_DEFS.map((t) => t.name);
-  assert.equal(new Set(names).size, 9);
+  assert.equal(new Set(names).size, 15);
   for (const expected of [
     "canvas_scan",
     "canvas_snapshot",
@@ -204,6 +214,12 @@ await test("B1 exactly 9 tools with unique names", () => {
     "canvas_patch_widget",
     "canvas_undo",
     "canvas_focus",
+    "web_read",
+    "web_search",
+    "research_search",
+    "github_repository_search",
+    "stock_symbol_search",
+    "stock_market_data",
   ]) {
     assert.ok(names.includes(expected), `missing ${expected}`);
   }
@@ -279,6 +295,116 @@ await test("B6 parseAgentToolCall safely validates and parses JSON args", () => 
   assert.deepEqual(parsed3.args, { foo: "bar" });
 });
 
+const webDef = (name: string) => AGENT_TOOL_DEFS.find((t) => t.name === name)!;
+
+await test("B7 web_read schema pins the documented url budget", () => {
+  const def = webDef("web_read");
+  assert.equal(def.schema.safeParse({}).success, false);
+  assert.equal(def.schema.safeParse({ urls: [] }).success, false);
+  assert.equal(def.schema.safeParse({ urls: ["https://example.com/a"] }).success, true);
+  const max = Array.from({ length: WEB_READ_MAX_URLS }, (_, i) => `https://example.com/${i}`);
+  assert.equal(def.schema.safeParse({ urls: max }).success, true);
+  assert.equal(def.schema.safeParse({ urls: [...max, "https://example.com/x"] }).success, false);
+});
+
+await test("B8 web/stock schemas reject out-of-contract enums and coerce numeric strings", () => {
+  const search = webDef("web_search").schema;
+  assert.equal(search.safeParse({}).success, false);
+  assert.equal(search.safeParse({ query: "orbital mechanics" }).success, true);
+  assert.equal(search.safeParse({ query: "x", domainType: "research_paper" }).success, false);
+  assert.equal(search.safeParse({ query: "x", freshness: "decade" }).success, false);
+
+  const repos = webDef("github_repository_search").schema;
+  assert.equal(repos.safeParse({ query: "x", sort: "downloads" }).success, false);
+  assert.equal(repos.safeParse({ query: "x", sort: "stars" }).success, true);
+
+  assert.equal(webDef("stock_symbol_search").schema.safeParse({}).success, false);
+  const market = webDef("stock_market_data").schema;
+  assert.equal(market.safeParse({ symbol: "AAPL" }).success, true);
+  assert.equal(market.safeParse({ symbol: "AAPL", range: "7y" }).success, false);
+  assert.equal(market.safeParse({ symbol: "AAPL", interval: "3m" }).success, false);
+
+  const research = webDef("research_search").schema.safeParse({ query: "x", fromYear: "2019" });
+  assert.ok(research.success && (research.data as { fromYear?: number }).fromYear === 2019);
+});
+
+await test("B9 web tool names stay consistent and re-validate through parseAgentToolCall", () => {
+  assert.equal(WEB_TOOL_NAMES.length, 6);
+  for (const name of WEB_TOOL_NAMES) {
+    assert.ok(isWebToolName(name));
+    assert.ok(AGENT_TOOL_DEFS.some((t) => t.name === name), `${name} missing from AGENT_TOOL_DEFS`);
+  }
+  assert.equal(isWebToolName("canvas_apply"), false);
+  assert.equal(isWebToolName(""), false);
+  // /api/canvas/web re-validates with this, so bad args must never reach a fetcher.
+  assert.equal(parseAgentToolCall("web_read", { urls: [] }).valid, false);
+  const good = parseAgentToolCall("stock_market_data", '{"symbol":"AAPL","includeHistory":true}');
+  assert.equal(good.valid, true);
+  assert.deepEqual(good.args, { symbol: "AAPL", includeHistory: true });
+});
+
+await test("B10 web tools register only behind their capability gate", () => {
+  const names = (flags: WebToolFlags) => Object.keys(getAiSdkTools(flags));
+  const canvasOnly = names({});
+  assert.equal(canvasOnly.length, 9);
+  assert.ok(!canvasOnly.some((n) => isWebToolName(n)), `canvas-only set leaked: ${canvasOnly.join(", ")}`);
+
+  const searchOnly = names({ search: true });
+  for (const n of ["web_search", "github_repository_search", "stock_symbol_search", "stock_market_data"]) {
+    assert.ok(searchOnly.includes(n), `missing ${n}`);
+  }
+  // No TinyFish key → no page reading and no paper search, whatever the search flag says.
+  assert.ok(!searchOnly.includes("web_read"));
+  assert.ok(!searchOnly.includes("research_search"));
+
+  const readOnly = names({ tinyfish: true });
+  assert.ok(readOnly.includes("web_read"));
+  assert.ok(!readOnly.includes("web_search"));
+  assert.ok(!readOnly.includes("research_search"));
+
+  assert.equal(names({ tinyfish: true, search: true }).length, 15);
+});
+
+await test("B11 fetch selection takes the Wikipedia hit, otherwise the top 2", () => {
+  const hits = [
+    { url: "https://a.example/1" },
+    { url: "https://b.example/2" },
+    { url: "https://en.wikipedia.org/wiki/Cat" },
+  ];
+  assert.deepEqual(selectFetchTargets(hits), [{ url: "https://en.wikipedia.org/wiki/Cat" }]);
+  assert.deepEqual(selectFetchTargets([...hits.slice(0, 2), { url: "https://c.example/3" }]), [
+    { url: "https://a.example/1" },
+    { url: "https://b.example/2" },
+  ]);
+  assert.deepEqual(selectFetchTargets([{ url: "https://a.example/1" }]), [{ url: "https://a.example/1" }]);
+  assert.deepEqual(selectFetchTargets([]), []);
+  assert.ok(isWikipedia("https://www.wikipedia.org/"));
+  assert.ok(isWikipedia("https://simple.wikipedia.org/wiki/Cat"));
+  assert.equal(isWikipedia("https://en.wikipedia.org.evil.example/wiki/Cat"), false);
+});
+
+await test("B12 safeUrl blocks loopback/private/metadata/non-http targets", () => {
+  for (const bad of [
+    "http://localhost/x",
+    "http://127.0.0.1/",
+    "https://10.1.2.3/",
+    "https://192.168.0.1/",
+    "https://172.16.4.5/",
+    "https://169.254.169.254/latest/meta-data/",
+    "https://box.internal/admin",
+    "https://printer.local/",
+    "file:///etc/passwd",
+    "javascript:alert(1)",
+    "not a url",
+    "",
+  ]) {
+    assert.equal(safeUrl(bad), null, `should reject ${bad || "(empty)"}`);
+  }
+  assert.equal(typeof safeUrl("https://en.wikipedia.org/wiki/Cat"), "string");
+  // 172.32/12 is public: the guard must not swallow all of 172.0.0.0/8.
+  assert.equal(typeof safeUrl("https://172.32.0.1/"), "string");
+});
+
 // ---------------------------------------------------------------------------
 // C. prompt contracts
 // ---------------------------------------------------------------------------
@@ -308,6 +434,36 @@ await test("C3 agent prompt has no per-request data (no viewport/revision interp
   assert.ok(!AGENT_SYSTEM_PROMPT.includes("visibleRect"));
 });
 
+await test("C4 web access state never advertises a tool that is not registered", () => {
+  const off = webAccessStatus(false, false);
+  assert.ok(off.includes("Internet search is DISABLED"));
+  assert.ok(off.includes("direct page reading is DISABLED"));
+  assert.ok(off.includes("No web tool is available this turn"));
+  for (const name of WEB_TOOL_NAMES) {
+    assert.ok(!off.includes(name), `disabled state must not name ${name}`);
+  }
+
+  const searchOnly = webAccessStatus(true, false);
+  assert.ok(searchOnly.includes("Internet search is ENABLED"));
+  assert.ok(searchOnly.includes("web_search") && searchOnly.includes("stock_symbol_search"));
+  // research_search and web_read both need the TinyFish key; the prompt must not
+  // promise them when getAiSdkTools did not register them.
+  assert.ok(!searchOnly.includes("web_read"));
+  assert.ok(!searchOnly.includes("research_search"));
+
+  const all = webAccessStatus(true, true);
+  for (const needle of [
+    "web_read",
+    "research_search",
+    "fetchPages=true",
+    "untrusted data",
+    "cite the source URL",
+    "not investment advice",
+  ]) {
+    assert.ok(all.includes(needle), `missing: ${needle}`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // D. repo hygiene
 // ---------------------------------------------------------------------------
@@ -317,9 +473,11 @@ const NEW_FILES = [
   "lib/ai/agentTools.ts",
   "lib/ai/conductor.ts",
   "lib/ai/conductorTools.ts",
+  "lib/ai/webTools.ts",
   "lib/canvas/widgetPatch.ts",
   "app/api/canvas/agent/step/route.ts",
   "app/api/canvas/agent/compact/route.ts",
+  "app/api/canvas/web/route.ts",
 ];
 
 await test("D1 no foreign identifiers in agent files (anti-clone)", () => {
@@ -488,6 +646,23 @@ await test("D9 draw without origin keeps absolute points; validated points are {
     { x: 9800, y: 9200 },
     { x: 10300, y: 9600 },
   ]);
+});
+
+await test("D10 web tool credentials and endpoints never reach the client bundle", () => {
+  const client = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  assert.ok(!client.includes("TINYFISH"), "the api key name must stay server-side");
+  assert.ok(!/tinyfish\.ai|query1\.finance|api\.github\.com/.test(client), "web endpoints must stay server-side");
+  assert.ok(!/from "\.\/webTools"|from "@\/lib\/ai\/webTools"/.test(client), "conductorTools must not import server-only webTools");
+  assert.ok(client.includes('fetch("/api/canvas/web"'), "web tools must execute through the authenticated route");
+
+  const web = fs.readFileSync(path.join(ROOT, "lib/ai/webTools.ts"), "utf8");
+  assert.ok(!web.includes("next/server"), "webTools must stay framework-free so it is unit-testable");
+  assert.ok(web.includes("process.env.TINYFISH_API_KEY"), "the key must be read from the server env only");
+
+  const route = fs.readFileSync(path.join(ROOT, "app/api/canvas/web/route.ts"), "utf8");
+  assert.ok(route.includes("requireSession"), "the web route must require a session");
+  assert.ok(route.includes("isWebToolName"), "the web route must allow-list tool names");
+  assert.ok(route.includes("parseAgentToolCall"), "the web route must re-validate args server-side");
 });
 
 // ---------------------------------------------------------------------------
@@ -825,12 +1000,39 @@ function sseEvents(raw: string): Array<{ event: string; data: Record<string, unk
   return out;
 }
 
+function wireToolNames(body: ModelBody): string[] {
+  return (body.tools ?? []).map((entry) => {
+    const rec = entry as { name?: string; function?: { name?: string } };
+    return rec.function?.name ?? rec.name ?? "";
+  });
+}
+
+const CANVAS_TOOL_NAMES = [
+  "canvas_scan",
+  "canvas_snapshot",
+  "canvas_apply",
+  "canvas_edit",
+  "load_plugin",
+  "canvas_read",
+  "canvas_patch_widget",
+  "canvas_undo",
+  "canvas_focus",
+];
+
+const SEARCH_TOOL_NAMES = [
+  "web_search",
+  "github_repository_search",
+  "stock_symbol_search",
+  "stock_market_data",
+];
+
 const validStepBase = {
   providerType: "custom",
   baseUrl: MODEL_URL,
   apiKey: API_KEY,
   model: "fake-model",
   loadedPluginIds: ["weather"],
+  webSearch: false,
   messages: [{ role: "user", text: "hi" }],
   context: { revision: 0, viewport: { x: 0, y: 0, w: 800, h: 600 }, canvasSize: 20000 },
 };
@@ -927,7 +1129,14 @@ try {
     assert.ok(String(msgs[0].content).includes("weather"));
     // loadedPluginIds → durable contract section in the system prompt
     assert.ok(String(msgs[0].content).includes("PLUGIN CONTRACT (durable)"));
-    assert.ok(Array.isArray(body.tools) && body.tools.length === 9);
+    const toolNames = wireToolNames(body);
+    for (const name of CANVAS_TOOL_NAMES) {
+      assert.ok(toolNames.includes(name), `missing ${name}`);
+    }
+    // webSearch:false in the request → the whole search family stays unbound.
+    for (const name of SEARCH_TOOL_NAMES) {
+      assert.ok(!toolNames.includes(name), `${name} bound despite webSearch:false`);
+    }
   });
 
   await test("E8 step E2E: tool_call round-trips with parsed args", async () => {
@@ -1004,6 +1213,33 @@ try {
 
   await test("E12 compact rejects invalid / missing fields", async () => {
     assert.equal((await post("/api/canvas/agent/compact", { providerType: "custom", apiKey: "k", model: "m" })).status, 400);
+  });
+
+  await test("E13 step E2E: the search flag gates both the tool list and the prompt state line", async () => {
+    modelState.mode = "text";
+    await readSseText(await post("/api/canvas/agent/step", { ...validStepBase, webSearch: true }));
+    const onNames = wireToolNames(modelState.lastBody!);
+    for (const name of SEARCH_TOOL_NAMES) {
+      assert.ok(onNames.includes(name), `missing ${name}`);
+    }
+    assert.ok(String(modelState.lastBody!.messages![0].content).includes("Internet search is ENABLED"));
+
+    await readSseText(await post("/api/canvas/agent/step", { ...validStepBase, webSearch: false }));
+    const offNames = wireToolNames(modelState.lastBody!);
+    for (const name of SEARCH_TOOL_NAMES) {
+      assert.ok(!offNames.includes(name), `${name} bound despite webSearch:false`);
+    }
+    assert.ok(String(modelState.lastBody!.messages![0].content).includes("Internet search is DISABLED"));
+  });
+
+  await test("E14 web route rejects unknown names, bad args, and unauthenticated callers", async () => {
+    assert.equal((await post_unauthed("/api/canvas/web", { name: "web_search", args: { query: "x" } })).status, 401);
+    const unknown = await post("/api/canvas/web", { name: "definitely_not_a_tool", args: {} });
+    assert.equal(unknown.status, 400);
+    assert.equal(((await unknown.json()) as { code?: string }).code, "INVALID_ARGUMENT");
+    const badArgs = await post("/api/canvas/web", { name: "web_read", args: { urls: [] } });
+    assert.equal(badArgs.status, 400);
+    assert.equal(((await badArgs.json()) as { code?: string }).code, "INVALID_ARGUMENT");
   });
 } finally {
   if (nextProc && !nextProc.killed) {

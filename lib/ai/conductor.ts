@@ -11,6 +11,7 @@ import {
   getActiveModel,
   getProviderConfig,
   getReasoningEffort,
+  getWebSearchEnabled,
   type ProviderConfig,
 } from "@/lib/ai/provider";
 import { buildAtlas } from "@/lib/canvas/atlas";
@@ -816,6 +817,7 @@ export class Conductor {
       reasoningEffort: getReasoningEffort(),
       messages: this.serializeMessages(),
       loadedPluginIds: [...this.loadedPluginIds],
+      webSearch: getWebSearchEnabled(),
       context: {
         revision: this.deps.getRevision(),
         viewport: this.deps.camera.visibleWorldRect(),

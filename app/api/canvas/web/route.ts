@@ -1,0 +1,59 @@
+import { NextResponse } from "next/server";
+import { isWebToolName, parseAgentToolCall } from "@/lib/ai/agentTools";
+import { runWebTool, tinyfishKey } from "@/lib/ai/webTools";
+import { requireSession } from "@/lib/api-guard";
+
+export const runtime = "nodejs";
+export const maxDuration = 45;
+
+const MAX_BODY_BYTES = 32 * 1024;
+
+interface WebToolRequest {
+  name?: string;
+  args?: unknown;
+}
+
+export async function POST(req: Request) {
+  let raw: string;
+  try {
+    raw = await req.text();
+  } catch {
+    return json({ code: "INVALID_ARGUMENT", message: "Failed to read body" }, 400);
+  }
+  if (raw.length > MAX_BODY_BYTES) {
+    return json({ code: "INVALID_ARGUMENT", message: "Request too large" }, 400);
+  }
+
+  const guard = await requireSession(req);
+  if (guard instanceof NextResponse) return guard;
+
+  let body: WebToolRequest;
+  try {
+    body = JSON.parse(raw) as WebToolRequest;
+  } catch {
+    return json({ code: "INVALID_ARGUMENT", message: "Invalid JSON" }, 400);
+  }
+
+  const name = typeof body.name === "string" ? body.name : "";
+  if (!isWebToolName(name)) {
+    return json({ code: "INVALID_ARGUMENT", message: `Unknown web tool: ${name || "(missing)"}.` }, 400);
+  }
+
+  const parsed = parseAgentToolCall(name, body.args ?? {});
+  if (!parsed.valid) {
+    return json({ code: "INVALID_ARGUMENT", message: parsed.error ?? `Invalid arguments for ${name}.` }, 400);
+  }
+
+  const result = await runWebTool(name, (parsed.args ?? {}) as Record<string, unknown>, {
+    tinyfishKey: tinyfishKey(),
+    signal: req.signal,
+  });
+  return json(result);
+}
+
+function json(body: unknown, status = 200): NextResponse {
+  return NextResponse.json(body, {
+    status,
+    headers: { "content-type": "application/json" },
+  });
+}
