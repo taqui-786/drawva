@@ -1,4 +1,21 @@
-export type ProviderType = "openai" | "anthropic" | "gemini" | "nvidia" | "groq" | "custom";
+export type ProviderType =
+  | "openai"
+  | "anthropic"
+  | "gemini"
+  | "nvidia"
+  | "groq"
+  | "openrouter"
+  | "deepinfra"
+  | "opencode_zen"
+  | "opencode_go"
+  | "mistral"
+  | "together"
+  | "cerebras"
+  | "xai"
+  | "perplexity"
+  | "ollama"
+  | "lmstudio"
+  | "custom";
 
 export interface CustomModel {
   id: string;
@@ -60,6 +77,17 @@ export const PROVIDER_INFOS: Record<ProviderType, ProviderInfo> = {
       "gemini-1.5-flash",
     ],
   },
+  groq: {
+    type: "groq",
+    name: "Groq",
+    defaultBaseUrl: "https://api.groq.com/openai/v1",
+    defaultModels: [
+      "llama-3.2-11b-vision-preview",
+      "llama-3.2-90b-vision-preview",
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+    ],
+  },
   nvidia: {
     type: "nvidia",
     name: "NVIDIA NIM",
@@ -71,15 +99,111 @@ export const PROVIDER_INFOS: Record<ProviderType, ProviderInfo> = {
       "mistralai/pixtral-12b",
     ],
   },
-  groq: {
-    type: "groq",
-    name: "Groq",
-    defaultBaseUrl: "https://api.groq.com/openai/v1",
+  openrouter: {
+    type: "openrouter",
+    name: "OpenRouter",
+    defaultBaseUrl: "https://openrouter.ai/api/v1",
     defaultModels: [
-      "llama-3.2-11b-vision-preview",
-      "llama-3.2-90b-vision-preview",
-      "llama-3.3-70b-versatile",
-      "llama-3.1-8b-instant",
+      "google/gemini-2.0-flash-001",
+      "anthropic/claude-3.5-sonnet",
+      "openai/gpt-4o",
+      "meta-llama/llama-3.2-11b-vision-instruct",
+    ],
+  },
+  deepinfra: {
+    type: "deepinfra",
+    name: "DeepInfra",
+    defaultBaseUrl: "https://api.deepinfra.com/v1/openai",
+    defaultModels: [
+      "meta-llama/Llama-3.2-11B-Vision-Instruct",
+      "meta-llama/Llama-3.2-90B-Vision-Instruct",
+      "Qwen/Qwen2.5-VL-72B-Instruct",
+    ],
+  },
+  opencode_zen: {
+    type: "opencode_zen",
+    name: "OpenCode Zen",
+    defaultBaseUrl: "https://opencode.ai/zen/v1",
+    defaultModels: [
+      "claude-3-7-sonnet",
+      "gpt-4o",
+      "gemini-2.0-flash",
+    ],
+  },
+  opencode_go: {
+    type: "opencode_go",
+    name: "OpenCode Go",
+    defaultBaseUrl: "https://opencode.ai/go/v1",
+    defaultModels: [
+      "gpt-4o-mini",
+      "claude-3-5-haiku",
+      "gemini-2.0-flash",
+    ],
+  },
+  mistral: {
+    type: "mistral",
+    name: "Mistral AI",
+    defaultBaseUrl: "https://api.mistral.ai/v1",
+    defaultModels: [
+      "pixtral-12b-2409",
+      "pixtral-large-latest",
+      "mistral-large-latest",
+    ],
+  },
+  together: {
+    type: "together",
+    name: "Together AI",
+    defaultBaseUrl: "https://api.together.xyz/v1",
+    defaultModels: [
+      "meta-llama/Llama-3.2-11B-Vision-Instruct-Turbo",
+      "meta-llama/Llama-3.2-90B-Vision-Instruct-Turbo",
+      "Qwen/Qwen2.5-VL-72B-Instruct",
+    ],
+  },
+  cerebras: {
+    type: "cerebras",
+    name: "Cerebras",
+    defaultBaseUrl: "https://api.cerebras.ai/v1",
+    defaultModels: [
+      "llama-3.3-70b",
+      "llama3.1-8b",
+    ],
+  },
+  xai: {
+    type: "xai",
+    name: "xAI (Grok)",
+    defaultBaseUrl: "https://api.x.ai/v1",
+    defaultModels: [
+      "grok-2-vision-1212",
+      "grok-2-1212",
+    ],
+  },
+  perplexity: {
+    type: "perplexity",
+    name: "Perplexity",
+    defaultBaseUrl: "https://api.perplexity.ai",
+    defaultModels: [
+      "sonar-pro",
+      "sonar",
+      "sonar-reasoning",
+    ],
+  },
+  ollama: {
+    type: "ollama",
+    name: "Ollama (Local)",
+    defaultBaseUrl: "http://localhost:11434/v1",
+    defaultModels: [
+      "llama3.2-vision",
+      "llava",
+      "qwen2.5-coder",
+    ],
+  },
+  lmstudio: {
+    type: "lmstudio",
+    name: "LM Studio (Local)",
+    defaultBaseUrl: "http://localhost:1234/v1",
+    defaultModels: [
+      "default",
     ],
   },
   custom: {
@@ -110,6 +234,16 @@ const MODEL_KEY = "drawva.aiModel";
 const MODEL_CAPABILITIES_KEY = "drawva.aiModelCapabilities";
 const REASONING_EFFORT_KEY = "drawva.aiReasoningEffort";
 const WEB_SEARCH_KEY = "drawva.aiWebSearch";
+const AUTOSAVE_KEY = "drawva.autosaveEnabled";
+
+export function getAutosaveEnabled(): boolean {
+  return read<boolean>(AUTOSAVE_KEY, true) !== false;
+}
+
+export function setAutosaveEnabled(enabled: boolean): void {
+  write(AUTOSAVE_KEY, enabled);
+  notify();
+}
 
 export function getWebSearchEnabled(): boolean {
   return read<boolean>(WEB_SEARCH_KEY, true) !== false;

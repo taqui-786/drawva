@@ -4,7 +4,7 @@ import { createChatModel } from "@/lib/ai/model";
 import { COMPACT_KEEP } from "@/lib/ai/agentTools";
 import { AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
 import { requireSession } from "@/lib/api-guard";
-import type { ProviderType } from "@/lib/ai/provider";
+import { type ProviderType, PROVIDER_INFOS } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -37,7 +37,11 @@ export async function POST(req: Request) {
   const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   const modelId = typeof body.model === "string" ? body.model.trim() : "";
-  const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  const info = PROVIDER_INFOS[providerType];
+  const baseUrl =
+    typeof body.baseUrl === "string" && body.baseUrl.trim()
+      ? body.baseUrl.trim()
+      : info?.defaultBaseUrl || "";
   if (!apiKey || !modelId) return NextResponse.json({ error: "Missing API key or model." }, { status: 400 });
   if (!Array.isArray(body.messages)) return NextResponse.json({ error: "messages is required." }, { status: 400 });
 

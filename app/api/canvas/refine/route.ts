@@ -6,7 +6,7 @@ import { MAX_BODY_BYTES, AI_TIMEOUT_MS } from "@/lib/ai/prompts";
 import { extractJsonDecision } from "@/lib/ai/agentTools";
 import { requireSession } from "@/lib/api-guard";
 import { recordAiUsage } from "@/lib/actions/usage";
-import type { ProviderType } from "@/lib/ai/provider";
+import { type ProviderType, PROVIDER_INFOS } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -189,7 +189,11 @@ export async function POST(req: Request) {
   const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   const modelId = typeof body.model === "string" ? body.model.trim() : "";
-  const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  const info = PROVIDER_INFOS[providerType];
+  const baseUrl =
+    typeof body.baseUrl === "string" && body.baseUrl.trim()
+      ? body.baseUrl.trim()
+      : info?.defaultBaseUrl || "";
   if (!apiKey || !modelId) return json({ error: "Missing API key or model." }, 400);
   if (providerType === "custom" && !baseUrl) return json({ error: "Custom provider requires a Base URL." }, 400);
   if (!body.cropDataUrl) return json({ error: "Missing crop image." }, 400);

@@ -31,7 +31,7 @@ import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { unionRect } from "@/lib/canvas/engine";
-import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles, computeSnapshotHash, loadAgentLogs, clearAgentLogs } from "@/lib/canvas/persistence";
+import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles, computeSnapshotHash, loadAgentLogs, clearAgentLogs, getAutosaveEnabled } from "@/lib/canvas/persistence";
 import {
   CloudSyncEngine,
   fetchCloudCanvas,
@@ -1125,8 +1125,10 @@ export function CanvasApp() {
 
   function scheduleSave() {
     if (autosaveTimer.current) clearTimeout(autosaveTimer.current);
+    if (!getAutosaveEnabled()) return;
     autosaveTimer.current = setTimeout(() => {
       autosaveTimer.current = null;
+      if (!getAutosaveEnabled()) return;
       if (isCanvasBusyRef.current()) {
         scheduleSave();
         return;
@@ -1141,6 +1143,17 @@ export function CanvasApp() {
       }
     }, 1200);
   }
+
+  useEffect(() => {
+    const onStorage = () => {
+      if (!getAutosaveEnabled() && autosaveTimer.current) {
+        clearTimeout(autosaveTimer.current);
+        autosaveTimer.current = null;
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   function afterBoardChange() {
     bumpRevision();

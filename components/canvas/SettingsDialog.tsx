@@ -28,18 +28,18 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Switch } from "@/components/ui/switch";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   Loading02Icon,
   CloudCheckIcon,
-  Delete02Icon,
-  Add01Icon,
+  Database01Icon,
+  Settings01Icon,
   EyeIcon,
   EyeOffIcon,
   FlashIcon,
   CloudServerIcon,
   Analytics01Icon,
-  Tick02Icon,
 } from "@hugeicons/core-free-icons";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -51,6 +51,7 @@ import {
   setCachedModels,
   setCachedModelCapabilities,
   setActiveModel,
+  getModelCapabilitiesCached,
   getWebSearchEnabled,
   setWebSearchEnabled,
   PROVIDER_INFOS,
@@ -58,6 +59,12 @@ import {
   type ProviderConfig,
   type CustomModel,
 } from "@/lib/ai/provider";
+import {
+  saveProviderCredentialsToDb,
+  loadSavedProviderCredentialsFromDb,
+  getAutosaveEnabled,
+  setAutosaveEnabled,
+} from "@/lib/canvas/persistence";
 import { getRecentAiUsage, clearAiUsage } from "@/lib/actions/usage";
 
 interface SettingsDialogProps {
@@ -74,7 +81,7 @@ const PROVIDER_METADATA: Record<
   }
 > = {
   openai: {
-    tagline: "GPT-4o & GPT-4o-mini",
+    tagline: "GPT-4o, GPT-4o-mini, o-series",
     apiKeyUrl: "https://platform.openai.com/api-keys",
     keyPlaceholder: "sk-proj-...",
   },
@@ -98,51 +105,64 @@ const PROVIDER_METADATA: Record<
     apiKeyUrl: "https://build.nvidia.com/",
     keyPlaceholder: "nvapi-...",
   },
-  custom: {
-    tagline: "Ollama, LM Studio, OpenRouter",
+  openrouter: {
+    tagline: "Unified API for 300+ models",
     apiKeyUrl: "https://openrouter.ai/keys",
+    keyPlaceholder: "sk-or-v1-...",
+  },
+  deepinfra: {
+    tagline: "Fast open source inference",
+    apiKeyUrl: "https://deepinfra.com/dash/api_keys",
+    keyPlaceholder: "API key...",
+  },
+  opencode_zen: {
+    tagline: "OpenCode Zen endpoint",
+    apiKeyUrl: "https://opencode.ai/",
+    keyPlaceholder: "sk-...",
+  },
+  opencode_go: {
+    tagline: "OpenCode Go high-speed endpoint",
+    apiKeyUrl: "https://opencode.ai/",
+    keyPlaceholder: "sk-...",
+  },
+  mistral: {
+    tagline: "Frontier European AI & Pixtral",
+    apiKeyUrl: "https://console.mistral.ai/api-keys/",
+    keyPlaceholder: "API key...",
+  },
+  together: {
+    tagline: "Fast open source cloud models",
+    apiKeyUrl: "https://api.together.ai/settings/api-keys",
+    keyPlaceholder: "API key...",
+  },
+  cerebras: {
+    tagline: "Ultra-fast wafer-scale inference",
+    apiKeyUrl: "https://cloud.cerebras.ai/",
+    keyPlaceholder: "csk-...",
+  },
+  xai: {
+    tagline: "Grok 2 Vision & Reasoning",
+    apiKeyUrl: "https://console.x.ai/",
+    keyPlaceholder: "xai-...",
+  },
+  perplexity: {
+    tagline: "Online conversational search models",
+    apiKeyUrl: "https://www.perplexity.ai/settings/api",
+    keyPlaceholder: "pplx-...",
+  },
+  ollama: {
+    tagline: "Local open-source models",
+    keyPlaceholder: "ollama (optional)",
+  },
+  lmstudio: {
+    tagline: "Local models via LM Studio",
+    keyPlaceholder: "lm-studio (optional)",
+  },
+  custom: {
+    tagline: "Custom OpenAI-compatible API",
     keyPlaceholder: "API key or local token...",
   },
 };
-
-const LOCAL_PRESETS = [
-  {
-    name: "Ollama Local",
-    baseUrl: "http://localhost:11434/v1",
-    apiKey: "ollama",
-    models: [
-      { id: "llava", name: "LLaVA Vision" },
-      { id: "llama3.2-vision", name: "Llama 3.2 Vision" },
-    ],
-  },
-  {
-    name: "LM Studio",
-    baseUrl: "http://localhost:1234/v1",
-    apiKey: "lm-studio",
-    models: [{ id: "default", name: "Active LM Studio Model" }],
-  },
-  {
-    name: "OpenRouter Gateway",
-    baseUrl: "https://openrouter.ai/api/v1",
-    apiKey: "",
-    models: [
-      { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash" },
-      { id: "anthropic/claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
-    ],
-  },
-  {
-    name: "AgentRouter Gateway",
-    baseUrl: "https://agentrouter.org/v1",
-    apiKey: "",
-    models: [
-      { id: "claude-opus-4-8", name: "Claude Opus 4.8" },
-      { id: "claude-opus-5", name: "Claude Opus 5" },
-      { id: "deepseek-v4-flash", name: "DeepSeek V4 Flash" },
-      { id: "glm-5.3", name: "GLM 5.3" },
-      { id: "gpt-5.6-sol", name: "GPT 5.6 Sol" },
-    ],
-  },
-];
 
 export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const [currentConfig, setCurrentConfig] = useState<ProviderConfig | null>(() => getProviderConfig());
@@ -179,17 +199,21 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         </DialogHeader>
 
         <Tabs defaultValue="provider" className="flex flex-col gap-4">
-          <TabsList className="grid w-full grid-cols-3">
-            <TabsTrigger value="provider" className="gap-2">
-              <HugeiconsIcon icon={FlashIcon} />
+          <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="provider" className="gap-1.5 text-xs sm:text-sm">
+              <HugeiconsIcon icon={FlashIcon} className="size-4" />
               <span>Provider</span>
             </TabsTrigger>
-            <TabsTrigger value="models" className="gap-2">
-              <HugeiconsIcon icon={CloudServerIcon} />
+            <TabsTrigger value="models" className="gap-1.5 text-xs sm:text-sm">
+              <HugeiconsIcon icon={CloudServerIcon} className="size-4" />
               <span>Models</span>
             </TabsTrigger>
-            <TabsTrigger value="usage" className="gap-2">
-              <HugeiconsIcon icon={Analytics01Icon} />
+            <TabsTrigger value="settings" className="gap-1.5 text-xs sm:text-sm">
+              <HugeiconsIcon icon={Settings01Icon} className="size-4" />
+              <span>Settings</span>
+            </TabsTrigger>
+            <TabsTrigger value="usage" className="gap-1.5 text-xs sm:text-sm">
+              <HugeiconsIcon icon={Analytics01Icon} className="size-4" />
               <span>Usage</span>
             </TabsTrigger>
           </TabsList>
@@ -209,6 +233,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             />
           </TabsContent>
 
+          <TabsContent value="settings" className="flex flex-col gap-4">
+            <GeneralSettingsTabContent />
+          </TabsContent>
+
           <TabsContent value="usage" className="flex flex-col gap-4">
             <UsageTabContent />
           </TabsContent>
@@ -226,24 +254,86 @@ function ProviderTabContent({
   const initial = getProviderConfig();
   const [providerType, setProviderType] = useState<ProviderType>(initial?.type || "openai");
   const [apiKey, setApiKey] = useState(initial?.apiKey || "");
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl || "");
+  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl || PROVIDER_INFOS[initial?.type || "openai"].defaultBaseUrl || "");
   const [showApiKey, setShowApiKey] = useState(false);
   const [customModels] = useState<CustomModel[]>(initial?.customModels || []);
 
+  const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifiedCount, setVerifiedCount] = useState<number | null>(() => getCachedModels().length || null);
   const meta = PROVIDER_METADATA[providerType];
 
-  const handleSelectProvider = (type: ProviderType) => {
+  const handleSelectProvider = async (type: ProviderType) => {
     setProviderType(type);
     const info = PROVIDER_INFOS[type];
-    if (type !== "custom") {
+    try {
+      const saved = await loadSavedProviderCredentialsFromDb(type);
+      if (saved) {
+        setApiKey(saved.apiKey || "");
+        setBaseUrl(saved.baseUrl || info.defaultBaseUrl || "");
+        return;
+      }
+    } catch {}
+
+    if (initial?.type === type) {
+      setApiKey(initial.apiKey || "");
+      setBaseUrl(initial.baseUrl || info.defaultBaseUrl || "");
+    } else {
+      setApiKey("");
       setBaseUrl(info.defaultBaseUrl || "");
     }
   };
 
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const saved = await loadSavedProviderCredentialsFromDb(providerType);
+        if (active && saved) {
+          if (saved.apiKey) setApiKey((prev) => prev || saved.apiKey);
+          if (saved.baseUrl) setBaseUrl((prev) => prev || saved.baseUrl || "");
+        }
+      } catch {}
+    })();
+    return () => {
+      active = false;
+    };
+  }, [providerType]);
+
+  const handleSaveCredentials = async () => {
+    if (!apiKey.trim() && providerType !== "ollama" && providerType !== "lmstudio") {
+      toast.error("Please enter an API key to save.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const creds = {
+        apiKey: apiKey.trim(),
+        baseUrl: baseUrl.trim() || PROVIDER_INFOS[providerType].defaultBaseUrl,
+      };
+      await saveProviderCredentialsToDb(providerType, creds);
+
+      const config: ProviderConfig = {
+        type: providerType,
+        apiKey: creds.apiKey,
+        baseUrl: creds.baseUrl,
+        customModels: providerType === "custom" ? customModels : undefined,
+      };
+
+      setProviderConfig(config);
+      onConfigSaved(config, getActiveModel());
+      toast.success("Credentials saved", {
+        description: `Saved to browser storage for ${PROVIDER_INFOS[providerType].name}.`,
+      });
+    } catch {
+      toast.error("Failed to save credentials.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const verifyAndSave = async () => {
-    if (!apiKey.trim()) {
+    if (!apiKey.trim() && providerType !== "ollama" && providerType !== "lmstudio") {
       toast.error("Please enter an API key.");
       return;
     }
@@ -284,6 +374,11 @@ function ProviderTabContent({
         customModels: providerType === "custom" ? customModels : undefined,
       };
 
+      await saveProviderCredentialsToDb(providerType, {
+        apiKey: apiKey.trim(),
+        baseUrl: baseUrl.trim() || PROVIDER_INFOS[providerType].defaultBaseUrl,
+      });
+
       setProviderConfig(config);
       setCachedModels(data.models);
       if (data.capabilities) {
@@ -309,39 +404,40 @@ function ProviderTabContent({
     }
   };
 
+  const defaultUrl = PROVIDER_INFOS[providerType].defaultBaseUrl;
+  const isCustomUrl = Boolean(defaultUrl) && baseUrl.trim() !== defaultUrl;
+
   return (
     <div className="flex flex-col gap-4">
-      {/* Provider Selection */}
-      <div className="flex flex-col gap-2">
-        <Label>Provider</Label>
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-          {(Object.keys(PROVIDER_INFOS) as ProviderType[]).map((type) => {
-            const info = PROVIDER_INFOS[type];
-            const isSelected = providerType === type;
-
-            return (
-              <Button
-                key={type}
-                type="button"
-                variant={isSelected ? "default" : "outline"}
-                className="h-auto flex-col items-start p-3 text-left"
-                onClick={() => handleSelectProvider(type)}
-              >
-                <div className="flex items-center justify-between w-full">
-                  <span className="font-semibold text-sm">{info.name}</span>
-                  {isSelected && <HugeiconsIcon icon={Tick02Icon} />}
-                </div>
-                <span
-                  className={`text-xs ${
-                    isSelected ? "text-primary-foreground/80" : "text-muted-foreground"
-                  }`}
-                >
-                  {PROVIDER_METADATA[type].tagline}
-                </span>
-              </Button>
-            );
-          })}
-        </div>
+      {/* Compact Provider Selection */}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="provider-select" className="text-xs font-medium">Provider</Label>
+        <Select
+          value={providerType}
+          onValueChange={(val) => {
+            if (val) void handleSelectProvider(val as ProviderType);
+          }}
+        >
+          <SelectTrigger id="provider-select" className="w-full">
+            <SelectValue placeholder="Select AI provider" />
+          </SelectTrigger>
+          <SelectContent className="max-h-72">
+            {(Object.keys(PROVIDER_INFOS) as ProviderType[]).map((type) => {
+              const info = PROVIDER_INFOS[type];
+              const m = PROVIDER_METADATA[type];
+              return (
+                <SelectItem key={type} value={type}>
+                  <span className="font-medium text-sm">{info.name}</span>
+                  {m?.tagline && (
+                    <span className="text-xs text-muted-foreground ml-2 hidden sm:inline">
+                      ({m.tagline})
+                    </span>
+                  )}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* Credentials Card */}
@@ -355,7 +451,12 @@ function ProviderTabContent({
               </CardDescription>
             </div>
             {meta.apiKeyUrl && (
-              <Button variant="link" size="sm" className="h-auto p-0" render={<a href={meta.apiKeyUrl} target="_blank" rel="noopener noreferrer" />}>
+              <Button
+                variant="link"
+                size="sm"
+                className="h-auto p-0 text-xs"
+                render={<a href={meta.apiKeyUrl} target="_blank" rel="noopener noreferrer" />}
+              >
                 Get API key
               </Button>
             )}
@@ -373,7 +474,7 @@ function ProviderTabContent({
                 placeholder={meta.keyPlaceholder}
                 autoComplete="off"
                 spellCheck={false}
-                className="pr-10 font-mono"
+                className="pr-10 font-mono text-xs"
               />
               <Button
                 type="button"
@@ -388,111 +489,72 @@ function ProviderTabContent({
             </div>
           </div>
 
-          {(providerType === "custom" || (Boolean(PROVIDER_INFOS[providerType].defaultBaseUrl) && baseUrl !== PROVIDER_INFOS[providerType].defaultBaseUrl)) && (
-            <div className="flex flex-col gap-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="base-url">Base URL</Label>
-                {providerType !== "custom" && (
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0 text-xs text-muted-foreground"
-                    onClick={() => setBaseUrl(PROVIDER_INFOS[providerType].defaultBaseUrl || "")}
-                  >
-                    Reset to default
-                  </Button>
-                )}
-              </div>
-              <Input
-                id="base-url"
-                value={baseUrl}
-                onChange={(e) => setBaseUrl(e.target.value)}
-                placeholder={PROVIDER_INFOS[providerType].defaultBaseUrl || "https://api.openai.com/v1"}
-                autoComplete="off"
-                spellCheck={false}
-                className="font-mono"
-              />
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="base-url">Base URL</Label>
+              {isCustomUrl && (
+                <Button
+                  type="button"
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0 text-xs text-muted-foreground"
+                  onClick={() => setBaseUrl(defaultUrl || "")}
+                >
+                  Reset to default
+                </Button>
+              )}
             </div>
-          )}
+            <Input
+              id="base-url"
+              value={baseUrl}
+              onChange={(e) => setBaseUrl(e.target.value)}
+              placeholder={defaultUrl || "https://api.openai.com/v1"}
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono text-xs"
+            />
+          </div>
 
           <div className="flex items-center justify-between pt-2">
             <span className="text-xs text-muted-foreground">
               {verifiedCount !== null && `${verifiedCount} models available`}
             </span>
-            <Button onClick={verifyAndSave} disabled={verifying} className="gap-2">
-              {verifying ? (
-                <>
-                  <HugeiconsIcon icon={Loading02Icon} className="animate-spin" />
-                  <span>Connecting...</span>
-                </>
-              ) : (
-                <>
-                  <HugeiconsIcon icon={CloudCheckIcon} />
-                  <span>Connect</span>
-                </>
-              )}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleSaveCredentials}
+                disabled={saving || (!apiKey.trim() && providerType !== "ollama" && providerType !== "lmstudio")}
+                className="gap-1.5"
+              >
+                <HugeiconsIcon icon={Database01Icon} className="size-3.5" />
+                <span>{saving ? "Saving…" : "Save"}</span>
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={verifyAndSave}
+                disabled={verifying}
+                className="gap-1.5"
+              >
+                {verifying ? (
+                  <>
+                    <HugeiconsIcon icon={Loading02Icon} className="size-3.5 animate-spin" />
+                    <span>Connecting...</span>
+                  </>
+                ) : (
+                  <>
+                    <HugeiconsIcon icon={CloudCheckIcon} className="size-3.5" />
+                    <span>Connect</span>
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </CardContent>
       </Card>
-
-      <WebSearchCard />
     </div>
-  );
-}
-
-function WebSearchCard() {
-  const [enabled, setEnabled] = useState<boolean>(() => getWebSearchEnabled());
-
-  const choose = (next: boolean) => {
-    setEnabled(next);
-    setWebSearchEnabled(next);
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Internet Search</CardTitle>
-        <CardDescription>
-          Lets the agent search the web, papers, GitHub, and market data before it draws. Reading a URL you paste stays
-          available either way. Results are treated as untrusted data and cited by source.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-2">
-        <div className="grid grid-cols-2 gap-2">
-          {[
-            { value: true, label: "Enabled", hint: "Search tools offered every step" },
-            { value: false, label: "Disabled", hint: "Answers from the model only" },
-          ].map((opt) => (
-            <Button
-              key={String(opt.value)}
-              type="button"
-              aria-pressed={enabled === opt.value}
-              variant={enabled === opt.value ? "default" : "outline"}
-              className="h-auto flex-col items-start p-3 text-left"
-              onClick={() => choose(opt.value)}
-            >
-              <div className="flex items-center justify-between w-full">
-                <span className="font-semibold text-sm">{opt.label}</span>
-                {enabled === opt.value && <HugeiconsIcon icon={Tick02Icon} />}
-              </div>
-              <span
-                className={`text-xs ${
-                  enabled === opt.value ? "text-primary-foreground/80" : "text-muted-foreground"
-                }`}
-              >
-                {opt.hint}
-              </span>
-            </Button>
-          ))}
-        </div>
-        <p className="text-xs text-muted-foreground">
-          Search and page reading need a TINYFISH_API_KEY on the server; without it the agent falls back to a keyless
-          web search and tells you what it could not reach.
-        </p>
-      </CardContent>
-    </Card>
   );
 }
 
@@ -501,12 +563,9 @@ function ModelsTabContent({
 }: {
   onModelChanged: (model: string) => void;
 }) {
-  const initial = getProviderConfig();
-  const [cachedModels, setModels] = useState<string[]>(() => getCachedModels());
+  const [cachedModels] = useState<string[]>(() => getCachedModels());
   const [activeModel, setActive] = useState<string | null>(() => getActiveModel());
-  const [customModels, setCustomModels] = useState<CustomModel[]>(initial?.customModels || []);
-  const [newModelId, setNewModelId] = useState("");
-  const [newModelName, setNewModelName] = useState("");
+  const config = getProviderConfig();
 
   const handleSelectModel = (val: string | null) => {
     if (!val) return;
@@ -516,189 +575,131 @@ function ModelsTabContent({
     toast.success(`Active model switched to ${val}`);
   };
 
-  const handleAddCustomModel = () => {
-    if (!newModelId.trim()) {
-      toast.error("Please enter a model ID.");
-      return;
-    }
-    const id = newModelId.trim();
-    const name = newModelName.trim() || id;
-    if (customModels.some((m) => m.id === id)) {
-      toast.error("Model ID already exists.");
-      return;
-    }
-    const updated = [...customModels, { id, name }];
-    setCustomModels(updated);
-    setNewModelId("");
-    setNewModelName("");
+  const selectedCaps = activeModel ? getModelCapabilitiesCached(activeModel) : null;
 
-    const currentCfg = getProviderConfig();
-    if (currentCfg) {
-      setProviderConfig({ ...currentCfg, customModels: updated });
-    }
+  return (
+    <div className="flex flex-col gap-4">
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Active Model</CardTitle>
+              <CardDescription>
+                Select the model used for canvas perception and AI commands.
+              </CardDescription>
+            </div>
+            {config?.type && (
+              <Badge variant="secondary" className="font-mono text-xs capitalize">
+                {PROVIDER_INFOS[config.type]?.name || config.type}
+              </Badge>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          {cachedModels.length > 0 ? (
+            <>
+              <Select value={activeModel || cachedModels[0]} onValueChange={handleSelectModel}>
+                <SelectTrigger className="w-full font-mono text-xs">
+                  <SelectValue placeholder="Select model" />
+                </SelectTrigger>
+                <SelectContent className="max-h-64">
+                  {cachedModels.map((m) => (
+                    <SelectItem key={m} value={m} className="font-mono text-xs">
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
 
-    if (!cachedModels.includes(id)) {
-      const newCache = [id, ...cachedModels];
-      setCachedModels(newCache);
-      setModels(newCache);
-      handleSelectModel(id);
-    }
-    toast.success(`Added ${name}`);
+              {selectedCaps && (
+                <div className="flex items-center gap-2 pt-1">
+                  <Badge
+                    variant={selectedCaps.vision ? "default" : "secondary"}
+                    className="text-[11px]"
+                  >
+                    {selectedCaps.vision ? "Vision: Supported" : "Vision: Unsupported"}
+                  </Badge>
+                  <Badge
+                    variant={selectedCaps.reasoning ? "outline" : "secondary"}
+                    className="text-[11px]"
+                  >
+                    {selectedCaps.reasoning ? "Reasoning: Supported" : "Standard"}
+                  </Badge>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 border border-dashed rounded-lg text-center gap-1.5">
+              <span className="text-sm font-medium">No models available</span>
+              <span className="text-xs text-muted-foreground">
+                Connect your AI provider in the Provider tab to discover and select vision models.
+              </span>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
+function GeneralSettingsTabContent() {
+  const [autoSave, setAutoSave] = useState<boolean>(() => getAutosaveEnabled());
+  const [webSearch, setWebSearch] = useState<boolean>(() => getWebSearchEnabled());
+
+  const handleToggleAutoSave = (checked: boolean) => {
+    setAutoSave(checked);
+    setAutosaveEnabled(checked);
+    toast.success(checked ? "Auto save enabled" : "Auto save disabled (delayed saves off)");
   };
 
-  const handleRemoveCustomModel = (id: string) => {
-    const updated = customModels.filter((m) => m.id !== id);
-    setCustomModels(updated);
-
-    const currentCfg = getProviderConfig();
-    if (currentCfg) {
-      setProviderConfig({ ...currentCfg, customModels: updated });
-    }
-
-    if (activeModel === id) {
-      const next = cachedModels.find((m) => m !== id) || null;
-      setActiveModel(next);
-      setActive(next);
-      if (next) onModelChanged(next);
-    }
-  };
-
-  const handleApplyPreset = (preset: (typeof LOCAL_PRESETS)[0]) => {
-    const currentCfg = getProviderConfig();
-    const updatedCfg: ProviderConfig = {
-      type: "custom",
-      baseUrl: preset.baseUrl,
-      apiKey: currentCfg?.apiKey || preset.apiKey || "local",
-      customModels: preset.models,
-    };
-    setProviderConfig(updatedCfg);
-    setCustomModels(preset.models);
-    const modelIds = preset.models.map((m) => m.id);
-    setCachedModels(modelIds);
-    setModels(modelIds);
-    if (modelIds[0]) {
-      handleSelectModel(modelIds[0]);
-    }
-    toast.success(`Applied ${preset.name}`);
+  const handleToggleWebSearch = (checked: boolean) => {
+    setWebSearch(checked);
+    setWebSearchEnabled(checked);
+    toast.success(checked ? "Internet search enabled" : "Internet search disabled");
   };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Active Model */}
       <Card>
-        <CardHeader>
-          <CardTitle>Active Model</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Canvas & AI Preferences</CardTitle>
           <CardDescription>
-            Select the model used for canvas perception and AI commands.
+            Configure whiteboard persistence and AI perception tools.
           </CardDescription>
         </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {cachedModels.length > 0 ? (
-            <Select value={activeModel || cachedModels[0]} onValueChange={handleSelectModel}>
-              <SelectTrigger className="w-full font-mono text-xs">
-                <SelectValue placeholder="Select model" />
-              </SelectTrigger>
-              <SelectContent>
-                {cachedModels.map((m) => (
-                  <SelectItem key={m} value={m} className="font-mono text-xs">
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div className="flex items-center justify-center py-6 border border-dashed rounded-lg text-sm text-muted-foreground">
-              No models available. Connect a provider first.
+        <CardContent className="flex flex-col divide-y divide-border/60">
+          {/* Auto Save Row */}
+          <div className="flex items-center justify-between py-3 first:pt-0">
+            <div className="flex flex-col gap-0.5 pr-4">
+              <Label htmlFor="toggle-autosave" className="text-sm font-medium cursor-pointer">
+                Auto Save
+              </Label>
+              <span className="text-xs text-muted-foreground">
+                Automatically save canvas strokes, objects, and widgets locally with debounced delay.
+              </span>
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Local & Gateway Presets */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Local & Gateway Presets</CardTitle>
-          <CardDescription>
-            Quickly configure local instances or gateway routers.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2">
-            {LOCAL_PRESETS.map((preset) => (
-              <Button
-                key={preset.name}
-                type="button"
-                variant="outline"
-                className="h-auto flex-col items-start p-3 text-left"
-                onClick={() => handleApplyPreset(preset)}
-              >
-                <span className="font-medium text-xs">{preset.name}</span>
-                <span className="font-mono text-[10px] text-muted-foreground truncate w-full">
-                  {preset.baseUrl}
-                </span>
-              </Button>
-            ))}
+            <Switch
+              id="toggle-autosave"
+              checked={autoSave}
+              onCheckedChange={handleToggleAutoSave}
+            />
           </div>
-        </CardContent>
-      </Card>
 
-      {/* Custom Models */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Custom Models</CardTitle>
-          <CardDescription>
-            Add manual model IDs for local or self-hosted endpoints.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-3">
-          {customModels.length > 0 && (
-            <div className="flex flex-col gap-1 max-h-36 overflow-y-auto">
-              {customModels.map((m) => (
-                <div
-                  key={m.id}
-                  className="flex items-center justify-between py-2 px-3 rounded-lg border text-xs"
-                >
-                  <div className="flex flex-col min-w-0">
-                    <span className="font-medium truncate">{m.name}</span>
-                    <span className="font-mono text-[10px] text-muted-foreground truncate">{m.id}</span>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon-sm"
-                    onClick={() => handleRemoveCustomModel(m.id)}
-                    className="text-muted-foreground hover:text-destructive"
-                  >
-                    <HugeiconsIcon icon={Delete02Icon} />
-                    <span className="sr-only">Remove model</span>
-                  </Button>
-                </div>
-              ))}
+          {/* Internet Search Row */}
+          <div className="flex items-center justify-between py-3 last:pb-0">
+            <div className="flex flex-col gap-0.5 pr-4">
+              <Label htmlFor="toggle-websearch" className="text-sm font-medium cursor-pointer">
+                Internet Search
+              </Label>
+              <span className="text-xs text-muted-foreground">
+                Allow the AI agent to search the web, papers, GitHub, and market data before drawing.
+              </span>
             </div>
-          )}
-
-          <div className="flex gap-2">
-            <Input
-              value={newModelId}
-              onChange={(e) => setNewModelId(e.target.value)}
-              placeholder="Model ID (e.g. qwen2.5-vl)"
-              className="font-mono text-xs"
+            <Switch
+              id="toggle-websearch"
+              checked={webSearch}
+              onCheckedChange={handleToggleWebSearch}
             />
-            <Input
-              value={newModelName}
-              onChange={(e) => setNewModelName(e.target.value)}
-              placeholder="Label"
-              className="text-xs"
-            />
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleAddCustomModel}
-              className="gap-1.5 shrink-0"
-            >
-              <HugeiconsIcon icon={Add01Icon} />
-              <span>Add</span>
-            </Button>
           </div>
         </CardContent>
       </Card>

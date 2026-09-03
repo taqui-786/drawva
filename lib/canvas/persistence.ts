@@ -217,6 +217,17 @@ export async function renderObject(
   }
 }
 
+import { getAutosaveEnabled, setAutosaveEnabled } from "@/lib/ai/provider";
+export { getAutosaveEnabled, setAutosaveEnabled };
+
+export interface SavedProviderCredentials {
+  apiKey: string;
+  baseUrl?: string;
+  updatedAt?: number;
+}
+
+const PROVIDER_CREDENTIALS_KEY = "saved_provider_credentials";
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 2);
@@ -227,6 +238,118 @@ function openDb(): Promise<IDBDatabase> {
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
   });
+}
+
+export async function saveProviderCredentialsToDb(
+  providerType: string,
+  credentials: SavedProviderCredentials
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  // Mirror to localStorage
+  try {
+    const raw = window.localStorage.getItem(PROVIDER_CREDENTIALS_KEY);
+    const all = raw ? (JSON.parse(raw) as Record<string, SavedProviderCredentials>) : {};
+    all[providerType] = { ...credentials, updatedAt: Date.now() };
+    window.localStorage.setItem(PROVIDER_CREDENTIALS_KEY, JSON.stringify(all));
+  } catch {}
+
+  if (!window.indexedDB) return;
+  try {
+    const db = await openDb();
+    const existing = await new Promise<Record<string, SavedProviderCredentials>>((resolve) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(PROVIDER_CREDENTIALS_KEY);
+      req.onsuccess = () => resolve((req.result as Record<string, SavedProviderCredentials>) || {});
+      req.onerror = () => resolve({});
+    });
+
+    const updated = {
+      ...existing,
+      [providerType]: {
+        ...credentials,
+        updatedAt: Date.now(),
+      },
+    };
+
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(updated, PROVIDER_CREDENTIALS_KEY);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+export async function loadSavedProviderCredentialsFromDb(
+  providerType: string
+): Promise<SavedProviderCredentials | null> {
+  if (typeof window === "undefined") return null;
+
+  if (window.indexedDB) {
+    try {
+      const db = await openDb();
+      const res = await new Promise<SavedProviderCredentials | null>((resolve) => {
+        const tx = db.transaction(STORE, "readonly");
+        const req = tx.objectStore(STORE).get(PROVIDER_CREDENTIALS_KEY);
+        req.onsuccess = () => {
+          db.close();
+          const all = (req.result as Record<string, SavedProviderCredentials>) || {};
+          resolve(all[providerType] || null);
+        };
+        req.onerror = () => {
+          db.close();
+          resolve(null);
+        };
+      });
+      if (res) return res;
+    } catch {}
+  }
+
+  // Fallback to localStorage
+  try {
+    const raw = window.localStorage.getItem(PROVIDER_CREDENTIALS_KEY);
+    if (!raw) return null;
+    const all = JSON.parse(raw) as Record<string, SavedProviderCredentials>;
+    return all[providerType] || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function loadAllSavedProviderCredentialsFromDb(): Promise<
+  Record<string, SavedProviderCredentials>
+> {
+  if (typeof window === "undefined") return {};
+
+  if (window.indexedDB) {
+    try {
+      const db = await openDb();
+      const res = await new Promise<Record<string, SavedProviderCredentials>>((resolve) => {
+        const tx = db.transaction(STORE, "readonly");
+        const req = tx.objectStore(STORE).get(PROVIDER_CREDENTIALS_KEY);
+        req.onsuccess = () => {
+          db.close();
+          resolve((req.result as Record<string, SavedProviderCredentials>) || {});
+        };
+        req.onerror = () => {
+          db.close();
+          resolve({});
+        };
+      });
+      if (res && Object.keys(res).length > 0) return res;
+    } catch {}
+  }
+
+  try {
+    const raw = window.localStorage.getItem(PROVIDER_CREDENTIALS_KEY);
+    if (!raw) return {};
+    return (JSON.parse(raw) as Record<string, SavedProviderCredentials>) || {};
+  } catch {
+    return {};
+  }
 }
 
 export async function saveAutosave(snapshot: ProjectSnapshot): Promise<void> {

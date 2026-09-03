@@ -3,7 +3,7 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createGroq } from "@ai-sdk/groq";
 import type { streamText } from "ai";
-import type { ProviderType, ReasoningEffort } from "./provider";
+import { type ProviderType, type ReasoningEffort, PROVIDER_INFOS } from "./provider";
 
 export const MAX_RETRIES = 3;
 
@@ -207,10 +207,13 @@ export function createChatModel({
 
     case "custom":
     default: {
-      if (!cleanBaseUrl) {
-        throw new Error("Missing baseUrl for custom provider.");
+      const effectiveBaseUrl =
+        cleanBaseUrl || (providerType ? PROVIDER_INFOS[providerType]?.defaultBaseUrl : undefined);
+      if (!effectiveBaseUrl) {
+        throw new Error(`Missing baseUrl for provider ${providerType || "custom"}.`);
       }
-      const isAgentRouter = cleanBaseUrl.includes("agentrouter.org");
+      const isAgentRouter = effectiveBaseUrl.includes("agentrouter.org");
+      const isOpenRouter = effectiveBaseUrl.includes("openrouter.ai") || providerType === "openrouter";
 
       const customFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
         const headers = new Headers(init?.headers);
@@ -223,6 +226,10 @@ export function createChatModel({
           headers.set("X-Stainless-Arch", "arm64");
           headers.set("X-Stainless-Runtime", "node");
           headers.set("X-Stainless-Runtime-Version", "v20.10.0");
+        }
+        if (isOpenRouter) {
+          headers.set("HTTP-Referer", "https://drawva.app");
+          headers.set("X-Title", "Drawva");
         }
         const res = await (timedFetch ?? fetch)(input, { ...init, headers });
         const ctype = res.headers.get("content-type") || "";
@@ -260,7 +267,7 @@ export function createChatModel({
 
       const custom = createOpenAI({
         apiKey,
-        baseURL: cleanBaseUrl,
+        baseURL: effectiveBaseUrl,
         fetch: customFetch,
       });
 

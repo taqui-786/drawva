@@ -20,7 +20,7 @@ import { hasTinyfishKey } from "@/lib/ai/webTools";
 import { getEnabledPluginDescriptors, getPluginMetadataList } from "@/lib/plugins/registry";
 import { requireSession } from "@/lib/api-guard";
 import { recordAiUsage } from "@/lib/actions/usage";
-import type { ProviderType, ReasoningEffort } from "@/lib/ai/provider";
+import { type ProviderType, type ReasoningEffort, PROVIDER_INFOS } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -76,7 +76,11 @@ export async function POST(req: Request) {
   const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   const modelId = typeof body.model === "string" ? body.model.trim() : "";
-  const baseUrl = typeof body.baseUrl === "string" ? body.baseUrl.trim() : "";
+  const info = PROVIDER_INFOS[providerType];
+  const baseUrl =
+    typeof body.baseUrl === "string" && body.baseUrl.trim()
+      ? body.baseUrl.trim()
+      : info?.defaultBaseUrl || "";
   if (!apiKey || !modelId) return json({ error: "Missing API key or model." }, 400);
   if (providerType === "custom" && !baseUrl) return json({ error: "Custom provider requires a Base URL." }, 400);
 
