@@ -31,7 +31,7 @@ import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { unionRect } from "@/lib/canvas/engine";
-import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles, computeSnapshotHash } from "@/lib/canvas/persistence";
+import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles, computeSnapshotHash, loadAgentLogs, clearAgentLogs } from "@/lib/canvas/persistence";
 import {
   CloudSyncEngine,
   fetchCloudCanvas,
@@ -39,6 +39,7 @@ import {
 } from "@/lib/canvas/cloudSync";
 import { useSession } from "@/lib/auth-client";
 import { BoardHistory } from "@/lib/canvas/history";
+import { boardFingerprint } from "@/lib/canvas/fingerprint";
 import { computeTidyMoves } from "@/lib/canvas/tidy";
 import { resizeWidgetGeometry } from "@/lib/canvas/widgetGeometry";
 import type { AiLogEntry } from "@/lib/ai/types";
@@ -299,7 +300,16 @@ export function CanvasApp() {
   }, [addObject, mergeObjectToInk, buildElementData]);
 
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const boardRevisionRef = useRef(0);
+  // Random epoch seed: a reload must never collide with revision numbers
+  // referenced by the persisted agent conversation (stale refs then conflict
+  // loudly instead of silently passing).
+  const boardRevisionRef = useRef(Math.floor(Math.random() * 1e9));
+  // Raster-mutation counter. The revision counter cannot tell "ink changed"
+  // from "a handler fired"; this one only advances on real tile writes, so the
+  // board fingerprint can detect ink edits without hashing every tile bitmap.
+  const inkEpochRef = useRef(0);
+  /** caller frame → bump count, cumulative for the session. See bumpRevision(). */
+  const revisionAuditRef = useRef(new Map<string, number>());
   const conductorRef = useRef<Conductor | null>(null);
   const [agentRunning, setAgentRunning] = useState(false);
 
@@ -348,6 +358,19 @@ export function CanvasApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
+  // Reload durable (redacted) agent traces from IndexedDB so debugging
+  // survives reloads; fresh turns from this session unshift on top.
+  useEffect(() => {
+    let cancelled = false;
+    void loadAgentLogs().then((saved) => {
+      if (!cancelled && saved && saved.length > 0) {
+        setLogs((prev) => (prev.length > 0 ? [...saved, ...prev].slice(0, 20) : saved.slice(0, 20)));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [selectedElement, setSelectedElement] = useState<ElementGeometryData | null>(null);
   const [tickerState, setTickerState] = useState<GenerationTickerState>({
@@ -552,6 +575,18 @@ export function CanvasApp() {
           messageId: prev.messageId + 1,
         };
       });
+    } else if (e.kind === "compact") {
+      setTickerState((prev) => ({
+        status: "running",
+        currentMessage: "Compacting context…",
+        messageId: prev.messageId + 1,
+      }));
+    } else if (e.kind === "compact_failed") {
+      setTickerState((prev) => ({
+        status: "running",
+        currentMessage: `Context compaction failed — history kept intact (${e.message.slice(0, 80)})`,
+        messageId: prev.messageId + 1,
+      }));
     } else if (e.kind === "log") {
       setLogs((prev) => [e.entry, ...prev.slice(0, 19)]);
     } else if (e.kind === "turn_end") {
@@ -1063,6 +1098,16 @@ export function CanvasApp() {
 
   function bumpRevision() {
     boardRevisionRef.current += 1;
+    // Attribution for the revision counter. Static reading of this file never
+    // explained the +8/+17 bursts that appear between two agent steps with no
+    // user input, so every bump tallies its caller frame; the turn log carries
+    // the breakdown as `revisionBumps`.
+    try {
+      const frames = (new Error().stack ?? "").split("\n").slice(1);
+      const caller = frames.find((f) => !f.includes("bumpRevision")) ?? "unknown";
+      const key = caller.trim().replace(/^at\s+/, "").slice(0, 120);
+      revisionAuditRef.current.set(key, (revisionAuditRef.current.get(key) ?? 0) + 1);
+    } catch {}
   }
 
   const isCanvasBusy = useCallback((): boolean => {
@@ -1115,6 +1160,8 @@ export function CanvasApp() {
     if (!h || !h.canUndo) return;
     await h.undo();
     bumpRevision();
+    // Undo/redo restore tile bitmaps directly, bypassing the tile write hook.
+    inkEpochRef.current += 1;
     syncHistoryButtons();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
@@ -1129,6 +1176,7 @@ export function CanvasApp() {
     if (!h || !h.canRedo) return;
     await h.redo();
     bumpRevision();
+    inkEpochRef.current += 1;
     syncHistoryButtons();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
@@ -1213,11 +1261,15 @@ export function CanvasApp() {
           setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
         },
         onDragEnd: (id) => {
+          // pointerup/pointercancel on the drag bar fires even when no drag was
+          // in flight; bumping the revision there rejects the agent's next
+          // mutation for a change that never happened.
+          const wasDragging = widgetDrag.current?.id === id;
           widgetDrag.current = null;
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
           setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
-          afterBoardChangeRef.current();
+          if (wasDragging) afterBoardChangeRef.current();
         },
         onResizeStart: (id, mode, e) => {
           const item = wm.get(id);
@@ -1244,11 +1296,12 @@ export function CanvasApp() {
           setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
         },
         onResizeEnd: (id) => {
+          const wasResizing = widgetResize.current?.id === id;
           widgetResize.current = null;
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
           setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
-          afterBoardChangeRef.current();
+          if (wasResizing) afterBoardChangeRef.current();
         },
         onRemove: (id) => {
           history.current?.recordWidgets();
@@ -1305,11 +1358,12 @@ export function CanvasApp() {
           setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
         },
         onDragEnd: (id) => {
+          const wasDragging = objectDrag.current?.id === id;
           objectDrag.current = null;
           const item = om.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
           setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
-          afterBoardChangeRef.current();
+          if (wasDragging) afterBoardChangeRef.current();
         },
         onResizeStart: (id, mode, e) => {
           objectResize.current = { id, mode, last: { x: e.clientX, y: e.clientY } };
@@ -1332,11 +1386,12 @@ export function CanvasApp() {
           setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
         },
         onResizeEnd: (id) => {
+          const wasResizing = objectResize.current?.id === id;
           objectResize.current = null;
           const item = om.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_RESIZE", id, x: item.x, y: item.y, w: item.w, h: item.h });
           setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
-          afterBoardChangeRef.current();
+          if (wasResizing) afterBoardChangeRef.current();
         },
         onRemove: (id) => {
           history.current?.recordObjects();
@@ -1365,7 +1420,10 @@ export function CanvasApp() {
     const boardHistory = new BoardHistory();
     boardHistory.bind(engine, wm, om);
     history.current = boardHistory;
-    engine.setTileWriteHook((tx, ty) => boardHistory.recordTileBefore(tx, ty));
+    engine.setTileWriteHook((tx, ty) => {
+      inkEpochRef.current += 1;
+      boardHistory.recordTileBefore(tx, ty);
+    });
 
     tm.setPicker({
       pick: (w) => {
@@ -1742,6 +1800,9 @@ export function CanvasApp() {
       camera: engine.camera,
       provider: () => getProviderConfig(),
       getRevision: () => boardRevisionRef.current,
+      getFingerprint: () =>
+        boardFingerprint(engine, widgets.current, objects.current, inkEpochRef.current),
+      getRevisionAudit: () => Object.fromEntries(revisionAuditRef.current),
       onEvent: (e) => handleConductorEventRef.current(e),
       afterBoardChange: () => afterBoardChangeRef.current(),
       getInkBox: () => inkBoxRef.current,
@@ -2903,7 +2964,10 @@ export function CanvasApp() {
         onOpenChange={setLogsOpen}
         logs={logs}
         log={logs[0] || null}
-        onClearLogs={() => setLogs([])}
+        onClearLogs={() => {
+          setLogs([]);
+          void clearAgentLogs();
+        }}
       />
       <ConnectDialog
         open={connectOpen}

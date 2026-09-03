@@ -7,6 +7,7 @@ import { renderFormula } from "./formulas";
 import { plotCommand } from "./plotter";
 import { renderWidgetToContext } from "./atlas";
 import { renderAnimationScene } from "./animation";
+import type { AiLogEntry } from "@/lib/ai/types";
 
 export interface ProjectSnapshot {
   version: 1;
@@ -294,6 +295,102 @@ export async function clearAgentSession(canvasId?: string): Promise<void> {
       tx.onerror = () => reject(tx.error);
     });
   } catch {}
+}
+
+const AGENT_LOGS_KEY = "agentLogs";
+const AGENT_LOGS_MAX = 50;
+
+export async function saveAgentLog(entry: AiLogEntry): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+  try {
+    const existing = (await loadAgentLogs()) ?? [];
+    const next = [entry, ...existing].slice(0, AGENT_LOGS_MAX);
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).put(next, AGENT_LOGS_KEY);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+export async function loadAgentLogs(): Promise<AiLogEntry[] | null> {
+  if (typeof window === "undefined" || !window.indexedDB) return null;
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readonly");
+      const req = tx.objectStore(STORE).get(AGENT_LOGS_KEY);
+      req.onsuccess = () => {
+        db.close();
+        resolve(Array.isArray(req.result) ? (req.result as AiLogEntry[]) : null);
+      };
+      req.onerror = () => reject(req.error);
+    });
+  } catch {
+    return null;
+  }
+}
+
+export async function clearAgentLogs(): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+  try {
+    const db = await openDb();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(AGENT_LOGS_KEY);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+const TRACE_MAX_STRING = 4000;
+
+/** Redact a log entry for durable storage: strip data URLs, clip long strings. */
+export function redactLogEntry(entry: AiLogEntry): AiLogEntry {
+  return {
+    ...entry,
+    atlasImage: entry.atlasImage ? "[image omitted]" : "",
+    userPromptText: clipTraceString(entry.userPromptText),
+    systemPrompt: clipTraceString(entry.systemPrompt),
+    steps: entry.steps?.map((s) => ({
+      ...s,
+      args: redactTraceValue(s.args),
+      result: redactTraceValue(s.result),
+    })),
+    response: entry.response
+      ? (redactTraceValue(entry.response) as AiLogEntry["response"])
+      : undefined,
+  };
+}
+
+function clipTraceString(value: string): string {
+  return value.length > TRACE_MAX_STRING ? `${value.slice(0, TRACE_MAX_STRING)}…[clipped]` : value;
+}
+
+function redactTraceValue(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") {
+    if (value.startsWith("data:")) return "[data-url omitted]";
+    return clipTraceString(value);
+  }
+  if (depth > 6) return "[deep]";
+  if (Array.isArray(value)) return value.slice(0, 50).map((v) => redactTraceValue(v, depth + 1));
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>).slice(0, 50)) {
+      out[k] = redactTraceValue(v, depth + 1);
+    }
+    return out;
+  }
+  return value;
 }
 
 export async function loadAutosave(): Promise<ProjectSnapshot | null> {

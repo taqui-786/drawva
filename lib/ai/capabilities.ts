@@ -197,3 +197,36 @@ export function getModelCapabilities(
     status: vision ? "verified_vision" : "unknown",
   };
 }
+
+// ponytail: static family table, good enough for compaction triggers; swap for
+// provider `context_length` metadata if small models start over/under-compacting.
+const CONTEXT_WINDOWS: Array<[RegExp, number]> = [
+  [/^gpt-5/, 400_000],
+  [/^gpt-4\.1/, 1_000_000],
+  [/^o[134]/, 200_000],
+  [/gpt-4o|gpt-4-turbo|chatgpt/, 128_000],
+  [/claude/, 200_000],
+  [/gemini-1\.5-pro/, 1_000_000],
+  [/gemini/, 1_000_000],
+  [/deepseek/, 64_000],
+  [/llama-3\.[13]|qwq|mistral|mixtral|kimi|minimax/i, 128_000],
+  [/grok/, 131_000],
+];
+
+const DEFAULT_CONTEXT_WINDOW = 128_000;
+
+export function contextWindowForModel(modelId: string): number {
+  const id = String(modelId || "").toLowerCase();
+  for (const [pattern, window] of CONTEXT_WINDOWS) {
+    if (pattern.test(id)) return window;
+  }
+  return DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * Token pressure that triggers history compaction: 62.5% of the model's
+ * context window (mirrors the 100k/160k policy of comparable agent loops).
+ */
+export function compactionTriggerTokens(modelId: string): number {
+  return Math.max(4_000, Math.round(contextWindowForModel(modelId) * 0.625));
+}

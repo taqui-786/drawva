@@ -43,11 +43,16 @@ export class DraftManager {
 
   async accept(engine: CanvasEngine): Promise<number> {
     let applied = 0;
-    for (const c of this.pending) {
-      const ok = await this.apply(engine, c);
-      if (ok) applied++;
+    try {
+      for (const c of this.pending) {
+        const ok = await this.apply(engine, c);
+        if (ok) applied++;
+      }
+    } finally {
+      // Always clear pending: a throwing renderer must never wedge
+      // hasPending → isCanvasBusy → autosave. The caller rolls the board back.
+      this.pending = [];
     }
-    this.pending = [];
     return applied;
   }
 

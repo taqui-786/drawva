@@ -472,7 +472,23 @@ function inferTextPlacement(placement: string, text: string): string {
   return "";
 }
 
-function placeContent(
+/**
+ * Where a box of w×h would land given the model's placement intent and the
+ * live validation context — the same engine canvas_apply uses, exported for
+ * read-only pre-flight (plannedWidget).
+ */
+export function placeContent(
+  placement: string,
+  sample: string,
+  w: number,
+  h: number,
+  ctx: CommandValidationContext,
+  explicitCoord?: { x?: unknown; y?: unknown; targetBox?: unknown }
+): { x: number; y: number } {
+  return placeContentImpl(placement, sample, w, h, ctx, explicitCoord);
+}
+
+function placeContentImpl(
   placement: string,
   sample: string,
   w: number,
@@ -1248,7 +1264,7 @@ export function validateCommand(
       const viewportW = ctx.visibleRect?.w ?? 2000;
       const maxWidth = textColumnWidth(c.maxWidth ?? c.width ?? c.w, fontSize, ctx.scale, viewportW);
       const content = textContentBox(text, fontSize, lineHeight, maxWidth);
-      const near = placeContent(placement, text, content.w, content.h, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
+      const near = placeContentImpl(placement, text, content.w, content.h, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
       let x = near.x;
       let y = near.y;
 
@@ -1274,7 +1290,7 @@ export function validateCommand(
       const estimatedWidth = Math.min(5000, Math.max(fontSize * 2, latex.length * fontSize * 0.72));
 
       const formulaH = Math.round(fontSize * 1.8);
-      const near = placeContent(placement, latex, estimatedWidth, formulaH, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
+      const near = placeContentImpl(placement, latex, estimatedWidth, formulaH, ctx, { x: c.x, y: c.y, targetBox: c.targetBox });
       let x = near.x;
       let y = near.y;
 
@@ -1530,12 +1546,18 @@ export function validateCommand(
     }
     case "draw": {
       const pts = Array.isArray(c.points) ? (c.points as unknown[]) : [];
+      // When the command carries an origin (x,y), points are local to it —
+      // same convention expandDrawObjects uses for salvaged objects. Without
+      // an origin, points are already global.
+      const originX = isFiniteNum(c.x) ? Number(c.x) : 0;
+      const originY = isFiniteNum(c.y) ? Number(c.y) : 0;
+      const hasOrigin = isFiniteNum(c.x) || isFiniteNum(c.y);
       const points: DrawPoint[] = [];
       for (const p of pts) {
         const x = isPointPair(p) ? p[0] : (p as { x: number })?.x;
         const y = isPointPair(p) ? p[1] : (p as { y: number })?.y;
         if (!isFiniteNum(x) || !isFiniteNum(y)) return fail("draw.bad");
-        points.push({ x, y });
+        points.push(hasOrigin ? { x: originX + Number(x), y: originY + Number(y) } : { x, y });
       }
       if (points.length < 2 || points.length > 600 || !isFiniteNum(c.size, 1, 1600)) {
         return fail("draw.bad");

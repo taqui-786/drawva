@@ -4,6 +4,7 @@ import { z } from "zod";
 import { createChatModel, isFatalAuthError, isRateLimitError } from "@/lib/ai/model";
 import { MAX_BODY_BYTES, AI_TIMEOUT_MS } from "@/lib/ai/prompts";
 import { extractJsonDecision } from "@/lib/ai/agentTools";
+import { requireSession } from "@/lib/api-guard";
 import { recordAiUsage } from "@/lib/actions/usage";
 import type { ProviderType } from "@/lib/ai/provider";
 
@@ -174,6 +175,9 @@ export async function POST(req: Request) {
     return json({ error: "Failed to read body" }, 400);
   }
   if (raw.length > MAX_BODY_BYTES) return json({ error: "Request too large" }, 400);
+
+  const guard = await requireSession(req);
+  if (guard instanceof NextResponse) return guard;
 
   let body: RefineRequest;
   try {

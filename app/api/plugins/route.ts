@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 import { getEnabledPluginDescriptors, getPluginMetadataList } from "@/lib/plugins/registry";
+import { requireSession } from "@/lib/api-guard";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const guard = await requireSession(req);
+  if (guard instanceof NextResponse) return guard;
   try {
     const docId = new URL(req.url).searchParams.get("doc");
     if (docId) {

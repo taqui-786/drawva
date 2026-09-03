@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { inspectModelCapabilities, type ModelCapabilityResult } from "@/lib/ai/modelRegistry";
+import { requireSession } from "@/lib/api-guard";
 
 export const runtime = "nodejs";
 
@@ -20,6 +21,9 @@ export async function POST(req: Request) {
   if (raw.length > MAX_BODY_BYTES) {
     return json({ error: "Request too large" }, 400);
   }
+
+  const guard = await requireSession(req);
+  if (guard instanceof NextResponse) return guard;
 
   let body: ValidateRequestBody;
   try {

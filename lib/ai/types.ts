@@ -97,6 +97,14 @@ export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
   totalTokens: number;
+  /**
+   * Largest single-step input count. A turn's `inputTokens` is the sum over
+   * steps — every step resends the system prompt and the full conversation — so
+   * the total scales with step count, not with how big the context ever got.
+   */
+  peakInputTokens?: number;
+  /** Number of billed model round trips the turn made. */
+  billedSteps?: number;
 }
 
 export interface AiDebugInfo {
@@ -147,7 +155,15 @@ export interface AiLogEntry {
   userPromptText: string;
   userPromptRaw?: string;
   sceneJson?: string;
+  /** Plugin contracts injected into the server-side system prompt for the turn. */
+  injectedPlugins?: string[];
   tokenUsage?: TokenUsage;
+  /**
+   * Revision-counter movement during the turn, attributed to the caller frame
+   * that bumped it. `total` far exceeding the successful mutation count means
+   * content-neutral bumps are inflating the counter.
+   */
+  revisionBumps?: { total: number; byCaller: Record<string, number> };
   steps?: AiLogStep[];
   response?: {
     intent?: AiIntent;

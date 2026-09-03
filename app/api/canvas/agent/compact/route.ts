@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { createChatModel } from "@/lib/ai/model";
 import { COMPACT_KEEP } from "@/lib/ai/agentTools";
 import { AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
+import { requireSession } from "@/lib/api-guard";
 import type { ProviderType } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
@@ -30,6 +31,9 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
+  const guard = await requireSession(req);
+  if (guard instanceof NextResponse) return guard;
+
   const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   const modelId = typeof body.model === "string" ? body.model.trim() : "";
@@ -56,21 +60,40 @@ export async function POST(req: Request) {
     .join("\n")
     .slice(0, 24_000);
 
-  const model = createChatModel({
-    providerType,
-    baseUrl,
-    apiKey,
-    model: modelId,
-    timeoutMs: AI_TIMEOUT_MS,
-  });
+  let model;
+  try {
+    model = createChatModel({
+      providerType,
+      baseUrl,
+      apiKey,
+      model: modelId,
+      timeoutMs: AI_TIMEOUT_MS,
+    });
+  } catch (err) {
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to create model." },
+      { status: 400 }
+    );
+  }
 
-  const { text } = await generateText({
-    model,
-    instructions:
-      "Summarize this Drawva Agent conversation for a later step. Keep object ids, coordinates, plugin ids, and the unfinished task. Plain text, ≤ 1500 characters. No JSON.",
-    prompt: digest || "(empty)",
-  });
+  try {
+    const { text } = await generateText({
+      model,
+      temperature: 0,
+      maxOutputTokens: 1024,
+      instructions:
+        "Summarize this Drawva Agent conversation for a later step. Keep object ids, coordinates, plugin ids, and the unfinished task. Plain text, ≤ 1500 characters. No JSON.",
+      prompt: digest || "(empty)",
+    });
 
-  const summary = text.trim().slice(0, 1500);
-  return NextResponse.json({ summary });
+    const summary = text.trim().slice(0, 1500);
+    return NextResponse.json({ summary });
+  } catch (err) {
+    // Provider failures must surface as a 502 with a message — never a 500
+    // that the client turns into silent history truncation.
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Compaction model call failed." },
+      { status: 502 }
+    );
+  }
 }

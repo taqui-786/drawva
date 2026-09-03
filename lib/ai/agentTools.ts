@@ -6,16 +6,40 @@ export const AGENT_MAX_APPLIES_PER_TURN = 6;
 export const AGENT_MAX_PATCHES_PER_TURN = 8;
 export const AGENT_MAX_EDITS_PER_TURN = 12;
 export const AGENT_MAX_TOOLS_PER_STEP = 1;
-export const SNAPSHOT_BASIC_MAX_EDGE = 1024;
-export const SNAPSHOT_DETAIL_MAX_EDGE = 2048;
+/** Capture quality tiers (long-edge / pixel / webp-quality / byte budgets). */
+export const SNAPSHOT_BASIC: CapturePolicy = {
+  maxLongEdge: 1024,
+  maxPixels: 520_000,
+  quality: 0.72,
+  maxBytes: 700 * 1024,
+};
+export const SNAPSHOT_DETAIL: CapturePolicy = {
+  maxLongEdge: 1440,
+  maxPixels: 1_800_000,
+  quality: 0.88,
+  maxBytes: 1200 * 1024,
+};
+export interface CapturePolicy {
+  maxLongEdge: number;
+  maxPixels: number;
+  quality: number;
+  maxBytes: number;
+}
 export const READ_DEFAULT_LINES = 200;
 export const READ_MAX_CHARS = 200_000;
 export const MAX_PATCH_BYTES = 64 * 1024;
+/** Legacy floor kept for small-context models; real trigger scales with model window. */
 export const AGENT_HISTORY_TOKEN_TRIGGER = 24_000;
 export const AGENT_MAX_TURN_IMAGES = 5;
 export const AGENT_SCENE_JSON_MAX = 8_000;
 export const AGENT_CONVERSATION_MAX_BYTES = 512 * 1024;
 export const SCAN_MAX_ITEMS = 60;
+/** Idempotency cache: replayed identical tool calls within one turn. */
+export const AGENT_TOOL_CACHE_ENTRIES = 20;
+/** Per-turn revision→fingerprint ledger used by the conflict check. */
+export const REVISION_FINGERPRINT_ENTRIES = 256;
+/** Per-turn cap on plugin contracts injected into the system prompt. */
+export const AGENT_MAX_LOADED_PLUGINS = 12;
 /** Shared by conductor.ts and the compact route so the two never drift. */
 export const COMPACT_KEEP = 12;
 
@@ -26,15 +50,38 @@ const regionSchema = z.object({
   h: z.coerce.number().describe("Box height"),
 });
 
+const plannedWidgetSchema = z.object({
+  width: z.coerce.number().describe("Proposed widget width in world units"),
+  height: z.coerce.number().describe("Proposed widget height in world units"),
+  bodyPx: z.coerce.number().optional().describe("Planned body font size in widget px (world units)"),
+  captionPx: z.coerce.number().optional().describe("Planned caption/meta font size in widget px"),
+  titlePx: z.coerce.number().optional().describe("Planned heading font size in widget px"),
+  placement: z.enum([
+    "below",
+    "right",
+    "left",
+    "top",
+    "in_place",
+    "inside_target",
+    "match_sketch",
+    "overlay",
+  ]).optional().describe("Relative placement hint the apply would use"),
+  x: z.coerce.number().optional().describe("Proposed absolute world X (omit to let the placement engine choose)"),
+  y: z.coerce.number().optional().describe("Proposed absolute world Y"),
+});
+
 const canvasScanSchema = z.object({
   scope: z.enum(["all", "viewport"]).optional().describe("Scan scope: 'viewport' for visible area or 'all' for entire canvas"),
+  plannedWidget: plannedWidgetSchema.optional().describe(
+    "Read-only pre-flight: returns where the placement engine would put a widget of this size, overlaps, and predicted on-screen font legibility at the focused view. Use before generating large widget HTML."
+  ),
 });
 
 const canvasSnapshotSchema = z.object({
-  target: z.enum(["viewport", "canvas", "region", "object"]).describe("Capture target"),
+  target: z.enum(["viewport", "canvas", "region", "object"]).describe("Capture target ('canvas' captures the content bounds, not the empty 20000-unit world)"),
   region: regionSchema.optional().describe("Region box when target='region'"),
   objectId: z.string().optional().describe("Object or widget ID when target='object'"),
-  quality: z.enum(["basic", "detail"]).optional().describe("Snapshot resolution: 'basic' (≤1024px) or 'detail' (≤2048px)"),
+  quality: z.enum(["basic", "detail"]).optional().describe("Snapshot tier: 'basic' (max edge 1024 / 0.52 Mpx) or 'detail' (max edge 1440 / 1.8 Mpx, region/object only)"),
   grid: z.boolean().optional().describe("Whether to overlay coordinate grid labels"),
 });
 
@@ -95,8 +142,14 @@ const commandItemSchema = z.object({
   motions: z.array(z.any()).optional().describe("animate_scene: object motion tracks (orbit/spin/translate/pulse/fade/keyframes)"),
 }).passthrough();
 
+const baseRevisionField = z.coerce
+  .number()
+  .describe(
+    "REQUIRED base board revision from your latest canvas_scan/canvas_snapshot. Missing or stale values are rejected with REVISION_CONFLICT."
+  );
+
 const canvasApplySchema = z.object({
-  baseRevision: z.coerce.number().optional().describe("Base board revision for conflict safety — pass the revision from your latest canvas_scan/canvas_snapshot. Stale revisions are rejected."),
+  baseRevision: baseRevisionField,
   commands: z.array(commandItemSchema).min(1).max(16).describe("Array of 1..16 canvas commands (write_text, draw_formula, diagram_source, html_widget, plot_function, animate_scene, draw, erase)"),
   note: z.string().optional().describe("Brief note explaining what this mutation achieves"),
 });
@@ -111,7 +164,7 @@ const editOpSchema = z.object({
 });
 
 const canvasEditSchema = z.object({
-  baseRevision: z.coerce.number().optional().describe("Base board revision for conflict safety — pass the revision from your latest canvas_scan/canvas_snapshot"),
+  baseRevision: baseRevisionField,
   operations: z.array(editOpSchema).min(1).max(16).describe("Array of 1..16 typed edit operations"),
   note: z.string().optional().describe("Brief note explaining what this edit achieves"),
 });
@@ -129,7 +182,7 @@ const canvasReadSchema = z.object({
 
 const canvasPatchWidgetSchema = z.object({
   objectId: z.string().describe("ID of the widget to patch"),
-  baseRevision: z.coerce.number().optional().describe("Base board revision"),
+  baseRevision: baseRevisionField,
   expectedContentHash: z.string().optional().describe("contentHash returned by the canvas_read this patch is based on — stale hashes are rejected"),
   patch: z.string().describe("Unified diff patch string with --- a/widget.html / +++ b/widget.html headers"),
 });
@@ -152,30 +205,30 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
   {
     name: "canvas_scan",
     description:
-      "List canvas items (id, kind, box, title). Cheap, no image. Use before mutating. scope=viewport limits to the visible rect.",
+      "List canvas items (id, kind, box, title). Cheap, no image. Use before mutating. scope=viewport limits to the visible rect. plannedWidget={width,height,bodyPx} is a read-only pre-flight: returns the exact placement the engine would choose, overlaps/crowding, and predicted on-screen font px at the focused view — check it before generating large widget HTML.",
     schema: canvasScanSchema,
   },
   {
     name: "canvas_snapshot",
     description:
-      "Capture a picture of the canvas. target=viewport|canvas|region|object. quality=basic (default, max edge 1024) or detail (max edge 2048, region/object only). grid=true (default) overlays global coordinate labels. Returns sourceRect + imageScale for the coordinate contract.",
+      "Capture a picture of the canvas. target=viewport|canvas|region|object. target=canvas captures the content bounds (readable overview), not the empty world. quality=basic (max edge 1024 / 0.52 Mpx) or detail (max edge 1440 / 1.8 Mpx, region/object only). grid=true (default) overlays global coordinate labels. Returns sourceRect + imageScale for the coordinate contract.",
     schema: canvasSnapshotSchema,
   },
   {
     name: "canvas_apply",
-    description: `Apply 1..16 validated canvas commands in one undo step. commands use the same tools as one-shot AI: write_text, draw_formula, plot_function, animate_scene, html_widget, diagram_source, draw, erase. Pass baseRevision from the latest scan/snapshot. Partial rejects are returned as rejected[] — treat them as feedback.`,
+    description: `Apply 1..16 validated canvas commands in one undo step. commands use the same tools as one-shot AI: write_text, draw_formula, plot_function, animate_scene, html_widget, diagram_source, draw, erase. baseRevision (from the latest scan/snapshot) is REQUIRED — missing or stale revisions are rejected. Partial rejects are returned as rejected[] — treat them as feedback. Apply is atomic: a renderer failure rolls the board back.`,
     schema: canvasApplySchema,
   },
   {
     name: "canvas_edit",
     description:
-      "Lightweight typed edits on existing items: move_object (dx,dy), resize_object (w,h), delete_object. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes — never re-create or replace an item just to move/resize/delete it.",
+      "Lightweight typed edits on existing items: move_object (dx,dy), resize_object (w,h), delete_object. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes — never re-create or replace an item just to move/resize/delete it. baseRevision is required.",
     schema: canvasEditSchema,
   },
   {
     name: "load_plugin",
     description:
-      "Load the full capability card for one plugin id from the catalog. Call before using a plugin's APIs or HTML contract.",
+      "Load a capability contract from the catalog. The full document is injected into the system prompt for the rest of the session (durable — it survives context compaction); the tool returns only a short receipt. Call before using a plugin's APIs.",
     schema: loadPluginSchema,
   },
   {
@@ -205,24 +258,24 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
 export function getAiSdkTools() {
   return {
     canvas_scan: tool({
-      description: "List canvas items (id, kind, box, title). Cheap, no image. Use before mutating. scope=viewport limits to the visible rect.",
+      description: "List canvas items (id, kind, box, title). Cheap, no image. Use before mutating. scope=viewport limits to the visible rect. plannedWidget={width,height,bodyPx} is a read-only pre-flight returning the placement, overlaps, and predicted on-screen font legibility.",
       inputSchema: canvasScanSchema,
     }),
     canvas_snapshot: tool({
-      description: "Capture a picture of the canvas. target=viewport|canvas|region|object. quality=basic (default, max edge 1024) or detail (max edge 2048, region/object only). grid=true (default) overlays global coordinate labels. Returns sourceRect + imageScale for the coordinate contract.",
+      description: "Capture a picture of the canvas. target=viewport|canvas|region|object (canvas = content bounds). quality=basic (max edge 1024 / 0.52 Mpx) or detail (max edge 1440 / 1.8 Mpx, region/object only). grid=true (default) overlays global coordinate labels. Returns sourceRect + imageScale.",
       inputSchema: canvasSnapshotSchema,
     }),
     canvas_apply: tool({
-      description: "Apply 1..16 validated canvas commands in one undo step. commands use write_text, draw_formula, plot_function, html_widget, diagram_source, draw, erase. Pass baseRevision from the latest scan/snapshot.",
+      description: "Apply 1..16 validated canvas commands in one undo step. commands use write_text, draw_formula, plot_function, html_widget, diagram_source, draw, erase. baseRevision is REQUIRED (from the latest scan/snapshot). Atomic: renderer failure rolls back.",
       inputSchema: canvasApplySchema,
     }),
     canvas_edit: tool({
       description:
-        "Lightweight typed edits on existing items: move_object (dx,dy), resize_object (w,h), delete_object. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes.",
+        "Lightweight typed edits on existing items: move_object (dx,dy), resize_object (w,h), delete_object. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes. baseRevision is required.",
       inputSchema: canvasEditSchema,
     }),
     load_plugin: tool({
-      description: "Load the full capability card for one plugin id from the catalog. Call before using a plugin's APIs or HTML contract.",
+      description: "Load a capability contract from the catalog. The full document is injected into the system prompt for the rest of the session (compaction-immune); the tool returns a short receipt.",
       inputSchema: loadPluginSchema,
     }),
     canvas_read: tool({

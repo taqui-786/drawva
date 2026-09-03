@@ -1,11 +1,19 @@
 import { NextResponse } from "next/server";
 import { streamText, type ModelMessage } from "ai";
-import { createChatModel, isFatalAuthError, isRateLimitError } from "@/lib/ai/model";
+import {
+  createChatModel,
+  isFatalAuthError,
+  isRateLimitError,
+  maxOutputTokensFor,
+  reasoningProviderOptions,
+} from "@/lib/ai/model";
+import { AGENT_MAX_LOADED_PLUGINS } from "@/lib/ai/agentTools";
 import { AGENT_SYSTEM_PROMPT, AI_TIMEOUT_MS, MAX_BODY_BYTES } from "@/lib/ai/prompts";
 import { extractJsonDecision, getAiSdkTools, parseAgentToolCall } from "@/lib/ai/agentTools";
-import { getPluginMetadataList } from "@/lib/plugins/registry";
+import { getEnabledPluginDescriptors, getPluginMetadataList } from "@/lib/plugins/registry";
+import { requireSession } from "@/lib/api-guard";
 import { recordAiUsage } from "@/lib/actions/usage";
-import type { ProviderType } from "@/lib/ai/provider";
+import type { ProviderType, ReasoningEffort } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -17,6 +25,7 @@ interface StepRequest {
   model?: string;
   reasoningEffort?: string;
   messages?: unknown;
+  loadedPluginIds?: unknown;
   context?: { revision?: number; viewport?: unknown; canvasSize?: number };
 }
 
@@ -53,6 +62,9 @@ export async function POST(req: Request) {
     return json({ error: "Client must not send prompt text." }, 400);
   }
 
+  const guard = await requireSession(req);
+  if (guard instanceof NextResponse) return guard;
+
   const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
   const modelId = typeof body.model === "string" ? body.model.trim() : "";
@@ -60,12 +72,32 @@ export async function POST(req: Request) {
   if (!apiKey || !modelId) return json({ error: "Missing API key or model." }, 400);
   if (providerType === "custom" && !baseUrl) return json({ error: "Custom provider requires a Base URL." }, 400);
 
+  // Plugin contracts the conductor loaded this session: injected into the
+  // system prompt (compaction-immune) instead of tool-result history.
+  const knownPluginIds = new Set(getPluginMetadataList().map((p) => p.id));
+  const requestedPluginIds = Array.isArray(body.loadedPluginIds)
+    ? body.loadedPluginIds.map(String).filter(Boolean)
+    : [];
+  const unknownPluginIds = requestedPluginIds.filter((id) => !knownPluginIds.has(id));
+  if (unknownPluginIds.length > 0) {
+    return json({ error: `Unknown plugin ids: ${unknownPluginIds.join(", ")}` }, 400);
+  }
+  const loadedPluginIds = requestedPluginIds.slice(0, AGENT_MAX_LOADED_PLUGINS);
+
   const catalog = getPluginMetadataList();
   const catalogBlock = catalog.map((p) => `${p.id} — ${p.name} — ${p.description}`).join("\n");
-  const system = `${AGENT_SYSTEM_PROMPT}\n\nPLUGIN CATALOG (load full docs with load_plugin):\n${catalogBlock || "(none)"}`;
+  const contractBlock =
+    loadedPluginIds.length > 0
+      ? getEnabledPluginDescriptors(loadedPluginIds)
+          .map((p) => `\n\n=== PLUGIN CONTRACT (durable): ${p.id} v${p.version} ===\n${p.document}`)
+          .join("")
+      : "";
+  const system = `${AGENT_SYSTEM_PROMPT}\n\nPLUGIN CATALOG (load full docs with load_plugin):\n${catalogBlock || "(none)"}${contractBlock}`;
 
   const messages = parseMessages(body.messages);
   if (!messages) return json({ error: "messages is invalid." }, 400);
+
+  const reasoningEffort = (typeof body.reasoningEffort === "string" ? body.reasoningEffort : "default") as ReasoningEffort;
 
   let model;
   try {
@@ -75,7 +107,6 @@ export async function POST(req: Request) {
       apiKey,
       model: modelId,
       timeoutMs: AI_TIMEOUT_MS,
-      reasoningEffort: body.reasoningEffort as Parameters<typeof createChatModel>[0]["reasoningEffort"],
     });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : "Failed to create model." }, 400);
@@ -98,7 +129,7 @@ export async function POST(req: Request) {
       try {
         // AI SDK retries internally with exponential backoff that respects
         // Retry-After headers; fatal auth errors and aborts are never retried.
-        await streamOnceWithAiSdk(model, providerType, modelId, system, aiSdkMessages, req.signal, send);
+        await streamOnceWithAiSdk(model, providerType, modelId, system, aiSdkMessages, req.signal, send, reasoningEffort);
       } catch (err) {
         if (req.signal.aborted) return;
         send("error", { message: publicError(err) });
@@ -131,10 +162,12 @@ async function streamOnceWithAiSdk(
   system: string,
   messages: ModelMessage[],
   signal: AbortSignal,
-  send: (event: string, data: unknown) => void
+  send: (event: string, data: unknown) => void,
+  reasoningEffort: ReasoningEffort
 ): Promise<void> {
   const tools = getAiSdkTools();
   const safeMessages = messages.length > 0 ? messages : [{ role: "user" as const, content: "Proceed with the canvas task." }];
+  const reasoning = reasoningProviderOptions(providerType, modelId, reasoningEffort);
 
   const result = streamText({
     model,
@@ -143,14 +176,23 @@ async function streamOnceWithAiSdk(
     tools,
     abortSignal: signal,
     maxRetries: 2,
+    maxOutputTokens: maxOutputTokensFor(providerType, modelId, reasoningEffort),
     providerOptions: {
-      anthropic: { cacheControl: { type: "ephemeral" } },
-      openai: { promptCacheKey: "drawva-agent-system-v1" },
+      ...reasoning,
+      anthropic: {
+        ...(reasoning.anthropic as Record<string, unknown> | undefined),
+        cacheControl: { type: "ephemeral" },
+      },
+      openai: {
+        ...(reasoning.openai as Record<string, unknown> | undefined),
+        promptCacheKey: "drawva-agent-system-v1",
+      },
     },
   });
 
   let fullText = "";
   const toolCallsCollected: { id: string; name: string; args: unknown; admissionError?: string }[] = [];
+  let finishReason: string | null = null;
 
   for await (const part of result.stream) {
     if (signal.aborted) return;
@@ -179,6 +221,10 @@ async function streamOnceWithAiSdk(
   }
 
   try {
+    finishReason = (await result.finishReason) || null;
+  } catch {}
+
+  try {
     const usage = await result.usage;
     if (usage) {
       await recordAiUsage({
@@ -195,14 +241,35 @@ async function streamOnceWithAiSdk(
     }
   } catch {}
 
-  if (toolCallsCollected.length > 0) {
+  if (toolCallsCollected.length > 1) {
+    // Decision admission: a multi-tool step is rejected as a whole — the model
+    // must learn extra calls are never free. Nothing is executed.
     const first = toolCallsCollected[0];
     send("tool_call", {
       id: first.id,
       name: first.name,
       args: first.args,
-      extraToolCalls: Math.max(0, toolCallsCollected.length - 1),
-      admissionError: first.admissionError,
+      admissionError: `This step emitted ${toolCallsCollected.length} tool calls (${toolCallsCollected
+        .map((c) => c.name)
+        .join(", ")}); multi-tool steps are rejected and NONE of them were executed.`,
+    });
+    send("final", { text: fullText });
+    return;
+  }
+
+  if (toolCallsCollected.length === 1) {
+    const first = toolCallsCollected[0];
+    let admissionError = first.admissionError;
+    if (!admissionError && finishReason === "length") {
+      admissionError =
+        "Output was truncated mid-tool-call (max tokens reached), so the arguments may be incomplete.";
+    }
+    send("tool_call", {
+      id: first.id,
+      name: first.name,
+      args: first.args,
+      extraToolCalls: 0,
+      admissionError,
     });
     send("final", { text: fullText });
     return;

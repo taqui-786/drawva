@@ -3,6 +3,7 @@ import { generateText } from "ai";
 import { createChatModel } from "@/lib/ai/model";
 import { PLUGIN_AUTHORING_PROMPT } from "@/lib/ai/prompts";
 import { parsePluginMarkdown } from "@/lib/plugins/registry";
+import { requireSession } from "@/lib/api-guard";
 import type { ProviderType } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
@@ -18,6 +19,9 @@ interface AuthorRequestBody {
 
 export async function POST(req: Request) {
   try {
+    const guard = await requireSession(req);
+    if (guard instanceof NextResponse) return guard;
+
     const body = (await req.json()) as AuthorRequestBody;
     const { prompt, baseUrl, apiKey, model: modelId, providerType } = body;
 
@@ -38,11 +42,11 @@ export async function POST(req: Request) {
       apiKey,
       model: modelId,
       timeoutMs: 45_000,
-      temperature: 0.2,
     });
 
     const { text: rawContent } = await generateText({
       model,
+      temperature: 0.2,
       system: PLUGIN_AUTHORING_PROMPT,
       prompt: `Generate a plugin document for: ${prompt.trim()}`,
     });

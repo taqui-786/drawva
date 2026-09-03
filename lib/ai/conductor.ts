@@ -20,18 +20,23 @@ import {
   saveAgentSession,
   loadAgentSession,
   clearAgentSession,
+  saveAgentLog,
+  redactLogEntry,
 } from "@/lib/canvas/persistence";
 import {
   AGENT_CONVERSATION_MAX_BYTES,
-  AGENT_HISTORY_TOKEN_TRIGGER,
   AGENT_MAX_APPLIES_PER_TURN,
   AGENT_MAX_EDITS_PER_TURN,
+  AGENT_MAX_LOADED_PLUGINS,
   AGENT_MAX_PATCHES_PER_TURN,
   AGENT_MAX_STEPS_PER_TURN,
   AGENT_MAX_TURN_IMAGES,
   AGENT_SCENE_JSON_MAX,
+  AGENT_TOOL_CACHE_ENTRIES,
   COMPACT_KEEP,
+  REVISION_FINGERPRINT_ENTRIES,
 } from "./agentTools";
+import { compactionTriggerTokens } from "./capabilities";
 import { executeTool, fnv1a, type ActiveImage, type ConductorToolDeps } from "./conductorTools";
 
 export type StepMessage =
@@ -56,6 +61,7 @@ export type ConductorEvent =
   | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string }
   | { kind: "usage"; usage: { inputTokens: number; outputTokens: number } }
   | { kind: "compact" }
+  | { kind: "compact_failed"; message: string }
   | { kind: "log"; entry: AiLogEntry };
 
 export interface ConductorDeps {
@@ -67,6 +73,13 @@ export interface ConductorDeps {
   camera: Camera;
   provider: () => ProviderConfig | null;
   getRevision: () => number;
+  /** Content fingerprint of the board — see lib/canvas/fingerprint.ts. */
+  getFingerprint: () => string;
+  /**
+   * Cumulative caller-frame → revision-bump tally. Diffed across the turn and
+   * written to the log as `revisionBumps` so a conflict storm names its source.
+   */
+  getRevisionAudit?: () => Record<string, number>;
   onEvent: (e: ConductorEvent) => void;
   afterBoardChange: () => void;
   getInkBox?: () => Rect | null;
@@ -102,9 +115,34 @@ export class Conductor {
   private atlasImageId: string | null = null;
   private listeners = new Set<(e: ConductorEvent) => void>();
   private turnUsage = { inputTokens: 0, outputTokens: 0 };
+  /**
+   * Largest single-step input token count in the turn. `turnUsage.inputTokens`
+   * is the *sum* over steps, so a 14-step turn reports ~14× the real context
+   * size; without this number the total is easy to misread as one request.
+   */
+  private turnPeakInput = 0;
+  private turnSteps = 0;
+  /**
+   * revision → board fingerprint, recorded whenever a revision is reported to
+   * the model. Lets the conflict check ask "did the content the model saw at
+   * `baseRevision` actually change?" instead of "did the counter move?".
+   */
+  private revisionFingerprints = new Map<number, string>();
+  /** Bump tally at turn start; the turn's own bumps are the difference. */
+  private auditAtTurnStart: Record<string, number> = {};
+  private revisionAtTurnStart = 0;
+  /** Plugin ids whose contracts are injected into the server-side system prompt. */
+  private loadedPluginIds = new Set<string>();
+  /** Per-turn idempotency: SHA-256 of {name,args} → replayed outcome. */
+  private toolCache = new Map<string, { result: unknown; isError: boolean }>();
+  /** Revision the cache was built at — replays must never return stale revision-scoped state. */
+  private toolCacheRevision = -1;
+  private compactFailedOnce = false;
 
   constructor(private deps: ConductorDeps) {
-    this.messages = loadConversation(this.deps.canvasId?.());
+    const restored = loadConversation(this.deps.canvasId?.());
+    this.messages = restored.messages;
+    this.loadedPluginIds = new Set(restored.pluginIds);
     void loadAgentSession(this.deps.canvasId?.()).then((saved) => {
       if (saved && Array.isArray(saved) && saved.length > 0 && this.messages.length === 0) {
         this.messages = saved as StepMessage[];
@@ -117,6 +155,7 @@ export class Conductor {
     this.images.clear();
     this.latestSnapshotId = null;
     this.atlasImageId = null;
+    this.loadedPluginIds.clear();
     clearConversation(this.deps.canvasId?.());
   }
 
@@ -193,6 +232,34 @@ export class Conductor {
     for (const fn of this.listeners) fn(e);
   }
 
+  /**
+   * Bumps attributed to this turn: total counter movement plus the per-caller
+   * delta. A total far above the number of successful mutations means something
+   * is calling afterBoardChange() without changing the board.
+   */
+  private turnRevisionBumps(): { total: number; byCaller: Record<string, number> } {
+    const now = this.deps.getRevisionAudit?.() ?? {};
+    const byCaller: Record<string, number> = {};
+    for (const [caller, count] of Object.entries(now)) {
+      const delta = count - (this.auditAtTurnStart[caller] ?? 0);
+      if (delta > 0) byCaller[caller] = delta;
+    }
+    return { total: this.deps.getRevision() - this.revisionAtTurnStart, byCaller };
+  }
+
+  /**
+   * Remember the fingerprint the board had at the current revision. First
+   * observation wins: that is the state the model was shown for that revision.
+   */
+  private recordRevisionFingerprint(): void {
+    const revision = this.deps.getRevision();
+    if (this.revisionFingerprints.has(revision)) return;
+    this.revisionFingerprints.set(revision, this.deps.getFingerprint());
+    if (this.revisionFingerprints.size > REVISION_FINGERPRINT_ENTRIES) {
+      this.revisionFingerprints.delete(this.revisionFingerprints.keys().next().value as number);
+    }
+  }
+
   private toolDeps(): ConductorToolDeps {
     return {
       engine: this.deps.engine,
@@ -202,10 +269,18 @@ export class Conductor {
       draft: this.deps.draft,
       camera: this.deps.camera,
       getRevision: this.deps.getRevision,
+      getFingerprint: this.deps.getFingerprint,
+      fingerprintAt: (revision) => this.revisionFingerprints.get(revision),
       afterBoardChange: this.deps.afterBoardChange,
       registerImage: (img) => {
         this.images.set(img.id, img);
         this.latestSnapshotId = img.id;
+      },
+      registerPlugin: (pluginId) => {
+        if (this.loadedPluginIds.has(pluginId)) return "already" as const;
+        if (this.loadedPluginIds.size >= AGENT_MAX_LOADED_PLUGINS) return "limit" as const;
+        this.loadedPluginIds.add(pluginId);
+        return "registered" as const;
       },
       getInkBox: this.deps.getInkBox,
     };
@@ -226,6 +301,14 @@ export class Conductor {
     this.turnImageIds = [];
     this.atlasImageId = null;
     this.turnUsage = { inputTokens: 0, outputTokens: 0 };
+    this.turnPeakInput = 0;
+    this.turnSteps = 0;
+    this.toolCache = new Map();
+    this.toolCacheRevision = this.deps.getRevision();
+    this.revisionFingerprints = new Map([[this.toolCacheRevision, this.deps.getFingerprint()]]);
+    this.auditAtTurnStart = { ...(this.deps.getRevisionAudit?.() ?? {}) };
+    this.revisionAtTurnStart = this.toolCacheRevision;
+    this.compactFailedOnce = false;
     this.emit({ kind: "turn_start" });
 
     let userText = text.trim();
@@ -281,6 +364,7 @@ export class Conductor {
       const host = this.hostRefs(atlasMeta);
       userText = [text.trim(), host].filter(Boolean).join("\n\n");
       this.messages.push({ role: "user", text: userText, images: images.length ? images : undefined });
+      this.persistConversation();
 
       let applies = 0;
       let patches = 0;
@@ -291,10 +375,12 @@ export class Conductor {
       const mutationBlocked = (name: string): boolean =>
         (name === "canvas_apply" || name === "canvas_patch_widget" || name === "canvas_edit") && layoutReviewNeeded;
 
+      const compactionTrigger = compactionTriggerTokens(getActiveModel() || "");
+
       while (steps < AGENT_MAX_STEPS_PER_TURN) {
         if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
         this.flushSteer();
-        if (estimateTokens(this.messages) > AGENT_HISTORY_TOKEN_TRIGGER) {
+        if (estimateTokens(this.serializeMessages()) > compactionTrigger) {
           await this.compactHistory();
           if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
         }
@@ -314,6 +400,7 @@ export class Conductor {
             summary: "Finished turn with final message",
           });
           finished = true;
+          this.persistConversation();
           break;
         }
 
@@ -357,32 +444,65 @@ export class Conductor {
             message: `Edit budget reached (${AGENT_MAX_EDITS_PER_TURN}/${AGENT_MAX_EDITS_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
           };
         } else {
-          try {
-            result = await executeTool(call.name, call.args, this.toolDeps());
-            if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-            if (result && typeof result === "object") {
-              const rec = result as Record<string, unknown>;
-              if (call.name === "canvas_apply" && rec.ok === true) applies += 1;
-              if (call.name === "canvas_patch_widget" && rec.ok === true) patches += 1;
-              if (call.name === "canvas_edit" && rec.ok === true) edits += 1;
-              // Layout-review gate: after any widget mutation the next mutation
-              // must wait for a fresh whole-canvas snapshot (penecho-style gate).
-              if (rec.widgetMutated === true) layoutReviewNeeded = true;
-              const snapRect = rec.sourceRect as { w?: number } | undefined;
-              if (call.name === "canvas_snapshot" && snapRect && typeof snapRect.w === "number" && snapRect.w >= SIZE) {
-                layoutReviewNeeded = false;
+          // Any board change (apply, user ink, rollback) invalidates replays:
+          // cached scan/snapshot results embed revision-scoped state and a
+          // stale replayed revision poisons every subsequent baseRevision.
+          const revisionNow = this.deps.getRevision();
+          if (revisionNow !== this.toolCacheRevision) {
+            this.toolCache.clear();
+            this.toolCacheRevision = revisionNow;
+          }
+          const signature = await toolSignature(call.name, call.args);
+          const cached = this.toolCache.get(signature);
+          if (cached) {
+            // Idempotent replay: identical {name,args} within the turn returns
+            // the earlier outcome instead of executing again.
+            result = cached.result;
+            isError = cached.isError;
+          } else {
+            try {
+              result = await executeTool(call.name, call.args, this.toolDeps());
+              if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
+              isError = isFailedResult(result);
+              this.toolCache.set(signature, { result, isError });
+              if (this.toolCache.size > AGENT_TOOL_CACHE_ENTRIES) {
+                this.toolCache.delete(this.toolCache.keys().next().value as string);
+              }
+              if (result && typeof result === "object") {
+                const rec = result as Record<string, unknown>;
+                if (call.name === "canvas_apply" && rec.ok === true) applies += 1;
+                if (call.name === "canvas_patch_widget" && rec.ok === true) patches += 1;
+                if (call.name === "canvas_edit" && rec.ok === true) edits += 1;
+                // Layout-review gate: after any widget mutation the next mutation
+                // waits for a fresh content-covering snapshot at the current revision.
+                if (rec.widgetMutated === true) layoutReviewNeeded = true;
+                if (
+                  call.name === "canvas_snapshot" &&
+                  rec.coversContent === true &&
+                  rec.revision === this.deps.getRevision()
+                ) {
+                  layoutReviewNeeded = false;
+                }
+              }
+            } catch (err) {
+              isError = true;
+              result = {
+                code: "INTERNAL",
+                message: err instanceof Error ? err.message : "Tool failed.",
+              };
+              this.toolCache.set(signature, { result, isError });
+              if (this.toolCache.size > AGENT_TOOL_CACHE_ENTRIES) {
+                this.toolCache.delete(this.toolCache.keys().next().value as string);
               }
             }
-          } catch (err) {
-            isError = true;
-            result = {
-              code: "INTERNAL",
-              message: err instanceof Error ? err.message : "Tool failed.",
-            };
           }
         }
 
         isError = isError || isFailedResult(result);
+        // Every revision handed to the model gets its content fingerprint
+        // recorded, so the next mutation's conflict check can distinguish
+        // "the board changed" from "the counter moved".
+        this.recordRevisionFingerprint();
         const toolImages = this.imagesForTool(call.name, result);
         stepsLog.push({
           stepNumber: steps,
@@ -407,6 +527,8 @@ export class Conductor {
           isError,
           images: toolImages,
         });
+        // Crash durability: the turn's tool history survives a tab crash mid-run.
+        this.persistConversation();
         this.emit({
           kind: "tool_end",
           name: call.name,
@@ -451,11 +573,18 @@ export class Conductor {
         atlasImage: this.images.get(this.latestSnapshotId || "")?.dataUrl || "",
         systemPrompt: AGENT_SYSTEM_PROMPT,
         userPromptText: userText,
+        injectedPlugins: [...this.loadedPluginIds],
         steps: stepsLog,
+        revisionBumps: this.turnRevisionBumps(),
         tokenUsage: {
           inputTokens: this.turnUsage.inputTokens,
           outputTokens: this.turnUsage.outputTokens,
           totalTokens: this.turnUsage.inputTokens + this.turnUsage.outputTokens,
+          // inputTokens is the sum over every step in the turn — each step
+          // resends the system prompt and the whole conversation. These two make
+          // that readable: peak is the largest single request's context.
+          peakInputTokens: this.turnPeakInput,
+          billedSteps: this.turnSteps,
         },
         response: {
           message: stepsLog.filter((s) => s.text).map((s) => s.text).join("\n\n"),
@@ -463,6 +592,8 @@ export class Conductor {
         },
       };
       this.emit({ kind: "log", entry: logEntry });
+      // Durable per-turn trace: redacted copy survives reloads for debugging.
+      void saveAgentLog(redactLogEntry(logEntry));
     } catch (err) {
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
       const message = err instanceof Error ? err.message : "Agent turn failed.";
@@ -474,11 +605,15 @@ export class Conductor {
         if (options?.headless) {
           this.messages = this.messages.slice(0, initialLen);
         } else {
-          saveConversation(this.messages, this.deps.canvasId?.());
+          this.persistConversation();
           this.pruneImages();
         }
       }
     }
+  }
+
+  private persistConversation(): void {
+    saveConversation(this.messages, this.deps.canvasId?.(), [...this.loadedPluginIds]);
   }
 
   private flushSteer(): void {
@@ -564,14 +699,42 @@ export class Conductor {
   }
 
   /**
-   * Deterministic context pressure relief: tool results older than the last
-   * 8 messages get their payload clipped to a head summary (penecho-style
-   * tool-result pruning, without a second compaction model call).
+   * Deterministic context pressure relief: tool results AND the assistant
+   * tool-call args that produced them get clipped to a head summary once they
+   * fall outside the last 8 messages (tool-result pruning, without a second
+   * compaction model call).
+   *
+   * Args matter as much as results here: a canvas_apply that creates a widget
+   * carries the widget's whole document, and that message was resent verbatim on
+   * every later step of the turn — the single largest repeated payload in a
+   * widget-building turn. The widget lives on the board now; the model re-reads
+   * it with canvas_read when it needs the source.
    */
   private pruneOldToolResults(messages: StepMessage[]): StepMessage[] {
     const recentFrom = Math.max(0, messages.length - 8);
     return messages.map((m, idx) => {
-      if (m.role !== "tool" || idx >= recentFrom) return m;
+      if (idx >= recentFrom) return m;
+      if (m.role === "assistant") {
+        if (!m.toolCall) return m;
+        try {
+          const json = JSON.stringify(m.toolCall.args ?? null);
+          if (json.length <= 2000) return m;
+          return {
+            ...m,
+            toolCall: {
+              ...m.toolCall,
+              args: {
+                code: "PRUNED",
+                note: "Full arguments clipped for context budget; the result of this call is authoritative. Use canvas_read for current item source.",
+                summary: json.slice(0, 800),
+              },
+            },
+          };
+        } catch {
+          return { ...m, toolCall: { ...m.toolCall, args: { code: "PRUNED" } } };
+        }
+      }
+      if (m.role !== "tool") return m;
       try {
         const json = JSON.stringify(m.result ?? null);
         if (json.length <= 2000) return m;
@@ -587,12 +750,21 @@ export class Conductor {
     const config = this.deps.provider() ?? getProviderConfig();
     const model = getActiveModel();
     if (!config || !model) return;
+    // One loud failure per turn: keep retrying silently-succeeding compaction
+    // but never truncate history behind the user's back.
+    if (this.compactFailedOnce) return;
     this.emit({ kind: "compact" });
     const keep = this.messages.slice(-COMPACT_KEEP);
     // Providers require tool results to follow their assistant tool call, and
     // most require the post-system conversation to open with a user turn — so
     // drop any leading orphaned tool/assistant messages after slicing.
     while (keep.length && keep[0].role !== "user" && keep[0].role !== "system") keep.shift();
+    const fail = (message: string) => {
+      this.compactFailedOnce = true;
+      this.emit({ kind: "compact_failed", message });
+      // Keep the full history: silent truncation loses context forever; a
+      // provider context overflow later in the turn is a loud, honest error.
+    };
     try {
       const res = await fetch("/api/canvas/agent/compact", {
         method: "POST",
@@ -607,22 +779,25 @@ export class Conductor {
         signal: this.abort?.signal,
       });
       if (!res.ok) {
-        this.messages = keep;
-        saveConversation(this.messages, this.deps.canvasId?.());
+        let message = `Compaction failed (HTTP ${res.status}).`;
+        try {
+          const data = (await res.json()) as { error?: string };
+          if (data.error) message = `Compaction failed: ${data.error}`;
+        } catch {}
+        fail(message);
         return;
       }
       const data = (await res.json()) as { summary?: string };
       const summary = (data.summary || "").trim();
       if (!summary) {
-        this.messages = keep;
-        saveConversation(this.messages, this.deps.canvasId?.());
+        fail("Compaction returned an empty summary; history kept intact.");
         return;
       }
       this.messages = [{ role: "system", text: summary, tag: "compact" }, ...keep];
-      saveConversation(this.messages, this.deps.canvasId?.());
-    } catch {
-      this.messages = keep;
-      saveConversation(this.messages, this.deps.canvasId?.());
+      this.persistConversation();
+    } catch (err) {
+      if (this.abort?.signal.aborted) throw err;
+      fail(err instanceof Error ? `Compaction failed: ${err.message}` : "Compaction failed.");
     }
   }
 
@@ -640,6 +815,7 @@ export class Conductor {
       model,
       reasoningEffort: getReasoningEffort(),
       messages: this.serializeMessages(),
+      loadedPluginIds: [...this.loadedPluginIds],
       context: {
         revision: this.deps.getRevision(),
         viewport: this.deps.camera.visibleWorldRect(),
@@ -668,6 +844,8 @@ export class Conductor {
         if (e.kind === "usage") {
           this.turnUsage.inputTokens += e.usage.inputTokens;
           this.turnUsage.outputTokens += e.usage.outputTokens;
+          this.turnPeakInput = Math.max(this.turnPeakInput, e.usage.inputTokens);
+          this.turnSteps += 1;
         }
         this.emit(e);
       });
@@ -704,7 +882,34 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 export function estimateTokens(messages: StepMessage[]): number {
   const stripped = stripImages(messages);
-  return Math.ceil(JSON.stringify(stripped).length / 4);
+  let images = 0;
+  for (const m of messages) {
+    if ((m.role === "user" || m.role === "tool") && m.images?.length) images += m.images.length;
+  }
+  // ponytail: flat ~1100 tokens per image (≈ a 1024×768 vision tile); scale by
+  // actual per-image pixels if small models start over/under-compacting.
+  return Math.ceil(JSON.stringify(stripped).length / 4) + images * 1100;
+}
+
+/** Stable SHA-256 signature of a tool call for the idempotency cache. */
+async function toolSignature(name: string, args: unknown): Promise<string> {
+  const payload = JSON.stringify({ name, args: stableValue(args) });
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));
+  return Array.from(new Uint8Array(digest.slice(0, 12)))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function stableValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([k, v]) => [k, stableValue(v)])
+    );
+  }
+  return value;
 }
 
 function getConversationKey(canvasId?: string): string {
@@ -726,24 +931,27 @@ function stripImages(messages: StepMessage[]): StepMessage[] {
   });
 }
 
-function loadConversation(canvasId?: string): StepMessage[] {
-  if (typeof window === "undefined") return [];
+function loadConversation(canvasId?: string): { messages: StepMessage[]; pluginIds: string[] } {
+  if (typeof window === "undefined") return { messages: [], pluginIds: [] };
   try {
     const raw = window.localStorage.getItem(getConversationKey(canvasId));
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as { messages?: StepMessage[] };
-    return Array.isArray(parsed.messages) ? parsed.messages : [];
+    if (!raw) return { messages: [], pluginIds: [] };
+    const parsed = JSON.parse(raw) as { messages?: StepMessage[]; pluginIds?: string[] };
+    return {
+      messages: Array.isArray(parsed.messages) ? parsed.messages : [],
+      pluginIds: Array.isArray(parsed.pluginIds) ? parsed.pluginIds : [],
+    };
   } catch {
-    return [];
+    return { messages: [], pluginIds: [] };
   }
 }
 
-function saveConversation(messages: StepMessage[], canvasId?: string): void {
+function saveConversation(messages: StepMessage[], canvasId?: string, pluginIds: string[] = []): void {
   if (typeof window === "undefined") return;
   const key = getConversationKey(canvasId);
   const stripped = stripImages(messages);
   void saveAgentSession(stripped, canvasId);
-  let payload = { messages: stripped, createdAt: Date.now(), updatedAt: Date.now() };
+  let payload = { messages: stripped, pluginIds, createdAt: Date.now(), updatedAt: Date.now() };
   let raw = JSON.stringify(payload);
   while (raw.length > AGENT_CONVERSATION_MAX_BYTES && payload.messages.length > 1) {
     const idx = payload.messages.findIndex((m) => m.role !== "system" || m.tag !== "compact");

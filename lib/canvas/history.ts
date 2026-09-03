@@ -167,6 +167,11 @@ export class BoardHistory {
     this.redoStack = [];
   }
 
+  /** Drop redo candidates (e.g. a rolled-back partial apply must not be redoable). */
+  dropRedo(): void {
+    this.redoStack = [];
+  }
+
   private async apply(entry: HistoryEntry, side: "before" | "after"): Promise<void> {
     const eng = this.engine;
     if (!eng) return;

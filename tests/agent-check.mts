@@ -1,11 +1,13 @@
 /**
  * Drawva Agent verification suite — run with `pnpm test:agent`.
- * No test framework: plain asserts, one process. Section A–E:
+ * No test framework: plain asserts, one process. Section A–F:
  *   A. widgetPatch pure unit cases
  *   B. agentTools schema/limit cases
  *   C. prompt/constant contracts
  *   D. repo hygiene (anti-clone greps, mutation-path audit)
- *   E. HTTP integration against a real `next start` + a fake OpenAI-compatible
+ *   E. concurrency & step economy (fingerprint conflict protocol, layout gate,
+ *      context pruning — the REVISION_CONFLICT storm / token blowup regressions)
+ *   F. HTTP integration against a real `next start` + a fake OpenAI-compatible
  *      model server (exercises /api/canvas/agent/step and /compact end to end
  *      with no external network and no real API key).
  */
@@ -14,11 +16,21 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { applyWidgetPatch } from "../lib/canvas/widgetPatch";
 import { AGENT_TOOL_DEFS, MAX_PATCH_BYTES, AGENT_MAX_STEPS_PER_TURN, parseAgentToolCall } from "../lib/ai/agentTools";
 import { AGENT_SYSTEM_PROMPT, COORDINATE_CONTRACT, SYSTEM_PROMPT } from "../lib/ai/prompts";
+
+// .env.local drives the Next server too; we need DATABASE_URL + BETTER_AUTH_SECRET
+// to seed a real session for the authenticated API routes.
+for (const envFile of [".env.local", ".env"]) {
+  if (fs.existsSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", envFile))) {
+    (await import("dotenv")).config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", envFile) });
+    break;
+  }
+}
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -178,14 +190,15 @@ await test("A16 multibyte UTF-8 patch byte length enforcement", () => {
 // ---------------------------------------------------------------------------
 console.log("\nB. agentTools");
 
-await test("B1 exactly 8 tools with unique names", () => {
-  assert.equal(AGENT_TOOL_DEFS.length, 8);
+await test("B1 exactly 9 tools with unique names", () => {
+  assert.equal(AGENT_TOOL_DEFS.length, 9);
   const names = AGENT_TOOL_DEFS.map((t) => t.name);
-  assert.equal(new Set(names).size, 8);
+  assert.equal(new Set(names).size, 9);
   for (const expected of [
     "canvas_scan",
     "canvas_snapshot",
     "canvas_apply",
+    "canvas_edit",
     "load_plugin",
     "canvas_read",
     "canvas_patch_widget",
@@ -196,7 +209,7 @@ await test("B1 exactly 8 tools with unique names", () => {
   }
 });
 
-await test("B2 canvas_apply schema enforces 1..16 commands", () => {
+await test("B2 canvas_apply schema enforces 1..16 commands + required baseRevision", () => {
   const def = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_apply")!;
   assert.equal(def.schema.safeParse({ baseRevision: 1, commands: [] }).success, false);
   assert.equal(
@@ -206,10 +219,23 @@ await test("B2 canvas_apply schema enforces 1..16 commands", () => {
     }).success,
     false
   );
+  // baseRevision is required: omission must fail admission, not slip through.
+  assert.equal(def.schema.safeParse({ commands: [{ tool: "write_text" }] }).success, false);
   assert.equal(
     def.schema.safeParse({ baseRevision: 1, commands: [{ tool: "write_text" }] }).success,
     true
   );
+});
+
+await test("B2b canvas_edit and canvas_patch_widget also require baseRevision", () => {
+  const edit = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_edit")!;
+  assert.equal(edit.schema.safeParse({ operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }).success, false);
+  assert.equal(
+    edit.schema.safeParse({ baseRevision: 3, operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }).success,
+    true
+  );
+  const patch = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_patch_widget")!;
+  assert.equal(patch.schema.safeParse({ objectId: "w1", patch: "x" }).success, false);
 });
 
 await test("B3 canvas_snapshot schema rejects invalid target/quality", () => {
@@ -217,6 +243,15 @@ await test("B3 canvas_snapshot schema rejects invalid target/quality", () => {
   assert.equal(def.schema.safeParse({ target: "universe" }).success, false);
   assert.equal(def.schema.safeParse({ target: "region", quality: "ultra" }).success, false);
   assert.equal(def.schema.safeParse({ target: "region", region: { x: 0, y: 0, w: 1, h: 1 } }).success, true);
+});
+
+await test("B3b canvas_scan plannedWidget pre-flight parses", () => {
+  const def = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_scan")!;
+  assert.equal(
+    def.schema.safeParse({ plannedWidget: { width: 720, height: 480, bodyPx: 32 } }).success,
+    true
+  );
+  assert.equal(def.schema.safeParse({ plannedWidget: { width: "nope" } }).success, false);
 });
 
 await test("B4 canvas_read requires objectId", () => {
@@ -251,11 +286,13 @@ console.log("\nC. prompts");
 
 await test("C1 agent prompt carries safety + discipline rules", () => {
   for (const needle of [
-    "One tool call per step",
+    "Exactly one tool call per step",
     "UNTRUSTED DATA",
     "canvas_patch_widget",
     "load_plugin",
     "≤ ~300 words",
+    "baseRevision is REQUIRED",
+    "plannedWidget",
   ]) {
     assert.ok(AGENT_SYSTEM_PROMPT.includes(needle), `missing: ${needle}`);
   }
@@ -403,10 +440,207 @@ await test("D7 numeric latex values and formula synonyms validate as draw_formul
   assert.equal(validated.latex, "42");
 });
 
+await test("D8 draw with x/y origin treats points as local coordinates (regression: triangle diagram landed at top-left)", async () => {
+  const { validateCommands } = await import("../lib/canvas/commands");
+  const ctx = {
+    aiColor: "#2679b8",
+    scale: 1,
+    widgetSlots: 8,
+    visibleRect: { x: 7000, y: 7000, w: 4000, h: 3000 },
+  };
+  const { commands, rejected } = validateCommands(
+    [{ tool: "draw", x: 9750, y: 9200, points: [[0, 400], [0, 0], [500, 400]], size: 7 }],
+    ctx
+  );
+  assert.equal(rejected.length, 0);
+  assert.equal(commands.length, 1);
+  const pts = (commands[0] as { points: Array<{ x: number; y: number }> }).points;
+  assert.deepEqual(pts, [
+    { x: 9750, y: 9600 },
+    { x: 9750, y: 9200 },
+    { x: 10250, y: 9600 },
+  ]);
+});
+
+await test("D9 draw without origin keeps absolute points; validated points are {x,y} objects (ink-capture contract)", async () => {
+  const { validateCommands } = await import("../lib/canvas/commands");
+  const ctx = {
+    aiColor: "#2679b8",
+    scale: 1,
+    widgetSlots: 8,
+    visibleRect: { x: 7000, y: 7000, w: 4000, h: 3000 },
+  };
+  const { commands, rejected } = validateCommands(
+    [{ tool: "draw", points: [[9800, 9600], [9800, 9200], [10300, 9600]], size: 7 }],
+    ctx
+  );
+  assert.equal(rejected.length, 0);
+  const pts = (commands[0] as { points: unknown[] }).points;
+  // Points are DrawPoint objects, NOT tuples — the apply path must read .x/.y,
+  // never array-destructure (the "not iterable" INTERNAL crash).
+  for (const p of pts) {
+    assert.ok(p && typeof p === "object" && !Array.isArray(p));
+    assert.equal(typeof (p as { x: number }).x, "number");
+    assert.equal(typeof (p as { y: number }).y, "number");
+  }
+  assert.deepEqual(pts, [
+    { x: 9800, y: 9600 },
+    { x: 9800, y: 9200 },
+    { x: 10300, y: 9600 },
+  ]);
+});
+
 // ---------------------------------------------------------------------------
-// E. HTTP integration (real Next server + fake OpenAI-compatible model)
+// E. concurrency & step economy
 // ---------------------------------------------------------------------------
-console.log("\nE. HTTP integration");
+console.log("\nE. concurrency & step economy");
+
+type FakeItem = { id: string; kind: string; status: string; html?: string; copyText?: string; source?: string };
+
+function fakeManagers(widgets: FakeItem[], objects: FakeItem[]) {
+  return {
+    widgets: {
+      all: () => widgets,
+      get: (id: string) => widgets.find((w) => w.id === id),
+    },
+    objects: {
+      all: () => objects,
+      get: (id: string) => objects.find((o) => o.id === id),
+    },
+  };
+}
+
+const FAKE_ENGINE = { tiles: { keys: () => [] as string[] } };
+
+await test("E1 boardFingerprint ignores geometry, tracks identity/content/ink", async () => {
+  const { boardFingerprint } = await import("../lib/canvas/fingerprint");
+  const w = { id: "w1", kind: "diagram", status: "accepted", html: "<p>a</p>", copyText: "graph TD" };
+  const o = { id: "o1", kind: "text", status: "accepted", source: "hello" };
+  const m = fakeManagers([w], [o]);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const fp = (ink: number) => boardFingerprint(FAKE_ENGINE as any, m.widgets as any, m.objects as any, ink);
+
+  const base = fp(0);
+  // A widget iframe self-fitting from 620x760 to 292x422 must NOT invalidate a
+  // pending agent mutation — this is the REVISION_CONFLICT storm's root cause.
+  Object.assign(w, { x: 10, y: 20, w: 292, h: 422 });
+  assert.equal(fp(0), base, "geometry must not change the fingerprint");
+
+  assert.notEqual(fp(1), base, "ink epoch must change the fingerprint");
+
+  w.html = "<p>ab</p>";
+  assert.notEqual(fp(0), base, "widget content must change the fingerprint");
+  w.html = "<p>a</p>";
+  assert.equal(fp(0), base);
+
+  o.source = "hello there";
+  assert.notEqual(fp(0), base, "object content must change the fingerprint");
+});
+
+await test("E2 trackedSceneSignature sees foreign deletes/edits, ignores untracked new items", async () => {
+  const { trackedSceneSignature } = await import("../lib/canvas/fingerprint");
+  const widgets: FakeItem[] = [{ id: "w1", kind: "diagram", status: "accepted", html: "12345" }];
+  const objects: FakeItem[] = [{ id: "o1", kind: "text", status: "accepted", source: "abc" }];
+  const m = fakeManagers(widgets, objects);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sig = () => trackedSceneSignature(m.widgets as any, m.objects as any, ["w1", "o1"]);
+
+  const before = sig();
+  // The apply's own new item is not on the watchlist, so it never registers.
+  widgets.push({ id: "w2", kind: "html", status: "draft", html: "new" });
+  assert.equal(sig(), before, "items created by the apply must not self-conflict");
+
+  // A concurrent geometry shift on a watched item is still tolerated.
+  Object.assign(widgets[0], { x: 99, y: 99 });
+  assert.equal(sig(), before);
+
+  // A foreign content edit and a foreign delete both must register.
+  objects[0].source = "abcd";
+  assert.notEqual(sig(), before);
+  objects[0].source = "abc";
+  assert.equal(sig(), before);
+  objects.length = 0;
+  assert.notEqual(sig(), before, "a concurrent delete must be detected");
+});
+
+await test("E3 conflict check is content-derived, never a bare revision comparison", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  const fn = src.slice(src.indexOf("function revisionConflict"), src.indexOf("async function execScan"));
+  assert.ok(fn.includes("deps.fingerprintAt("), "revisionConflict must consult the observed fingerprint");
+  assert.ok(fn.includes("deps.getFingerprint()"), "revisionConflict must compare against the live fingerprint");
+  // The async-gap guards must not fall back to raw counter comparisons either.
+  assert.ok(
+    !/!==\s*currentRevision/.test(src),
+    "no executor may reject a mutation on a bare revision inequality"
+  );
+});
+
+await test("E4 layout-review gate arms only on unknown widget geometry, not on deletes", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  const apply = src.slice(src.indexOf("const widgetMutated ="), src.indexOf("async function execEdit"));
+  assert.ok(!apply.includes("removed_widget"), "deleting a widget must not force a layout-review snapshot");
+  const edit = src.slice(src.indexOf("async function execEdit"), src.indexOf("async function execRead"));
+  assert.ok(edit.includes("widgetReflowed"), "canvas_edit must gate on reflow, not on any widget touch");
+  const reflowIdx = edit.indexOf("widgetReflowed = true");
+  const resizeIdx = edit.indexOf('op === "resize_object"');
+  const deleteIdx = edit.indexOf('op === "delete_object"');
+  assert.ok(reflowIdx > resizeIdx && reflowIdx < deleteIdx, "only resize_object may arm the gate");
+});
+
+await test("E5 canvas_snapshot returns the scene so no follow-up canvas_scan is needed", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  const snap = src.slice(src.indexOf("async function execSnapshot"), src.indexOf("function applyContext"));
+  assert.ok(snap.includes("buildScene("), "snapshot must build the scene list");
+  assert.ok(/items:\s*sceneItems/.test(snap), "snapshot must return items[]");
+  assert.ok(snap.includes("counts:"), "snapshot must return counts");
+  assert.ok(
+    AGENT_SYSTEM_PROMPT.includes("Never follow a snapshot with canvas_scan"),
+    "the prompt must tell the model the snapshot already carries the scene"
+  );
+});
+
+await test("E6 a conflict tells the model to retry directly instead of re-scanning", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  const fn = src.slice(src.indexOf("function revisionConflict"), src.indexOf("async function execScan"));
+  assert.ok(/retry this same call with baseRevision/.test(fn), "the error must carry the retry instruction");
+  assert.ok(fn.includes("{ currentRevision }"), "the error must carry currentRevision as data");
+  assert.ok(
+    AGENT_SYSTEM_PROMPT.includes("retry the SAME call immediately with baseRevision"),
+    "the prompt must forbid a reflexive re-scan after a conflict"
+  );
+});
+
+await test("E7 old assistant tool-call args are pruned, not just tool results", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
+  const fn = src.slice(src.indexOf("private pruneOldToolResults"), src.indexOf("private async compactHistory"));
+  assert.ok(fn.includes('m.role === "assistant"'), "pruning must cover assistant tool-call args");
+  assert.ok(fn.includes("m.toolCall"), "pruning must clip the toolCall args payload");
+  assert.ok(fn.includes('m.role !== "tool"'), "pruning must still cover tool results");
+});
+
+await test("E8 turn logs report peak input and bump attribution, not only cumulative tokens", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
+  assert.ok(src.includes("peakInputTokens: this.turnPeakInput"), "log must carry peak single-step input");
+  assert.ok(src.includes("billedSteps: this.turnSteps"), "log must carry the billed step count");
+  assert.ok(src.includes("revisionBumps: this.turnRevisionBumps()"), "log must carry bump attribution");
+  const app = fs.readFileSync(path.join(ROOT, "components/canvas/CanvasApp.tsx"), "utf8");
+  assert.ok(app.includes("revisionAuditRef"), "the revision counter must attribute its bumps");
+});
+
+await test("E9 gesture-end handlers only bump the revision when a gesture happened", () => {
+  const app = fs.readFileSync(path.join(ROOT, "components/canvas/CanvasApp.tsx"), "utf8");
+  // pointerup/pointercancel fire on drag bars and resize handles even with no
+  // drag in flight; an unconditional bump there rejects the agent's next call.
+  const guardedDrag = app.match(/if \(wasDragging\) afterBoardChangeRef\.current\(\);/g) ?? [];
+  const guardedResize = app.match(/if \(wasResizing\) afterBoardChangeRef\.current\(\);/g) ?? [];
+  assert.equal(guardedDrag.length, 2, "both widget and object onDragEnd must be guarded");
+  assert.equal(guardedResize.length, 2, "both widget and object onResizeEnd must be guarded");
+});
+
+// ---------------------------------------------------------------------------
+// F. HTTP integration (real Next server + fake OpenAI-compatible model)
+// ---------------------------------------------------------------------------
+console.log("\nF. HTTP integration");
 
 const APP_PORT = 4123;
 const MODEL_PORT = 4124;
@@ -505,6 +739,41 @@ const fakeModel = http.createServer((req, res) => {
   });
 });
 
+// --- Session seeding: the agent routes require a real better-auth session. ---
+const TEST_USER_EMAIL = "drawva-agent-check@localhost";
+const SESSION_TOKEN = `test-session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+let sessionCookie = "";
+
+async function seedSession(): Promise<void> {
+  const databaseUrl = process.env.DATABASE_URL;
+  const secret = process.env.BETTER_AUTH_SECRET || "";
+  if (!databaseUrl) throw new Error("DATABASE_URL missing for session seeding");
+  const { neon } = await import("@neondatabase/serverless");
+  const sql = neon(databaseUrl);
+  await sql`INSERT INTO "user" (id, name, email, email_verified, created_at, updated_at)
+    VALUES (${`test-user-${SESSION_TOKEN}`}, 'Agent Check', ${TEST_USER_EMAIL}, true, now(), now())
+    ON CONFLICT (email) DO NOTHING`;
+  const userId = (await sql`SELECT id FROM "user" WHERE email = ${TEST_USER_EMAIL}`)[0]?.id as string;
+  await sql`INSERT INTO "session" (id, expires_at, token, created_at, updated_at, user_id)
+    VALUES (${`test-session-row-${SESSION_TOKEN}`}, now() + interval '1 hour', ${SESSION_TOKEN}, now(), now(), ${userId})`;
+  const signature = createHmac("sha256", secret).update(SESSION_TOKEN).digest("base64");
+  const value = encodeURIComponent(`${SESSION_TOKEN}.${signature}`);
+  // Send both plain and __Secure- prefixed names; the server matches whichever it uses.
+  sessionCookie = `better-auth.session_token=${value}; __Secure-better-auth.session_token=${value}`;
+}
+
+async function cleanupSession(): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  try {
+    const { neon } = await import("@neondatabase/serverless");
+    const sql = neon(process.env.DATABASE_URL);
+    await sql`DELETE FROM "session" WHERE token = ${SESSION_TOKEN}`;
+    await sql`DELETE FROM "user" WHERE email = ${TEST_USER_EMAIL}`;
+  } catch (err) {
+    console.warn("session cleanup failed:", err instanceof Error ? err.message : err);
+  }
+}
+
 async function startServer(server: http.Server, port: number): Promise<void> {
   await new Promise<void>((resolve) => server.listen(port, "127.0.0.1", resolve));
 }
@@ -518,7 +787,8 @@ async function waitFor(url: string, timeoutMs: number): Promise<void> {
   for (;;) {
     try {
       const res = await fetch(url);
-      if (res.ok || res.status === 404) return;
+      // 401 is fine: the route is up, it just demands a session.
+      if (res.ok || res.status === 404 || res.status === 401) return;
     } catch {}
     if (Date.now() > deadline) throw new Error(`server not ready at ${url}`);
     await new Promise((r) => setTimeout(r, 300));
@@ -528,7 +798,7 @@ async function waitFor(url: string, timeoutMs: number): Promise<void> {
 async function post(pathname: string, body: unknown): Promise<Response> {
   return fetch(`${APP}${pathname}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", cookie: sessionCookie },
     body: JSON.stringify(body),
   });
 }
@@ -560,7 +830,7 @@ const validStepBase = {
   baseUrl: MODEL_URL,
   apiKey: API_KEY,
   model: "fake-model",
-  enabledPluginIds: ["weather"],
+  loadedPluginIds: ["weather"],
   messages: [{ role: "user", text: "hi" }],
   context: { revision: 0, viewport: { x: 0, y: 0, w: 800, h: 600 }, canvasSize: 20000 },
 };
@@ -569,11 +839,19 @@ let nextProc: ReturnType<typeof spawn> | null = null;
 
 try {
   await startServer(fakeModel, MODEL_PORT);
+  await seedSession();
   nextProc = spawn("npx", ["next", "start", "-p", String(APP_PORT)], {
     cwd: ROOT,
     stdio: ["ignore", "pipe", "pipe"],
   });
   await waitFor(`${APP}/api/plugins`, 60_000);
+
+  await test("E0 unauthenticated requests are rejected", async () => {
+    const res = await post_unauthed("/api/canvas/agent/step", validStepBase);
+    assert.equal(res.status, 401);
+    const res2 = await fetch(`${APP}/api/plugins`);
+    assert.equal(res2.status, 401);
+  });
 
   await test("E1 step rejects client-sent prompt text", async () => {
     const res = await post("/api/canvas/agent/step", { ...validStepBase, systemPrompt: "hi" });
@@ -597,10 +875,10 @@ try {
     assert.equal((await post("/api/canvas/agent/step", noUrl)).status, 400);
   });
 
-  await test("E4 step rejects unknown plugin ids", async () => {
+  await test("E4 step rejects unknown plugin ids in loadedPluginIds", async () => {
     const res = await post("/api/canvas/agent/step", {
       ...validStepBase,
-      enabledPluginIds: ["weather", "not-a-plugin"],
+      loadedPluginIds: ["weather", "not-a-plugin"],
     });
     assert.equal(res.status, 400);
     assert.ok((await res.json()).error.includes("not-a-plugin"));
@@ -617,16 +895,16 @@ try {
   });
 
   await test("E6 plugins ?doc= returns full card; unknown 404s", async () => {
-    const res = await fetch(`${APP}/api/plugins?doc=weather`);
+    const res = await fetch(`${APP}/api/plugins?doc=weather`, { headers: { cookie: sessionCookie } });
     assert.equal(res.status, 200);
     const data = (await res.json()) as { plugin?: { id: string; document: string } };
     assert.equal(data.plugin?.id, "weather");
     assert.ok(data.plugin!.document.includes("drawva-plugin"));
-    const res2 = await fetch(`${APP}/api/plugins?doc=not-a-plugin`);
+    const res2 = await fetch(`${APP}/api/plugins?doc=not-a-plugin`, { headers: { cookie: sessionCookie } });
     assert.equal(res2.status, 404);
   });
 
-  await test("E7 step E2E: streams text, server-composed prompt, tools bound, key forwarded", async () => {
+  await test("E7 step E2E: streams text, server-composed prompt, tools bound, key forwarded, plugin contract injected", async () => {
     modelState.mode = "text";
     const res = await post("/api/canvas/agent/step", validStepBase);
     assert.equal(res.status, 200);
@@ -647,7 +925,9 @@ try {
     assert.ok(String(msgs[0].content).includes("Drawva Agent"));
     assert.ok(String(msgs[0].content).includes("PLUGIN CATALOG"));
     assert.ok(String(msgs[0].content).includes("weather"));
-    assert.ok(Array.isArray(body.tools) && body.tools.length === 8);
+    // loadedPluginIds → durable contract section in the system prompt
+    assert.ok(String(msgs[0].content).includes("PLUGIN CONTRACT (durable)"));
+    assert.ok(Array.isArray(body.tools) && body.tools.length === 9);
   });
 
   await test("E8 step E2E: tool_call round-trips with parsed args", async () => {
@@ -663,7 +943,7 @@ try {
     assert.ok(events.some((e) => e.event === "final"));
   });
 
-  await test("E9 step E2E: multiple tool_calls suppressed to first + extraToolCalls", async () => {
+  await test("E9 step E2E: multi-tool batch rejected via decision admission, nothing executed", async () => {
     modelState.mode = "two-tools";
     const res = await post("/api/canvas/agent/step", validStepBase);
     assert.equal(res.status, 200);
@@ -671,8 +951,12 @@ try {
     const tc = events.filter((e) => e.event === "tool_call");
     assert.equal(tc.length, 1);
     assert.equal(tc[0].data.name, "canvas_scan");
-    assert.equal(tc[0].data.extraToolCalls, 1);
+    assert.equal(tc[0].data.extraToolCalls ?? 0, 0);
     assert.ok(!events.some((e) => e.event === "tool_call" && e.data.name === "canvas_focus"));
+    assert.ok(
+      typeof tc[0].data.admissionError === "string" && tc[0].data.admissionError.includes("2 tool calls"),
+      `admissionError should name the rejected batch: ${JSON.stringify(tc[0].data.admissionError)}`
+    );
   });
 
   await test("E10 step E2E: system notes render as user turns, tool results as tool role", async () => {
@@ -728,6 +1012,15 @@ try {
     nextProc.kill("SIGKILL");
   }
   await stopServer(fakeModel);
+  await cleanupSession();
+}
+
+async function post_unauthed(pathname: string, body: unknown): Promise<Response> {
+  return fetch(`${APP}${pathname}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

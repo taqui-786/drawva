@@ -8,6 +8,29 @@ import { ObjectManager, type ObjectItem } from "./objects";
 const MAX_ATLAS_WIDTH = 1024;
 const MAX_ATLAS_HEIGHT = 768;
 
+/** Resolution ceiling for a capture: long edge and total pixel budget. */
+export interface AtlasResolutionPolicy {
+  maxLongEdge: number;
+  maxPixels: number;
+}
+
+/**
+ * Union of all drawn ink, widgets, and objects across the whole world.
+ * null when the board has no content.
+ */
+export function contentBounds(
+  engine: CanvasEngine,
+  widgets?: WidgetManager | WidgetItem[] | null,
+  objects?: ObjectManager | ObjectItem[] | null
+): Rect | null {
+  const world: Rect = { x: 0, y: 0, w: SIZE, h: SIZE };
+  return unionRects([
+    visibleInkBounds(engine, world),
+    layerBounds(widgets, world),
+    layerBounds(objects, world),
+  ]);
+}
+
 export interface FocusInsetMeta {
   sourceRect: Rect;
   imageRect: Rect;
@@ -358,7 +381,7 @@ export async function buildAtlas(
   changedBox: Rect | null,
   widgets?: WidgetManager | WidgetItem[] | null,
   objects?: ObjectManager | ObjectItem[] | null,
-  opts: { captureFullViewport?: boolean } = {}
+  opts: { captureFullViewport?: boolean; resolution?: AtlasResolutionPolicy } = {}
 ): Promise<AtlasResult> {
   const visibleRect = clip(viewport);
   const captureRect = visibleRect;
@@ -387,13 +410,24 @@ export async function buildAtlas(
     if (cropped.w > 0 && cropped.h > 0) sourceRect = cropped;
   }
 
-  const imageScale =
-    Math.min(1, MAX_ATLAS_WIDTH / Math.max(1, sourceRect.w), MAX_ATLAS_HEIGHT / Math.max(1, sourceRect.h)) *
-    (1 - Number.EPSILON * 4);
-  const imageSize = {
-    w: Math.max(1, Math.min(MAX_ATLAS_WIDTH, Math.ceil(sourceRect.w * imageScale))),
-    h: Math.max(1, Math.min(MAX_ATLAS_HEIGHT, Math.ceil(sourceRect.h * imageScale))),
-  };
+  const imageScale = opts.resolution
+    ? Math.min(
+        1,
+        opts.resolution.maxLongEdge / Math.max(1, sourceRect.w),
+        opts.resolution.maxLongEdge / Math.max(1, sourceRect.h),
+        Math.sqrt(opts.resolution.maxPixels / Math.max(1, sourceRect.w * sourceRect.h))
+      ) * (1 - Number.EPSILON * 4)
+    : Math.min(1, MAX_ATLAS_WIDTH / Math.max(1, sourceRect.w), MAX_ATLAS_HEIGHT / Math.max(1, sourceRect.h)) *
+      (1 - Number.EPSILON * 4);
+  const imageSize = opts.resolution
+    ? {
+        w: Math.max(1, Math.ceil(sourceRect.w * imageScale)),
+        h: Math.max(1, Math.ceil(sourceRect.h * imageScale)),
+      }
+    : {
+        w: Math.max(1, Math.min(MAX_ATLAS_WIDTH, Math.ceil(sourceRect.w * imageScale))),
+        h: Math.max(1, Math.min(MAX_ATLAS_HEIGHT, Math.ceil(sourceRect.h * imageScale))),
+      };
   const out = document.createElement("canvas");
   out.width = imageSize.w;
   out.height = imageSize.h;
