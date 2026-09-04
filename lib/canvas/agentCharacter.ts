@@ -71,6 +71,8 @@ interface Character {
   /** State to resume after a stumble. */
   resumeState: CharState | null;
   facing: 1 | -1;
+  /** Dominant walk axis — picks side sprites (h) or front sprites (v). */
+  walkDir: "h" | "v";
   stateSince: number;
   alpha: number;
   fadingOut: boolean;
@@ -602,6 +604,7 @@ export class AgentCharacterController {
       queuedState: "thinking",
       resumeState: null,
       facing: 1,
+      walkDir: "h",
       stateSince: performance.now(),
       alpha: 0,
       fadingOut: false,
@@ -628,9 +631,9 @@ export class AgentCharacterController {
 
   private charWorldWidth(): number {
     const engine = this.deps.engine;
-    // Integer multiple of the sprite grid (3×16 / 4×16 screen px) so every
+    // Integer multiple of the 24px grid (3×24 / 2×24 screen px) so every
     // sprite pixel maps to exactly N whole screen pixels — crisp at any zoom.
-    const target = engine.cssWidth > 0 && engine.cssWidth < 640 ? SPRITE_W * 3 : SPRITE_W * 4;
+    const target = engine.cssWidth > 0 && engine.cssWidth < 640 ? SPRITE_W * 2 : SPRITE_W * 3;
     return clamp(target / (engine.camera.scale || 1), SPRITE_W, 6000);
   }
 
@@ -672,6 +675,9 @@ export class AgentCharacterController {
       const dist = Math.hypot(dx, dy);
       const step = speed * dt;
       if (Math.abs(dx) > 1) ch.facing = dx < 0 ? -1 : 1;
+      // Side sprites when walking across the board, front when walking
+      // toward/away (top-down whiteboard has no true "back").
+      ch.walkDir = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
       if (dist <= step || dist < 4 / scale) {
         ch.pos = { ...ch.landing };
         ch.landing = null;
@@ -697,39 +703,81 @@ export class AgentCharacterController {
     const none = { jump: 0, shake: 0 } as const;
     if (this.reduced) {
       const map: Partial<Record<CharState, SpriteFrameName>> = {
-        walking: "walk0",
-        reading: "read0",
-        working: "work0",
-        thinking: "think0",
-        celebrating: "celebrate0",
-        sad: "sad",
-        stumble: "idle0",
-        idle: "idle0",
+        walking: ch.walkDir === "h" ? "side_walk0" : "front_walk0",
+        reading: "side_read0",
+        working: "side_work0",
+        thinking: "front_think0",
+        celebrating: "front_celebrate",
+        sad: "front_sad",
+        stumble: "front_idle0",
+        idle: "front_idle0",
       };
-      return { name: map[ch.state] ?? "idle0", jump: 0, shake: 0 };
+      return { name: map[ch.state] ?? "front_idle0", jump: 0, shake: 0 };
     }
     switch (ch.state) {
-      case "walking":
-        return { name: Math.floor(now / 130) % 2 ? "walk1" : "walk0", ...none };
+      case "walking": {
+        const f = Math.floor(now / 130) % 4;
+        const side: SpriteFrameName[] = ["side_walk0", "side_walk1", "side_walk2", "side_walk3"];
+        const front: SpriteFrameName = f % 2 ? "front_walk1" : "front_walk0";
+        return { name: ch.walkDir === "h" ? side[f] : front, ...none };
+      }
       case "idle": {
         const cycle = ((now - ch.stateSince) % 3200) / 3200;
-        return { name: cycle < 0.91 ? "idle0" : "idle1", ...none };
+        return { name: cycle < 0.91 ? "front_idle0" : "front_idle1", ...none };
       }
       case "reading":
-        return { name: Math.floor(now / 380) % 2 ? "read1" : "read0", ...none };
+        return { name: Math.floor(now / 380) % 2 ? "side_read1" : "side_read0", ...none };
       case "working":
-        return { name: Math.floor(now / 150) % 2 ? "work1" : "work0", ...none };
+        return { name: Math.floor(now / 150) % 2 ? "side_work1" : "side_work0", ...none };
       case "thinking":
-        return { name: Math.floor(now / 600) % 2 ? "think1" : "think0", ...none };
+        return { name: Math.floor(now / 600) % 2 ? "front_think1" : "front_think0", ...none };
       case "celebrating": {
         const up = Math.floor(now / 160) % 2 === 1;
-        return { name: up ? "celebrate1" : "celebrate0", jump: up ? 0.18 : 0, shake: 0 };
+        return { name: "front_celebrate", jump: up ? 0.18 : 0, shake: 0 };
       }
       case "stumble":
-        return { name: "idle0", jump: 0, shake: 1 };
+        return { name: "front_idle0", jump: 0, shake: 1 };
       case "sad":
-        return { name: "sad", ...none };
+        return { name: "front_sad", ...none };
     }
+  }
+
+  /**
+   * Tiny pixel activity glyph above the head — ✓ done, ✦ working, ! sad.
+   * Drawn as crisp pixel squares so it reads as pixel-art, not emoji.
+   */
+  private drawGlyph(
+    ctx: CanvasRenderingContext2D,
+    ch: Character,
+    kind: "done" | "working" | "error",
+    now: number
+  ): void {
+    const w = this.charWorldWidth();
+    const px = clamp(4 / (this.deps.engine.camera.scale || 1), 2, 60);
+    const cx = ch.pos.x;
+    const cy = ch.pos.y - w * (SPRITE_H / SPRITE_W) - px * 2;
+    ctx.save();
+    ctx.globalAlpha = ch.alpha;
+    ctx.fillStyle = kind === "done" ? "#22c55e" : kind === "working" ? "#f59e0b" : "#ef4444";
+    if (kind === "done") {
+      // 5×5 pixel check mark
+      ctx.fillRect(cx - px * 1.5, cy - px * 0.5, px, px);
+      ctx.fillRect(cx - px * 0.5, cy + px * 0.5, px, px);
+      ctx.fillRect(cx + px * 0.5, cy - px * 1.5, px, px);
+      ctx.fillRect(cx + px * 1.5, cy - px * 2.5, px, px);
+    } else if (kind === "working") {
+      // two 4-point pixel sparkles pulsing out from center
+      const phase = Math.floor(now / 150) % 2;
+      ctx.fillRect(cx - px, cy - phase * px, px, px);
+      ctx.fillRect(cx + phase * px, cy, px, px);
+      ctx.fillRect(cx, cy + phase * px, px, px);
+      ctx.fillRect(cx - px, cy + px, px, px);
+    } else {
+      // 1×5 exclamation bar + dot
+      ctx.fillRect(cx - px * 0.5, cy - px * 2, px, px * 2.5);
+      ctx.fillRect(cx - px * 0.5, cy + px, px, px);
+    }
+    ctx.restore();
   }
 
   private roundRectPath(
@@ -894,10 +942,15 @@ export class AgentCharacterController {
     ctx.drawImage(getSpriteFrame(name), -w / 2, -h, w, h);
     ctx.restore();
 
+    // Pixel activity indicator above the head.
+    if (ch.state === "celebrating") this.drawGlyph(ctx, ch, "done", now);
+    else if (ch.state === "working") this.drawGlyph(ctx, ch, "working", now);
+    else if (ch.state === "sad" || ch.state === "stumble") this.drawGlyph(ctx, ch, "error", now);
+
     // Thought bubble (skipped automatically while walking).
     this.drawBubble(ctx, ch);
 
-    // Impact sparks at the nearest edge of the content being worked on.
+    // Pencil sparks at the nearest edge of the content being drawn on.
     if (ch.state === "working" && ch.targetBox) {
       const b = ch.targetBox;
       const px = clamp(ch.pos.x, b.x, b.x + b.w);
@@ -906,7 +959,7 @@ export class AgentCharacterController {
       const s = clamp(4 / scale, 2, 60);
       ctx.save();
       ctx.globalAlpha = ch.alpha;
-      ctx.fillStyle = "#f59e0b";
+      ctx.fillStyle = "#22c55e";
       const phase = Math.floor(now / 150) % 3;
       const offs = [
         [0, -1],
