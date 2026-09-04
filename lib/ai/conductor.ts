@@ -16,6 +16,7 @@ import {
 } from "@/lib/ai/provider";
 import { buildAtlas } from "@/lib/canvas/atlas";
 import { buildScene } from "@/lib/canvas/scene";
+import { widgetGeometryForViewport } from "@/lib/ai/geometry";
 import { SIZE } from "@/lib/canvas/constants";
 import {
   saveAgentSession,
@@ -28,6 +29,7 @@ import {
   AGENT_CONVERSATION_MAX_BYTES,
   AGENT_MAX_APPLIES_PER_TURN,
   AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN,
+  AGENT_MAX_CONSECUTIVE_FAILURES,
   AGENT_MAX_EDITS_PER_TURN,
   AGENT_MAX_LOADED_PLUGINS,
   AGENT_MAX_PATCHES_PER_TURN,
@@ -36,10 +38,8 @@ import {
   AGENT_MAX_TURN_IMAGES,
   AGENT_SCENE_JSON_MAX,
   AGENT_TOOL_CACHE_ENTRIES,
-  COMPACT_KEEP,
   REVISION_FINGERPRINT_ENTRIES,
 } from "./agentTools";
-import { compactionTriggerTokens } from "./capabilities";
 import { executeTool, fnv1a, type ActiveImage, type ConductorToolDeps } from "./conductorTools";
 
 export type StepMessage =
@@ -53,7 +53,7 @@ export type StepMessage =
       isError?: boolean;
       images?: { id: string; dataUrl: string }[];
     }
-  | { role: "system"; text: string; tag?: "compact" | "steer" | "cancel" };
+  | { role: "system"; text: string; tag?: "cancel" };
 
 export type ConductorEvent =
   | { kind: "turn_start" }
@@ -64,8 +64,6 @@ export type ConductorEvent =
   | { kind: "reasoning_delta"; text: string }
   | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string; message?: string }
   | { kind: "usage"; usage: { inputTokens: number; outputTokens: number } }
-  | { kind: "compact" }
-  | { kind: "compact_failed"; message: string }
   | { kind: "log"; entry: AiLogEntry };
 
 export interface ConductorDeps {
@@ -90,35 +88,51 @@ export interface ConductorDeps {
   canvasId?: () => string | undefined;
 }
 
-interface StepToolCall {
-  id: string;
-  name: string;
-  args: unknown;
-  extraToolCalls?: number;
-  /** Admission-rejection reason from the server; when set the call is NOT executed. */
-  admissionError?: string;
+interface TurnPolicy {
+  applies: number;
+  patches: number;
+  edits: number;
+  snapshots: number;
+  detailSnapshots: number;
+  readOnlyStreak: number;
+  layoutReviewNeeded: boolean;
+  steps: number;
+  /** Consecutive failures of the same tool — the anti-thrash fuse. */
+  failStreak: { name: string; count: number };
+  /** Once tripped, every later tool call in this turn short-circuits. */
+  stopped: string;
+  /** Widget title → id created this turn, so a retry cannot duplicate it. */
+  createdWidgets: Map<string, string>;
 }
 
-interface StepResult {
-  kind: "tool_call" | "final" | "error";
-  toolCall?: StepToolCall;
-  text?: string;
-  message?: string;
+/** Normalized widget title of a create command, or "" when this apply makes none. */
+function widgetTitleOf(args: unknown): string {
+  const commands = (args as { commands?: unknown })?.commands;
+  const list = Array.isArray(commands) ? commands : [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    if (rec.targetId) return "";
+    const makesWidget = rec.html !== undefined || rec.source !== undefined;
+    const title = typeof rec.title === "string" ? rec.title.trim().toLowerCase() : "";
+    if (makesWidget && title) return title;
+  }
+  return "";
 }
 
-/**
- * TESTING KILL-SWITCH: one model step per turn, no ReAct loop. The turn runs a
- * single step (one tool call at most), then ends. Flip back to false to
- * restore the full agent loop.
- */
-export const AGENT_SINGLE_STEP_TEST = false;
+/** Thrown to unwind the turn pump on cancel/generation change. */
+class TurnAborted extends Error {
+  constructor() {
+    super("Turn aborted.");
+    this.name = "TurnAborted";
+  }
+}
 
 export class Conductor {
   private messages: StepMessage[] = [];
   private running = false;
   private currentGeneration = 0;
   private abort: AbortController | null = null;
-  private pendingSteer: string[] = [];
   private sendQueue: { text: string; attachments?: File[]; options?: { headless?: boolean } }[] = [];
   private images = new Map<string, ActiveImage>();
   private latestSnapshotId: string | null = null;
@@ -148,7 +162,6 @@ export class Conductor {
   private toolCache = new Map<string, { result: unknown; isError: boolean }>();
   /** Revision the cache was built at — replays must never return stale revision-scoped state. */
   private toolCacheRevision = -1;
-  private compactFailedOnce = false;
 
   constructor(private deps: ConductorDeps) {
     const restored = loadConversation(this.deps.canvasId?.());
@@ -214,14 +227,18 @@ export class Conductor {
       void this.send(trimmed);
       return;
     }
-    this.pendingSteer.push(trimmed);
+    // The agent loop runs server-side; steering posts straight into the
+    // running turn and its events arrive on the open turn stream.
+    this.messages.push({ role: "user", text: trimmed });
+    this.persistConversation();
+    this.postSteer(trimmed);
   }
 
   cancel(): void {
     this.currentGeneration++;
     this.sendQueue = [];
-    this.pendingSteer = [];
     this.abort?.abort();
+    this.postCancel(false);
     if (!this.running) return;
     this.messages.push({ role: "system", text: "[user cancelled]", tag: "cancel" });
     this.running = false;
@@ -230,6 +247,7 @@ export class Conductor {
 
   reset(): void {
     this.cancel();
+    this.postCancel(true);
     this.messages = [];
     this.images.clear();
     this.latestSnapshotId = null;
@@ -308,22 +326,20 @@ export class Conductor {
     const initialLen = this.messages.length;
     this.running = true;
     this.abort = new AbortController();
-    this.pendingSteer = [];
     this.turnImageIds = [];
     this.atlasImageId = null;
     this.turnUsage = { inputTokens: 0, outputTokens: 0 };
     this.turnPeakInput = 0;
     this.turnSteps = 0;
+    this.turnErrorMessage = "";
     this.toolCache = new Map();
     this.toolCacheRevision = this.deps.getRevision();
     this.revisionFingerprints = new Map([[this.toolCacheRevision, this.deps.getFingerprint()]]);
     this.auditAtTurnStart = { ...(this.deps.getRevisionAudit?.() ?? {}) };
     this.revisionAtTurnStart = this.toolCacheRevision;
-    this.compactFailedOnce = false;
     this.emit({ kind: "turn_start" });
 
     let userText = text.trim();
-    let steps = 0;
     let finished = false;
     let finalText = "";
 
@@ -378,228 +394,42 @@ export class Conductor {
       this.messages.push({ role: "user", text: userText, images: images.length ? images : undefined });
       this.persistConversation();
 
-      let applies = 0;
-      let patches = 0;
-      let edits = 0;
-      let snapshots = 0;
-      let detailSnapshots = 0;
-      let readOnlyStreak = 0;
-      let layoutReviewNeeded = false;
+      const policy: TurnPolicy = {
+        applies: 0,
+        patches: 0,
+        edits: 0,
+        snapshots: 0,
+        detailSnapshots: 0,
+        readOnlyStreak: 0,
+        layoutReviewNeeded: false,
+        steps: 0,
+        failStreak: { name: "", count: 0 },
+        stopped: "",
+        createdWidgets: new Map(),
+      };
       const stepsLog: AiLogStep[] = [];
 
-      const mutationBlocked = (name: string): boolean =>
-        (name === "canvas_patch_widget" || name === "canvas_edit") && layoutReviewNeeded;
-
-      const compactionTrigger = compactionTriggerTokens(getActiveModel() || "");
-
-      const maxSteps = AGENT_SINGLE_STEP_TEST ? 1 : AGENT_MAX_STEPS_PER_TURN;
-      while (steps < maxSteps) {
-        if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-        this.flushSteer();
-        if (estimateTokens(this.serializeMessages()) > compactionTrigger) {
-          await this.compactHistory();
-          if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-        }
-        this.emit({ kind: "step_start", stepNumber: steps + 1 });
-
-        const step = await this.postStep();
-        if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-        if (step.kind === "error") {
-          this.emit({ kind: "turn_end", reason: "error", error: step.message || "Agent step failed." });
-          return;
-        }
-        if (step.kind === "final") {
-          this.messages.push({ role: "assistant", text: step.text || "" });
-          finalText = step.text || "";
-          stepsLog.push({
-            stepNumber: steps + 1,
-            text: step.text || "",
-            summary: "Finished turn with final message",
-          });
-          finished = true;
-          this.persistConversation();
-          break;
-        }
-
-        const call = step.toolCall!;
-        steps += 1;
-        this.emit({ kind: "tool_start", name: call.name, argsSummary: summarizeArgs(call.args) });
-
-        let result: unknown;
-        let isError = false;
-        if (call.admissionError) {
-          // Decision admission: the server rejected this call's arguments before
-          // execution. Surface the schema error as feedback so the model retries in-turn.
-          isError = true;
-          result = {
-            code: "DECISION_REJECTED",
-            message: `${call.admissionError} The tool was NOT executed. Return one corrected tool call with valid arguments, or a final answer when done.`,
-          };
-        } else if (mutationBlocked(call.name)) {
-          isError = true;
-          result = {
-            code: "LAYOUT_REVIEW_REQUIRED",
-            message:
-              "Widgets were just created or moved. Call canvas_snapshot with target=canvas, quality=basic to review the full layout before the next mutation.",
-          };
-        } else if (call.name === "canvas_apply" && applies >= AGENT_MAX_APPLIES_PER_TURN) {
-          result = {
-            ok: true,
-            code: "APPLY_BUDGET_REACHED",
-            message: `Apply budget reached (${AGENT_MAX_APPLIES_PER_TURN}/${AGENT_MAX_APPLIES_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
-          };
-        } else if (call.name === "canvas_patch_widget" && patches >= AGENT_MAX_PATCHES_PER_TURN) {
-          result = {
-            ok: true,
-            code: "PATCH_BUDGET_REACHED",
-            message: `Patch budget reached (${AGENT_MAX_PATCHES_PER_TURN}/${AGENT_MAX_PATCHES_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
-          };
-        } else if (call.name === "canvas_edit" && edits >= AGENT_MAX_EDITS_PER_TURN) {
-          result = {
-            ok: true,
-            code: "EDIT_BUDGET_REACHED",
-            message: `Edit budget reached (${AGENT_MAX_EDITS_PER_TURN}/${AGENT_MAX_EDITS_PER_TURN}). Keep the best valid result, finish with a final answer, and wait for the user's next message.`,
-          };
-        } else if (call.name === "canvas_snapshot" && snapshots >= AGENT_MAX_SNAPSHOTS_PER_TURN) {
-          result = {
-            ok: true,
-            code: "SNAPSHOT_BUDGET_REACHED",
-            message: `Snapshot budget reached (${AGENT_MAX_SNAPSHOTS_PER_TURN}/${AGENT_MAX_SNAPSHOTS_PER_TURN}). You have seen the board — act on what you have (apply/edit/patch) or finish with a final answer.`,
-          };
-        } else if (
-          call.name === "canvas_snapshot" &&
-          (call.args as { quality?: string } | null)?.quality === "detail" &&
-          detailSnapshots >= AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN
-        ) {
-          isError = true;
-          result = {
-            code: "DETAIL_BUDGET_REACHED",
-            message: `Detail-snapshot budget reached (${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}/${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}). Use quality=basic or act on the detail you already have.`,
-          };
-        } else {
-          // Any board change (apply, user ink, rollback) invalidates replays:
-          // cached scan/snapshot results embed revision-scoped state and a
-          // stale replayed revision poisons every subsequent baseRevision.
-          const revisionNow = this.deps.getRevision();
-          if (revisionNow !== this.toolCacheRevision) {
-            this.toolCache.clear();
-            this.toolCacheRevision = revisionNow;
-          }
-          const signature = await toolSignature(call.name, call.args);
-          const cached = this.toolCache.get(signature);
-          if (cached) {
-            // Idempotent replay: identical {name,args} within the turn returns
-            // the earlier outcome instead of executing again.
-            result = cached.result;
-            isError = cached.isError;
-          } else {
-            try {
-              result = await executeTool(call.name, call.args, this.toolDeps());
-              if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-              isError = isFailedResult(result);
-              this.toolCache.set(signature, { result, isError });
-              if (this.toolCache.size > AGENT_TOOL_CACHE_ENTRIES) {
-                this.toolCache.delete(this.toolCache.keys().next().value as string);
-              }
-              if (result && typeof result === "object") {
-                const rec = result as Record<string, unknown>;
-                if (call.name === "canvas_apply" && rec.ok === true) applies += 1;
-                if (call.name === "canvas_patch_widget" && rec.ok === true) patches += 1;
-                if (call.name === "canvas_edit" && rec.ok === true) edits += 1;
-                if (call.name === "canvas_snapshot" && rec.ok !== false) {
-                  snapshots += 1;
-                  if ((call.args as { quality?: string } | null)?.quality === "detail") detailSnapshots += 1;
-                }
-                // Layout-review gate: only a content-covering snapshot proves the
-                // layout — a zoomed region/object view cannot verify composition.
-                if (rec.widgetMutated === true) layoutReviewNeeded = true;
-                if (call.name === "canvas_snapshot" && rec.ok !== false && rec.coversContent === true) {
-                  layoutReviewNeeded = false;
-                }
-              }
-            } catch (err) {
-              isError = true;
-              result = {
-                code: "INTERNAL",
-                message: err instanceof Error ? err.message : "Tool failed.",
-              };
-              this.toolCache.set(signature, { result, isError });
-              if (this.toolCache.size > AGENT_TOOL_CACHE_ENTRIES) {
-                this.toolCache.delete(this.toolCache.keys().next().value as string);
-              }
-            }
-          }
-        }
-
-        isError = isError || isFailedResult(result);
-        // Every revision handed to the model gets its content fingerprint
-        // recorded, so the next mutation's conflict check can distinguish
-        // "the board changed" from "the counter moved".
-        this.recordRevisionFingerprint();
-        const toolImages = this.imagesForTool(call.name, result);
-        stepsLog.push({
-          stepNumber: steps,
-          tool: call.name,
-          args: call.args,
-          result,
-          isError,
-          summary: summarizeResult(result),
-          text: step.text || undefined,
-        });
-
-        this.messages.push({
-          role: "assistant",
-          text: step.text || "",
-          toolCall: { id: call.id, name: call.name, args: call.args },
-        });
-        this.messages.push({
-          role: "tool",
-          toolCallId: call.id,
-          name: call.name,
-          result,
-          isError,
-          images: toolImages,
-        });
-        // Crash durability: the turn's tool history survives a tab crash mid-run.
-        this.persistConversation();
-        this.emit({
-          kind: "tool_end",
-          name: call.name,
-          ok: !isError,
-          summary: summarizeResult(result),
-        });
-        if ((call.extraToolCalls ?? 0) > 0) {
-          this.messages.push({
-            role: "system",
-            text: `One tool call per step. ${call.extraToolCalls} extra call(s) were not executed. Continue the task by issuing the next single tool call on the following step.`,
-          });
-        }
-        // ponytail: streak heuristic instead of pixel-overlap cache; overlap tracking if jitter persists past budgets
-        if (call.name === "canvas_scan" || call.name === "canvas_snapshot" || call.name === "canvas_read" || call.name === "canvas_focus") {
-          readOnlyStreak += 1;
-        } else {
-          readOnlyStreak = 0;
-        }
-        if (readOnlyStreak === 4) {
-          readOnlyStreak = 0;
-          this.messages.push({
-            role: "system",
-            text: "4 reads without a mutation. You have enough context — act now (canvas_apply/canvas_edit/canvas_patch_widget) or finish with a final answer. Do not take another snapshot of a region you already saw.",
-          });
-        }
+      // The agent loop runs server-side: one turn stream carries text deltas
+      // and tool requests; this side answers tool requests with the same
+      // budget/cache/layout policy the per-step loop used to enforce.
+      const turnResult = await this.postTurn(userText, images, gen, policy, stepsLog);
+      if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
+      if (turnResult.kind === "error") {
+        this.emit({ kind: "turn_end", reason: "error", error: turnResult.message || "Agent turn failed." });
+        return;
       }
+      finalText = turnResult.text || "";
+      finished = true;
+      this.messages.push({ role: "assistant", text: finalText });
+      stepsLog.push({
+        stepNumber: policy.steps + 1,
+        text: finalText,
+        summary: "Finished turn with final message",
+      });
+      this.persistConversation();
 
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-      const stepLimitMessage = `Step limit reached (${maxSteps}/${maxSteps}).`;
-      if (finished) {
-        this.emit({ kind: "turn_end", reason: "done", message: finalText || undefined });
-      } else if (AGENT_SINGLE_STEP_TEST) {
-        // Single-step test mode: the one allowed step ran — end quietly, no error toast.
-        this.emit({ kind: "turn_end", reason: "done", message: finalText || "Single-step test: loop disabled after 1 step." });
-        finished = true;
-      } else {
-        this.emit({ kind: "turn_end", reason: "error", error: stepLimitMessage });
-      }
+      this.emit({ kind: "turn_end", reason: "done", message: finalText || undefined });
 
       const config = this.deps.provider() ?? getProviderConfig();
       const commandsList: unknown[] = [];
@@ -617,9 +447,9 @@ export class Conductor {
         requestId: `turn-${Date.now()}`,
         model: getActiveModel() || "unknown",
         providerType: config?.type,
-        attempts: Math.max(1, steps),
+        attempts: Math.max(1, policy.steps),
         status: finished ? "success" : "error",
-        errorMessage: finished ? undefined : stepLimitMessage,
+        errorMessage: finished ? undefined : "Agent turn ended without a final answer.",
         atlasImage: this.images.get(this.latestSnapshotId || "")?.dataUrl || "",
         systemPrompt: AGENT_SYSTEM_PROMPT,
         userPromptText: userText,
@@ -637,7 +467,7 @@ export class Conductor {
           billedSteps: this.turnSteps,
         },
         response: {
-          message: stepsLog.filter((s) => s.text).map((s) => s.text).join("\n\n"),
+          message: finalText,
           commands: commandsList,
         },
       };
@@ -662,16 +492,473 @@ export class Conductor {
     }
   }
 
-  private persistConversation(): void {
-    saveConversation(this.messages, this.deps.canvasId?.(), [...this.loadedPluginIds]);
+  private async postTurn(
+    userText: string,
+    images: { id: string; dataUrl: string }[],
+    gen: number,
+    policy: TurnPolicy,
+    stepsLog: AiLogStep[]
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string }> {
+    const config = this.deps.provider() ?? getProviderConfig();
+    const model = getActiveModel();
+    if (!config || !model) {
+      return { kind: "error", message: "Configure an API provider in Settings to use Drawva Agent." };
+    }
+
+    const body = {
+      conversation: this.conversationSuffix(),
+      providerType: config.type,
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
+      model,
+      reasoningEffort: getReasoningEffort(),
+      text: userText,
+      images: images.length ? images : undefined,
+      history: this.seedHistory(),
+      loadedPluginIds: [...this.loadedPluginIds],
+      webSearch: getWebSearchEnabled(),
+    };
+
+    const attempt = async (): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string }> => {
+      const res = await fetch("/api/canvas/agent/step", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(body),
+        signal: this.abort?.signal,
+      });
+      if (!res.ok || !res.body) {
+        let message = "Agent turn failed.";
+        try {
+          const data = (await res.json()) as { error?: string; message?: string };
+          message = data.error || data.message || message;
+        } catch {}
+        const err = new Error(message) as Error & { status: number };
+        err.status = res.status;
+        throw err;
+      }
+      return this.pumpTurnStream(res, gen, policy, stepsLog);
+    };
+
+    try {
+      return await attempt();
+    } catch (err) {
+      if (err instanceof TurnAborted || this.abort?.signal.aborted || gen !== this.currentGeneration) {
+        return { kind: "cancelled" };
+      }
+      if (isRetryableTurnError(err)) {
+        // Server already retried with backoff; this client retry covers HTTP-level
+        // failures. Delay so a rate-limited provider gets breathing room.
+        await sleep(1500, this.abort?.signal);
+        try {
+          return await attempt();
+        } catch (retryErr) {
+          if (retryErr instanceof TurnAborted || this.abort?.signal.aborted || gen !== this.currentGeneration) {
+            return { kind: "cancelled" };
+          }
+          return { kind: "error", message: retryErr instanceof Error ? retryErr.message : "Agent turn failed." };
+        }
+      }
+      return { kind: "error", message: err instanceof Error ? err.message : "Agent turn failed." };
+    }
   }
 
-  private flushSteer(): void {
-    if (this.pendingSteer.length === 0) return;
-    const text = this.pendingSteer.splice(0).join("\n");
-    // Steering changes the canvas context: attach a fresh state digest so the
-    // next steps reason over current revision/scene, not the turn-opening view.
-    this.messages.push({ role: "user", text: `${text}\n\n${this.hostRefs()}`, images: undefined });
+  /**
+   * Read one turn stream: text/reasoning/usage events project straight
+   * through; each tool request runs the client policy chain and posts back
+   * as a tool result on the same conversation.
+   */
+  private async pumpTurnStream(
+    res: Response,
+    gen: number,
+    policy: TurnPolicy,
+    stepsLog: AiLogStep[]
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string }> {
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    // Mutable so a tool call can clear it: interim "working on it" lines are
+    // progress, not the answer, and concatenating them produced the 25-sentence
+    // final message in the reported trace.
+    const sink = { text: "" };
+    const checkLive = () => {
+      if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
+    };
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        checkLive();
+        buffer += decoder.decode(value, { stream: true });
+        let sep = buffer.indexOf("\n\n");
+        while (sep >= 0) {
+          const block = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          const outcome = await this.handleTurnFrame(block, gen, policy, stepsLog, sink);
+          if (outcome === "final") return { kind: "final", text: sink.text };
+          if (outcome === "error") return { kind: "error", message: this.turnErrorMessage || "Agent turn failed." };
+          sep = buffer.indexOf("\n\n");
+        }
+      }
+    } catch (err) {
+      if (err instanceof TurnAborted) return { kind: "cancelled" };
+      throw err;
+    } finally {
+      try {
+        reader.releaseLock();
+      } catch {}
+    }
+    return { kind: "final", text: sink.text };
+  }
+
+  /**
+   * Handle one SSE frame. Returns "final"/"error" when the turn stream is
+   * complete, "continue" otherwise. Tool requests are answered inline before
+   * reading resumes so the server loop keeps flowing on this same stream.
+   */
+  private async handleTurnFrame(
+    block: string,
+    gen: number,
+    policy: TurnPolicy,
+    stepsLog: AiLogStep[],
+    sink: { text: string }
+  ): Promise<"continue" | "final" | "error"> {
+    const eventName = /^event: (.+)$/m.exec(block)?.[1] ?? "message";
+    const dataLine = /^data: (.+)$/m.exec(block)?.[1] ?? "";
+    if (!dataLine) return "continue";
+    let data: unknown = null;
+    try {
+      data = JSON.parse(dataLine);
+    } catch {
+      return "continue";
+    }
+    if (!data || typeof data !== "object") return "continue";
+    const rec = data as Record<string, unknown>;
+    if (eventName === "text_delta" && typeof rec.text === "string") {
+      sink.text += rec.text;
+      this.emit({ kind: "text_delta", text: rec.text });
+    } else if (eventName === "reasoning" && typeof rec.text === "string") {
+      // Reasoning tokens never become the final answer — detail only.
+      this.emit({ kind: "reasoning_delta", text: rec.text });
+    } else if (eventName === "tool_request" && typeof rec.name === "string") {
+      // Anything said before a tool call was a progress line, not the answer.
+      sink.text = "";
+      const toolCallId = String(rec.toolCallId || `call-${Date.now()}`);
+      const answer = await this.answerToolRequest(String(rec.name), rec.args, toolCallId, gen, policy, stepsLog);
+      if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
+      await this.postToolResult(toolCallId, answer.result, answer.isError);
+    } else if (eventName === "tool_end") {
+      // Server echo of the posted result; the client already emitted its own.
+    } else if (eventName === "agent_status") {
+      // Server lifecycle mirror; the client owns running state.
+    } else if (eventName === "final") {
+      if (typeof rec.text === "string" && rec.text) sink.text = rec.text;
+      return "final";
+    } else if (eventName === "usage") {
+      const inputTokens = Number(rec.inputTokens || 0);
+      const outputTokens = Number(rec.outputTokens || 0);
+      this.turnUsage.inputTokens += inputTokens;
+      this.turnUsage.outputTokens += outputTokens;
+      this.turnPeakInput = Math.max(this.turnPeakInput, inputTokens);
+      this.turnSteps += 1;
+      this.emit({ kind: "usage", usage: { inputTokens, outputTokens } });
+    } else if (eventName === "error") {
+      this.turnErrorMessage = String(rec.message || rec.error || "Agent turn failed.");
+      return "error";
+    }
+    return "continue";
+  }
+
+  private turnErrorMessage = "";
+
+  private async postToolResult(toolCallId: string, result: unknown, isError: boolean): Promise<void> {
+    const signal = this.abort?.signal;
+    try {
+      await fetch("/api/canvas/agent/tool-result", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ conversation: this.conversationSuffix(), toolCallId, result: result ?? {}, isError }),
+        ...(signal ? { signal } : {}),
+      });
+    } catch (err) {
+      if (this.abort?.signal.aborted) throw new TurnAborted();
+      throw err;
+    }
+  }
+
+  private postSteer(text: string): void {
+    const config = this.deps.provider() ?? getProviderConfig();
+    const model = getActiveModel();
+    if (!config || !model) return;
+    const host = this.hostRefs();
+    void fetch("/api/canvas/agent/step", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        conversation: this.conversationSuffix(),
+        providerType: config.type,
+        baseUrl: config.baseUrl,
+        apiKey: config.apiKey,
+        model,
+        reasoningEffort: getReasoningEffort(),
+        text: [text, host].filter(Boolean).join("\n\n"),
+        loadedPluginIds: [...this.loadedPluginIds],
+        webSearch: getWebSearchEnabled(),
+        mode: "steer",
+      }),
+      signal: this.abort?.signal,
+    })
+      .then(async (res) => {
+        try {
+          await res.body?.cancel();
+        } catch {}
+      })
+      .catch(() => {});
+  }
+
+  private postCancel(dispose: boolean): void {
+    void fetch("/api/canvas/agent/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ conversation: this.conversationSuffix(), ...(dispose ? { action: "dispose" } : {}) }),
+    }).catch(() => {});
+  }
+
+  /** Server conversation suffix: per canvas, safe alphabet only. */
+  private conversationSuffix(): string {
+    const raw = this.deps.canvasId?.() || "default";
+    return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(raw) ? raw : "default";
+  }
+
+  /**
+   * Seed text for a fresh server conversation: recent user/assistant texts
+   * only (tool payloads stay local). Established server sessions ignore it.
+   */
+  private seedHistory(): { role: string; text: string }[] {
+    const out: { role: string; text: string }[] = [];
+    let chars = 0;
+    for (let i = this.messages.length - 1; i >= 0 && out.length < 60 && chars < 24_000; i--) {
+      const m = this.messages[i];
+      if (m.role === "user" && m.text.trim()) {
+        out.unshift({ role: "user", text: m.text.slice(0, 2000) });
+        chars += m.text.length;
+      } else if (m.role === "assistant" && m.text.trim()) {
+        const suffix = m.toolCall ? ` [called ${m.toolCall.name}]` : "";
+        out.unshift({ role: "assistant", text: `${m.text.slice(0, 2000)}${suffix}` });
+        chars += m.text.length;
+      }
+    }
+    return out;
+  }
+
+
+  /**
+   * Answer one server-requested tool call with the client-side policy chain:
+   * budgets, idempotency cache, layout-review gate, and board execution.
+   * The server loop parks until the answer posts back as a tool result.
+   */
+  private async answerToolRequest(
+    name: string,
+    args: unknown,
+    toolCallId: string,
+    gen: number,
+    policy: TurnPolicy,
+    stepsLog: AiLogStep[]
+  ): Promise<{ result: unknown; isError: boolean }> {
+    // Sticky terminal stop. Without it the model kept re-issuing the same
+    // rejected call for the rest of the turn (25 steps, 3 landed).
+    if (policy.stopped) {
+      return { result: { ok: true, code: "STOPPED", message: policy.stopped }, isError: false };
+    }
+    policy.steps += 1;
+    this.emit({ kind: "step_start", stepNumber: policy.steps });
+    if (policy.steps > AGENT_MAX_STEPS_PER_TURN) {
+      policy.stopped = `Step limit reached (${AGENT_MAX_STEPS_PER_TURN}). Tool use is closed for this turn: keep the best valid result and reply with a final answer now.`;
+      return { result: { ok: true, code: "STEP_LIMIT_REACHED", message: policy.stopped }, isError: false };
+    }
+    this.emit({ kind: "tool_start", name, argsSummary: summarizeArgs(args) });
+
+    let result: unknown;
+    let isError = false;
+    const budget: Record<string, { used: number; cap: number }> = {
+      canvas_apply: { used: policy.applies, cap: AGENT_MAX_APPLIES_PER_TURN },
+      canvas_patch_widget: { used: policy.patches, cap: AGENT_MAX_PATCHES_PER_TURN },
+      canvas_edit: { used: policy.edits, cap: AGENT_MAX_EDITS_PER_TURN },
+      canvas_snapshot: { used: policy.snapshots, cap: AGENT_MAX_SNAPSHOTS_PER_TURN },
+    };
+    const spent = budget[name];
+    const duplicateTitle = name === "canvas_apply" ? widgetTitleOf(args) : "";
+    const alreadyMade = duplicateTitle ? policy.createdWidgets.get(duplicateTitle) : undefined;
+    if ((name === "canvas_patch_widget" || name === "canvas_edit") && policy.layoutReviewNeeded) {
+          isError = true;
+          result = {
+            code: "LAYOUT_REVIEW_REQUIRED",
+            message:
+              "Widgets were just created or moved. Call canvas_snapshot with target=canvas, quality=basic to review the full layout before the next mutation.",
+          };
+        } else if (alreadyMade) {
+          // The reported turn created "Animated Solar System" twice and then
+          // spent nine steps trying to delete the copy. A retry of a widget you
+          // already made is a patch/edit on the existing one, not a new create.
+          isError = true;
+          result = {
+            code: "DUPLICATE_WIDGET",
+            message: `A widget titled "${duplicateTitle}" was already created this turn as ${alreadyMade}. Refine that one with canvas_patch_widget or canvas_edit, or finish — do not create a second copy.`,
+            objectId: alreadyMade,
+          };
+        } else if (spent && spent.used >= spent.cap) {
+          // Exhausting a budget ends tool use for the turn instead of leaving the
+          // model free to pivot to another tool and keep spinning.
+          policy.stopped = `${name} budget reached (${spent.cap}). Tool use is closed for this turn: keep the best valid result and reply with a final answer now.`;
+          result = { ok: true, code: "BUDGET_REACHED", message: policy.stopped };
+        } else if (
+          name === "canvas_snapshot" &&
+          (args as { quality?: string } | null)?.quality === "detail" &&
+          policy.detailSnapshots >= AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN
+        ) {
+          isError = true;
+          result = {
+            code: "DETAIL_BUDGET_REACHED",
+            message: `Detail-snapshot budget reached (${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}/${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}). Use quality=basic or act on the detail you already have.`,
+          };
+        } else {
+          // Any board change (apply, user ink, rollback) invalidates replays:
+          // cached scan/snapshot results embed revision-scoped state and a
+          // stale replayed revision poisons every subsequent baseRevision.
+          const revisionNow = this.deps.getRevision();
+          if (revisionNow !== this.toolCacheRevision) {
+            this.toolCache.clear();
+            this.toolCacheRevision = revisionNow;
+          }
+          const signature = await toolSignature(name, args);
+          const cached = this.toolCache.get(signature);
+          if (cached) {
+            // Idempotent replay: identical {name,args} within the turn returns
+            // the earlier outcome instead of executing again.
+            result = cached.result;
+            isError = cached.isError;
+          } else {
+            try {
+              result = await executeTool(name, args, this.toolDeps());
+              if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
+              isError = isFailedResult(result);
+              this.toolCache.set(signature, { result, isError });
+              if (this.toolCache.size > AGENT_TOOL_CACHE_ENTRIES) {
+                this.toolCache.delete(this.toolCache.keys().next().value as string);
+              }
+              if (result && typeof result === "object") {
+                const rec = result as Record<string, unknown>;
+                if (name === "canvas_apply" && rec.ok === true) {
+                  policy.applies += 1;
+                  if (duplicateTitle) {
+                    const made = Array.isArray(rec.applied)
+                      ? (rec.applied as { objectId?: unknown; kind?: unknown }[]).find(
+                          (row) => row.kind === "html" || row.kind === "diagram"
+                        )
+                      : undefined;
+                    const id = typeof made?.objectId === "string" ? made.objectId : "";
+                    if (id) policy.createdWidgets.set(duplicateTitle, id);
+                  }
+                }
+                if (name === "canvas_patch_widget" && rec.ok === true) policy.patches += 1;
+                if (name === "canvas_edit" && rec.ok === true) policy.edits += 1;
+                if (name === "canvas_snapshot" && rec.ok !== false) {
+                  policy.snapshots += 1;
+                  if ((args as { quality?: string } | null)?.quality === "detail") policy.detailSnapshots += 1;
+                }
+                // Layout-review gate: only a content-covering snapshot proves the
+                // layout — a zoomed region/object view cannot verify composition.
+                if (rec.widgetMutated === true) policy.layoutReviewNeeded = true;
+                if (name === "canvas_snapshot" && rec.ok !== false && rec.coversContent === true) {
+                  policy.layoutReviewNeeded = false;
+                }
+              }
+            } catch (err) {
+              isError = true;
+              result = {
+                code: "INTERNAL",
+                message: err instanceof Error ? err.message : "Tool failed.",
+              };
+              this.toolCache.set(signature, { result, isError });
+              if (this.toolCache.size > AGENT_TOOL_CACHE_ENTRIES) {
+                this.toolCache.delete(this.toolCache.keys().next().value as string);
+              }
+            }
+          }
+        }
+
+        isError = isError || isFailedResult(result);
+        // Anti-thrash fuse. The real-user trace shows the same rejected
+        // canvas_edit re-sent five times in one turn; after N consecutive
+        // failures of one tool, tool use ends and the model must answer.
+        if (isError) {
+          policy.failStreak =
+            policy.failStreak.name === name
+              ? { name, count: policy.failStreak.count + 1 }
+              : { name, count: 1 };
+          if (policy.failStreak.count >= AGENT_MAX_CONSECUTIVE_FAILURES) {
+            policy.stopped = `${name} failed ${policy.failStreak.count} times in a row, so tool use is closed for this turn. Keep what is already on the board and reply with a final answer explaining what you could not do.`;
+            result = { ...(result as Record<string, unknown>), stopped: true, instruction: policy.stopped };
+          }
+        } else {
+          policy.failStreak = { name: "", count: 0 };
+        }
+        // Read-only streak nudge. It rides on the tool result because that is
+        // the only channel the server-side loop actually shows the model —
+        // this.messages only seeds a *fresh* server session.
+        if (name === "canvas_scan" || name === "canvas_snapshot" || name === "canvas_read" || name === "canvas_focus") {
+          policy.readOnlyStreak += 1;
+        } else {
+          policy.readOnlyStreak = 0;
+        }
+        if (policy.readOnlyStreak >= 4 && !policy.stopped && result && typeof result === "object") {
+          policy.readOnlyStreak = 0;
+          result = {
+            ...(result as Record<string, unknown>),
+            instruction:
+              "4 reads without a mutation. You have enough context — act now (canvas_apply/canvas_edit/canvas_patch_widget) or finish with a final answer. Do not re-capture a region you already saw.",
+          };
+        }
+        // Every revision handed to the model gets its content fingerprint
+        // recorded, so the next mutation's conflict check can distinguish
+        // "the board changed" from "the counter moved".
+        this.recordRevisionFingerprint();
+        const toolImages = this.imagesForTool(name, result);
+        stepsLog.push({
+          stepNumber: policy.steps,
+          tool: name,
+          args,
+          result,
+          isError,
+          summary: summarizeResult(result),
+          text: undefined,
+        });
+
+        this.messages.push({
+          role: "assistant",
+          text: "",
+          toolCall: { id: toolCallId, name, args },
+        });
+        this.messages.push({
+          role: "tool",
+          toolCallId,
+          name,
+          result,
+          isError,
+          images: toolImages,
+        });
+        // Crash durability: the turn's tool history survives a tab crash mid-run.
+        this.persistConversation();
+        this.emit({
+          kind: "tool_end",
+          name,
+          ok: !isError,
+          summary: summarizeResult(result),
+        });
+    return { result, isError };
+  }
+
+  private persistConversation(): void {
+    saveConversation(this.messages, this.deps.canvasId?.(), [...this.loadedPluginIds]);
   }
 
   private hostRefs(atlasMeta?: { sourceRect: Rect; imageScale: number; changedBox?: Rect }): string {
@@ -684,12 +971,17 @@ export class Conductor {
       ? atlasMeta.changedBox
       : (this.deps.getInkBox?.() ?? null);
     const scene = trimScene(buildScene(this.deps.widgets, this.deps.objects), viewport, selected);
+    const widgetMax = widgetGeometryForViewport(viewport).max;
     return JSON.stringify({
       revision: this.deps.getRevision(),
       viewport,
       sourceRect: atlasMeta?.sourceRect || viewport,
       imageScale: atlasMeta?.imageScale || 1,
       canvasSize: SIZE,
+      // The placement engine clamps any widget past this, preserving aspect.
+      // Without it in the prompt the model asked for 3400x1180, silently got
+      // 2500x867, and spent the rest of the turn trying to resize it back.
+      maxWidgetSize: widgetMax,
       selectedIds: selected,
       newestInkBox: ink,
       scene,
@@ -724,201 +1016,6 @@ export class Conductor {
     return [{ id: img.id, dataUrl: img.dataUrl }];
   }
 
-  private serializeMessages(): StepMessage[] {
-    const active = this.activeImageIds();
-    const pruned = this.pruneOldToolResults(this.messages);
-    return pruned.map((m) => {
-      if ((m.role === "user" || m.role === "tool") && m.images?.length) {
-        const kept: { id: string; dataUrl: string }[] = [];
-        const notes: string[] = [];
-        for (const img of m.images) {
-          if (active.has(img.id)) kept.push(img);
-          else {
-            const meta = this.images.get(img.id);
-            notes.push(`[image expired: ${meta?.note || img.id}]`);
-          }
-        }
-        const extra = notes.join("\n");
-        if (m.role === "user") {
-          return { ...m, text: extra ? `${m.text}\n${extra}` : m.text, images: kept.length ? kept : undefined };
-        }
-        return { ...m, images: kept.length ? kept : undefined };
-      }
-      return m;
-    });
-  }
-
-  /**
-   * Deterministic context pressure relief: tool results AND the assistant
-   * tool-call args that produced them get clipped to a head summary once they
-   * fall outside the last 8 messages (tool-result pruning, without a second
-   * compaction model call).
-   *
-   * Args matter as much as results here: a canvas_apply that creates a widget
-   * carries the widget's whole document, and that message was resent verbatim on
-   * every later step of the turn — the single largest repeated payload in a
-   * widget-building turn. The widget lives on the board now; the model re-reads
-   * it with canvas_read when it needs the source.
-   */
-  private pruneOldToolResults(messages: StepMessage[]): StepMessage[] {
-    const recentFrom = Math.max(0, messages.length - 8);
-    return messages.map((m, idx) => {
-      if (idx >= recentFrom) return m;
-      if (m.role === "assistant") {
-        if (!m.toolCall) return m;
-        try {
-          const json = JSON.stringify(m.toolCall.args ?? null);
-          if (json.length <= 2000) return m;
-          return {
-            ...m,
-            toolCall: {
-              ...m.toolCall,
-              args: {
-                code: "PRUNED",
-                note: "Full arguments clipped for context budget; the result of this call is authoritative. Use canvas_read for current item source.",
-                summary: json.slice(0, 800),
-              },
-            },
-          };
-        } catch {
-          return { ...m, toolCall: { ...m.toolCall, args: { code: "PRUNED" } } };
-        }
-      }
-      if (m.role !== "tool") return m;
-      try {
-        const json = JSON.stringify(m.result ?? null);
-        if (json.length <= 2000) return m;
-        return { ...m, result: { code: "PRUNED", note: "Full result clipped for context budget; re-run the tool if details are needed.", summary: json.slice(0, 800) } };
-      } catch {
-        return { ...m, result: { code: "PRUNED" } };
-      }
-    });
-  }
-
-  private async compactHistory(): Promise<void> {
-    if (this.messages.length <= COMPACT_KEEP) return;
-    const config = this.deps.provider() ?? getProviderConfig();
-    const model = getActiveModel();
-    if (!config || !model) return;
-    // One loud failure per turn: keep retrying silently-succeeding compaction
-    // but never truncate history behind the user's back.
-    if (this.compactFailedOnce) return;
-    this.emit({ kind: "compact" });
-    const keep = this.messages.slice(-COMPACT_KEEP);
-    // Providers require tool results to follow their assistant tool call, and
-    // most require the post-system conversation to open with a user turn — so
-    // drop any leading orphaned tool/assistant messages after slicing.
-    while (keep.length && keep[0].role !== "user" && keep[0].role !== "system") keep.shift();
-    const fail = (message: string) => {
-      this.compactFailedOnce = true;
-      this.emit({ kind: "compact_failed", message });
-      // Keep the full history: silent truncation loses context forever; a
-      // provider context overflow later in the turn is a loud, honest error.
-    };
-    try {
-      const res = await fetch("/api/canvas/agent/compact", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          providerType: config.type,
-          baseUrl: config.baseUrl,
-          apiKey: config.apiKey,
-          model,
-          messages: this.serializeMessages(),
-        }),
-        signal: this.abort?.signal,
-      });
-      if (!res.ok) {
-        let message = `Compaction failed (HTTP ${res.status}).`;
-        try {
-          const data = (await res.json()) as { error?: string };
-          if (data.error) message = `Compaction failed: ${data.error}`;
-        } catch {}
-        fail(message);
-        return;
-      }
-      const data = (await res.json()) as { summary?: string };
-      const summary = (data.summary || "").trim();
-      if (!summary) {
-        fail("Compaction returned an empty summary; history kept intact.");
-        return;
-      }
-      this.messages = [{ role: "system", text: summary, tag: "compact" }, ...keep];
-      this.persistConversation();
-    } catch (err) {
-      if (this.abort?.signal.aborted) throw err;
-      fail(err instanceof Error ? `Compaction failed: ${err.message}` : "Compaction failed.");
-    }
-  }
-
-  private async postStep(): Promise<StepResult> {
-    const config = this.deps.provider() ?? getProviderConfig();
-    const model = getActiveModel();
-    if (!config || !model) {
-      return { kind: "error", message: "Configure an API provider in Settings to use Drawva Agent." };
-    }
-
-    const body = {
-      providerType: config.type,
-      baseUrl: config.baseUrl,
-      apiKey: config.apiKey,
-      model,
-      reasoningEffort: getReasoningEffort(),
-      messages: this.serializeMessages(),
-      loadedPluginIds: [...this.loadedPluginIds],
-      webSearch: getWebSearchEnabled(),
-      context: {
-        revision: this.deps.getRevision(),
-        viewport: this.deps.camera.visibleWorldRect(),
-        canvasSize: SIZE,
-      },
-    };
-
-    const attempt = async (): Promise<StepResult> => {
-      const res = await fetch("/api/canvas/agent/step", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-        signal: this.abort?.signal,
-      });
-      if (!res.ok || !res.body) {
-        let message = "Agent step failed.";
-        try {
-          const data = (await res.json()) as { error?: string; message?: string };
-          message = data.error || data.message || message;
-        } catch {}
-        const err = new Error(message) as Error & { status: number };
-        err.status = res.status;
-        throw err;
-      }
-      return readStepSse(res, (e) => {
-        if (e.kind === "usage") {
-          this.turnUsage.inputTokens += e.usage.inputTokens;
-          this.turnUsage.outputTokens += e.usage.outputTokens;
-          this.turnPeakInput = Math.max(this.turnPeakInput, e.usage.inputTokens);
-          this.turnSteps += 1;
-        }
-        this.emit(e);
-      });
-    };
-
-    try {
-      return await attempt();
-    } catch (err) {
-      if (this.abort?.signal.aborted) throw err;
-      if (isRetryableStepError(err)) {
-        // Server already retried with backoff; this client retry covers HTTP-level
-        // failures. Delay so a rate-limited provider gets breathing room.
-        await sleep(1500, this.abort?.signal);
-        try {
-          return await attempt();
-        } catch (retryErr) {
-          return { kind: "error", message: retryErr instanceof Error ? retryErr.message : "Agent step failed." };
-        }
-      }
-      return { kind: "error", message: err instanceof Error ? err.message : "Agent step failed." };
-    }
-  }
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -929,17 +1026,6 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       resolve();
     }, { once: true });
   });
-}
-
-export function estimateTokens(messages: StepMessage[]): number {
-  const stripped = stripImages(messages);
-  let images = 0;
-  for (const m of messages) {
-    if ((m.role === "user" || m.role === "tool") && m.images?.length) images += m.images.length;
-  }
-  // ponytail: flat ~1100 tokens per image (≈ a 1024×768 vision tile); scale by
-  // actual per-image pixels if small models start over/under-compacting.
-  return Math.ceil(JSON.stringify(stripped).length / 4) + images * 1100;
 }
 
 /** Stable SHA-256 signature of a tool call for the idempotency cache. */
@@ -1005,9 +1091,7 @@ function saveConversation(messages: StepMessage[], canvasId?: string, pluginIds:
   let payload = { messages: stripped, pluginIds, createdAt: Date.now(), updatedAt: Date.now() };
   let raw = JSON.stringify(payload);
   while (raw.length > AGENT_CONVERSATION_MAX_BYTES && payload.messages.length > 1) {
-    const idx = payload.messages.findIndex((m) => m.role !== "system" || m.tag !== "compact");
-    if (idx < 0) break;
-    payload.messages.splice(idx, 1);
+    payload.messages.splice(0, 1);
     payload = { ...payload, updatedAt: Date.now() };
     raw = JSON.stringify(payload);
   }
@@ -1086,7 +1170,7 @@ function isFailedResult(result: unknown): boolean {
   return rec.ok === false || typeof rec.code === "string";
 }
 
-function isRetryableStepError(err: unknown): boolean {
+function isRetryableTurnError(err: unknown): boolean {
   const rec = err as { status?: number; message?: string };
   const status = Number(rec.status || 0);
   const msg = String(rec.message || "").toLowerCase();
@@ -1100,70 +1184,4 @@ function fileToDataUrl(file: File): Promise<string> {
     reader.onload = () => resolve(String(reader.result || ""));
     reader.readAsDataURL(file);
   });
-}
-
-async function readStepSse(
-  res: Response,
-  onEvent: (e: ConductorEvent) => void
-): Promise<StepResult> {
-  const reader = res.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let text = "";
-  let toolCall: StepToolCall | undefined;
-  let errorMessage = "";
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    let sep = buffer.indexOf("\n\n");
-    while (sep >= 0) {
-      const block = buffer.slice(0, sep);
-      buffer = buffer.slice(sep + 2);
-      const eventName = /^event: (.+)$/m.exec(block)?.[1] ?? "message";
-      const dataLine = /^data: (.+)$/m.exec(block)?.[1] ?? "";
-      if (dataLine) {
-        let data: unknown = null;
-        try {
-          data = JSON.parse(dataLine);
-        } catch {
-          data = null;
-        }
-        if (data && typeof data === "object") {
-          const rec = data as Record<string, unknown>;
-          if (eventName === "text_delta" && typeof rec.text === "string") {
-            text += rec.text;
-            onEvent({ kind: "text_delta", text: rec.text });
-          } else if (eventName === "reasoning" && typeof rec.text === "string") {
-            // Reasoning tokens never become the final answer — detail only.
-            onEvent({ kind: "reasoning_delta", text: rec.text });
-          } else if (eventName === "tool_call" && typeof rec.name === "string") {
-            toolCall = {
-              id: String(rec.id || `call-${Date.now()}`),
-              name: rec.name,
-              args: rec.args,
-              extraToolCalls: typeof rec.extraToolCalls === "number" ? rec.extraToolCalls : 0,
-              admissionError: typeof rec.admissionError === "string" ? rec.admissionError : undefined,
-            };
-          } else if (eventName === "final" && typeof rec.text === "string") {
-            text = rec.text || text;
-          } else if (eventName === "usage") {
-            onEvent({
-              kind: "usage",
-              usage: {
-                inputTokens: Number(rec.inputTokens || 0),
-                outputTokens: Number(rec.outputTokens || 0),
-              },
-            });
-          } else if (eventName === "error") {
-            errorMessage = String(rec.message || rec.error || "Agent step failed.");
-          }
-        }
-      }
-      sep = buffer.indexOf("\n\n");
-    }
-  }
-  if (errorMessage) return { kind: "error", message: errorMessage };
-  if (toolCall) return { kind: "tool_call", toolCall, text };
-  return { kind: "final", text };
 }

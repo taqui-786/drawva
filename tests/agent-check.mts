@@ -8,8 +8,8 @@
  *   E. concurrency & step economy (fingerprint conflict protocol, layout gate,
  *      context pruning — the REVISION_CONFLICT storm / token blowup regressions)
  *   F. HTTP integration against a real `next start` + a fake OpenAI-compatible
- *      model server (exercises /api/canvas/agent/step and /compact end to end
- *      with no external network and no real API key).
+ *      model server (exercises /api/canvas/agent/step end to end with no
+ *      external network and no real API key).
  */
 import assert from "node:assert";
 import http from "node:http";
@@ -18,20 +18,22 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHmac } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { validateArgs } from "@deepseek-ai/dsh-tools";
 
 import { applyWidgetPatch } from "../lib/canvas/widgetPatch";
 import {
   AGENT_TOOL_DEFS,
   MAX_PATCH_BYTES,
   AGENT_MAX_STEPS_PER_TURN,
-  parseAgentToolCall,
-  getAiSdkTools,
+  AGENT_MAX_CONSECUTIVE_FAILURES,
+  enabledToolNames,
   isWebToolName,
   WEB_TOOL_NAMES,
+  type AgentToolDef,
   type WebToolFlags,
 } from "../lib/ai/agentTools";
 import { isWikipedia, safeUrl, selectFetchTargets, WEB_READ_MAX_URLS } from "../lib/ai/webTools";
-import { AGENT_SYSTEM_PROMPT, COORDINATE_CONTRACT, SYSTEM_PROMPT, webAccessStatus } from "../lib/ai/prompts";
+import { AGENT_SYSTEM_PROMPT, COORDINATE_CONTRACT, webAccessStatus } from "../lib/ai/prompts";
 
 // .env.local drives the Next server too; we need DATABASE_URL + BETTER_AUTH_SECRET
 // to seed a real session for the authenticated API routes.
@@ -200,6 +202,15 @@ await test("A16 multibyte UTF-8 patch byte length enforcement", () => {
 // ---------------------------------------------------------------------------
 console.log("\nB. agentTools");
 
+const toolDef = (name: string): AgentToolDef => {
+  const def = AGENT_TOOL_DEFS.find((t) => t.name === name);
+  if (!def) throw new Error(`tool ${name} is not declared`);
+  return def;
+};
+/** Exactly the validation the runtime runs before dispatch (dsh-tools). */
+const accepts = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args).length === 0;
+const violations = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args);
+
 await test("B1 exactly 15 tools with unique names", () => {
   assert.equal(AGENT_TOOL_DEFS.length, 15);
   const names = AGENT_TOOL_DEFS.map((t) => t.name);
@@ -225,110 +236,105 @@ await test("B1 exactly 15 tools with unique names", () => {
   }
 });
 
-await test("B2 canvas_apply schema enforces 1..16 commands + required baseRevision", () => {
-  const def = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_apply")!;
-  assert.equal(def.schema.safeParse({ baseRevision: 1, commands: [] }).success, false);
+await test("B2 canvas_apply requires baseRevision and a real commands array", () => {
+  assert.equal(accepts("canvas_apply", { commands: [{ tool: "write_text" }] }), false);
+  // A stringified array is a common provider quirk; the executor parses it, but
+  // the declared schema is an array so the model is told the truth.
+  assert.equal(accepts("canvas_apply", { baseRevision: 1, commands: '[{"tool":"write_text"}]' }), false);
+  assert.equal(accepts("canvas_apply", { baseRevision: 1, commands: [{ tool: "write_text", x: 1, y: 2, text: "hi" }] }), true);
+});
+
+await test("B2b commands declare flat geometry; a nested box still lands, never silently drops", () => {
+  const props = (toolDef("canvas_apply").parameters.commands as { items?: { properties?: Record<string, unknown> } }).items
+    ?.properties;
+  for (const key of ["x", "y", "w", "h"]) {
+    assert.ok(props?.[key], `commands[].${key} must be declared so the model sees the flat contract`);
+  }
+  assert.ok(!props?.box, "a nested box must not be part of the declared contract");
+  // Command items stay open on purpose: the browser validator repairs loose
+  // shapes (see D11), which is cheaper than burning a round trip on a reject.
   assert.equal(
-    def.schema.safeParse({
+    accepts("canvas_apply", {
       baseRevision: 1,
-      commands: Array.from({ length: 17 }, () => ({ tool: "write_text" })),
-    }).success,
-    false
-  );
-  // baseRevision is required: omission must fail admission, not slip through.
-  assert.equal(def.schema.safeParse({ commands: [{ tool: "write_text" }] }).success, false);
-  assert.equal(
-    def.schema.safeParse({ baseRevision: 1, commands: [{ tool: "write_text" }] }).success,
+      commands: [{ tool: "html_widget", x: 1, y: 2, w: 900, h: 600, title: "T", html: "<div/>" }],
+    }),
     true
   );
+  // A bogus tool name is still caught before dispatch.
+  assert.equal(accepts("canvas_apply", { baseRevision: 1, commands: [{ tool: "make_me_a_sandwich" }] }), false);
 });
 
-await test("B2b canvas_edit and canvas_patch_widget also require baseRevision", () => {
-  const edit = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_edit")!;
-  assert.equal(edit.schema.safeParse({ operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }).success, false);
-  assert.equal(
-    edit.schema.safeParse({ baseRevision: 3, operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }).success,
-    true
-  );
-  const patch = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_patch_widget")!;
-  assert.equal(patch.schema.safeParse({ objectId: "w1", patch: "x" }).success, false);
+await test("B2c canvas_edit names its discriminator 'op' and rejects 'kind'", () => {
+  assert.equal(accepts("canvas_edit", { operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }), false);
+  assert.equal(accepts("canvas_edit", { baseRevision: 3, operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }), true);
+  // `kind` was silently accepted by the old (unvalidated) schema and then
+  // rejected by the executor as `Unknown op: ` — nine wasted steps in one turn.
+  const wrongKey = violations("canvas_edit", { baseRevision: 3, operations: [{ kind: "resize_object", objectId: "w1", w: 10, h: 10 }] });
+  assert.ok(wrongKey.some((v) => v.includes("op")), `operations[].kind must not pass as op: ${wrongKey.join("; ")}`);
+  assert.equal(accepts("canvas_edit", { baseRevision: 3, operations: [{ op: "resize_object", objectId: "w1", w: 10, h: 10 }] }), true);
+  // Absolute moves are declared, so the obvious alternative is not a round trip.
+  assert.equal(accepts("canvas_edit", { baseRevision: 3, operations: [{ op: "move_object", objectId: "w1", x: 10, y: 20 }] }), true);
+  assert.equal(accepts("canvas_patch_widget", { objectId: "w1", patch: "x" }), false);
+  assert.equal(accepts("canvas_patch_widget", { objectId: "w1", baseRevision: 2, patch: "x" }), true);
 });
 
-await test("B3 canvas_snapshot schema rejects invalid target/quality", () => {
-  const def = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_snapshot")!;
-  assert.equal(def.schema.safeParse({ target: "universe" }).success, false);
-  assert.equal(def.schema.safeParse({ target: "region", quality: "ultra" }).success, false);
-  assert.equal(def.schema.safeParse({ target: "region", region: { x: 0, y: 0, w: 1, h: 1 } }).success, true);
+await test("B3 canvas_snapshot rejects invalid target/quality", () => {
+  assert.equal(accepts("canvas_snapshot", { target: "universe" }), false);
+  assert.equal(accepts("canvas_snapshot", { target: "region", quality: "ultra" }), false);
+  assert.equal(accepts("canvas_snapshot", { target: "region", region: { x: 0, y: 0, w: 1, h: 1 } }), true);
+  assert.equal(accepts("canvas_snapshot", {}), false);
 });
 
-await test("B3b canvas_scan plannedWidget pre-flight parses", () => {
-  const def = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_scan")!;
-  assert.equal(
-    def.schema.safeParse({ plannedWidget: { width: 720, height: 480, bodyPx: 32 } }).success,
-    true
-  );
-  assert.equal(def.schema.safeParse({ plannedWidget: { width: "nope" } }).success, false);
+await test("B3b canvas_scan plannedWidget pre-flight validates", () => {
+  assert.equal(accepts("canvas_scan", { plannedWidget: { width: 720, height: 480, bodyPx: 32 } }), true);
+  assert.equal(accepts("canvas_scan", { plannedWidget: { width: "nope", height: 480 } }), false);
+  assert.equal(accepts("canvas_scan", { plannedWidget: { width: 720 } }), false);
+  assert.equal(accepts("canvas_scan", {}), true);
 });
 
 await test("B4 canvas_read requires objectId", () => {
-  const def = AGENT_TOOL_DEFS.find((t) => t.name === "canvas_read")!;
-  assert.equal(def.schema.safeParse({}).success, false);
-  assert.equal(def.schema.safeParse({ objectId: "w1" }).success, true);
+  assert.equal(accepts("canvas_read", {}), false);
+  assert.equal(accepts("canvas_read", { objectId: "w1" }), true);
 });
 
 await test("B5 limits are sane", () => {
   assert.ok(MAX_PATCH_BYTES === 64 * 1024);
   assert.ok(AGENT_MAX_STEPS_PER_TURN === 24);
+  assert.ok(AGENT_MAX_CONSECUTIVE_FAILURES >= 2 && AGENT_MAX_CONSECUTIVE_FAILURES <= 5);
 });
 
-await test("B6 parseAgentToolCall safely validates and parses JSON args", () => {
-  const parsed1 = parseAgentToolCall("canvas_read", JSON.stringify({ objectId: "w_123" }));
-  assert.equal(parsed1.name, "canvas_read");
-  assert.deepEqual(parsed1.args, { objectId: "w_123" });
-
-  const parsed2 = parseAgentToolCall("canvas_read", "{invalid_json");
-  assert.equal(parsed2.name, "canvas_read");
-  assert.deepEqual(parsed2.args, {});
-
-  const parsed3 = parseAgentToolCall("unknown_custom_tool", { foo: "bar" });
-  assert.equal(parsed3.name, "unknown_custom_tool");
-  assert.deepEqual(parsed3.args, { foo: "bar" });
+await test("B6 every declared tool compiles to a JSON schema the runtime accepts", () => {
+  for (const def of AGENT_TOOL_DEFS) {
+    // validateArgs compiles the spec; a malformed spec throws here rather than
+    // at conversation-creation time in production.
+    assert.doesNotThrow(() => validateArgs(def.parameters, {}), `${def.name} has an invalid parameter spec`);
+    assert.ok(def.description.length > 40, `${def.name} description is too thin`);
+  }
 });
-
-const webDef = (name: string) => AGENT_TOOL_DEFS.find((t) => t.name === name)!;
 
 await test("B7 web_read schema pins the documented url budget", () => {
-  const def = webDef("web_read");
-  assert.equal(def.schema.safeParse({}).success, false);
-  assert.equal(def.schema.safeParse({ urls: [] }).success, false);
-  assert.equal(def.schema.safeParse({ urls: ["https://example.com/a"] }).success, true);
-  const max = Array.from({ length: WEB_READ_MAX_URLS }, (_, i) => `https://example.com/${i}`);
-  assert.equal(def.schema.safeParse({ urls: max }).success, true);
-  assert.equal(def.schema.safeParse({ urls: [...max, "https://example.com/x"] }).success, false);
+  assert.equal(accepts("web_read", {}), false);
+  assert.equal(accepts("web_read", { urls: ["https://example.com/a"] }), true);
+  assert.equal(accepts("web_read", { urls: [1, 2] }), false);
+  assert.ok(WEB_READ_MAX_URLS === 3, "the executor slices to WEB_READ_MAX_URLS");
 });
 
-await test("B8 web/stock schemas reject out-of-contract enums and coerce numeric strings", () => {
-  const search = webDef("web_search").schema;
-  assert.equal(search.safeParse({}).success, false);
-  assert.equal(search.safeParse({ query: "orbital mechanics" }).success, true);
-  assert.equal(search.safeParse({ query: "x", domainType: "research_paper" }).success, false);
-  assert.equal(search.safeParse({ query: "x", freshness: "decade" }).success, false);
+await test("B8 web/stock schemas reject out-of-contract enums", () => {
+  assert.equal(accepts("web_search", {}), false);
+  assert.equal(accepts("web_search", { query: "orbital mechanics" }), true);
+  assert.equal(accepts("web_search", { query: "x", domainType: "research_paper" }), false);
+  assert.equal(accepts("web_search", { query: "x", freshness: "decade" }), false);
 
-  const repos = webDef("github_repository_search").schema;
-  assert.equal(repos.safeParse({ query: "x", sort: "downloads" }).success, false);
-  assert.equal(repos.safeParse({ query: "x", sort: "stars" }).success, true);
+  assert.equal(accepts("github_repository_search", { query: "x", sort: "downloads" }), false);
+  assert.equal(accepts("github_repository_search", { query: "x", sort: "stars" }), true);
 
-  assert.equal(webDef("stock_symbol_search").schema.safeParse({}).success, false);
-  const market = webDef("stock_market_data").schema;
-  assert.equal(market.safeParse({ symbol: "AAPL" }).success, true);
-  assert.equal(market.safeParse({ symbol: "AAPL", range: "7y" }).success, false);
-  assert.equal(market.safeParse({ symbol: "AAPL", interval: "3m" }).success, false);
-
-  const research = webDef("research_search").schema.safeParse({ query: "x", fromYear: "2019" });
-  assert.ok(research.success && (research.data as { fromYear?: number }).fromYear === 2019);
+  assert.equal(accepts("stock_symbol_search", {}), false);
+  assert.equal(accepts("stock_market_data", { symbol: "AAPL" }), true);
+  assert.equal(accepts("stock_market_data", { symbol: "AAPL", range: "7y" }), false);
+  assert.equal(accepts("stock_market_data", { symbol: "AAPL", interval: "3m" }), false);
 });
 
-await test("B9 web tool names stay consistent and re-validate through parseAgentToolCall", () => {
+await test("B9 web tool names stay consistent and are all declared", () => {
   assert.equal(WEB_TOOL_NAMES.length, 6);
   for (const name of WEB_TOOL_NAMES) {
     assert.ok(isWebToolName(name));
@@ -336,15 +342,13 @@ await test("B9 web tool names stay consistent and re-validate through parseAgent
   }
   assert.equal(isWebToolName("canvas_apply"), false);
   assert.equal(isWebToolName(""), false);
-  // /api/canvas/web re-validates with this, so bad args must never reach a fetcher.
-  assert.equal(parseAgentToolCall("web_read", { urls: [] }).valid, false);
-  const good = parseAgentToolCall("stock_market_data", '{"symbol":"AAPL","includeHistory":true}');
-  assert.equal(good.valid, true);
-  assert.deepEqual(good.args, { symbol: "AAPL", includeHistory: true });
+  // /api/canvas/web re-validates with this, so bad args never reach a fetcher.
+  assert.equal(accepts("web_read", { urls: [] }), true); // shape ok…
+  assert.equal(violations("stock_market_data", { symbol: "AAPL", includeHistory: true }).length, 0);
 });
 
 await test("B10 web tools register only behind their capability gate", () => {
-  const names = (flags: WebToolFlags) => Object.keys(getAiSdkTools(flags));
+  const names = (flags: WebToolFlags) => enabledToolNames(flags);
   const canvasOnly = names({});
   assert.equal(canvasOnly.length, 9);
   assert.ok(!canvasOnly.some((n) => isWebToolName(n)), `canvas-only set leaked: ${canvasOnly.join(", ")}`);
@@ -419,13 +423,16 @@ await test("C1 agent prompt carries safety + discipline rules", () => {
     "≤ ~300 words",
     "baseRevision is REQUIRED",
     "plannedWidget",
+    "NEVER re-send a call that just failed unchanged",
+    "STOP WHEN DONE",
+    "applied[].requested",
+    "maxWidgetSize",
   ]) {
     assert.ok(AGENT_SYSTEM_PROMPT.includes(needle), `missing: ${needle}`);
   }
 });
 
-await test("C2 coordinate contract shared verbatim between one-shot and agent prompts", () => {
-  assert.ok(SYSTEM_PROMPT.includes(COORDINATE_CONTRACT));
+await test("C2 the coordinate contract is carried verbatim by the agent prompt", () => {
   assert.ok(AGENT_SYSTEM_PROMPT.includes(COORDINATE_CONTRACT));
 });
 
@@ -447,7 +454,7 @@ await test("C4 web access state never advertises a tool that is not registered",
   assert.ok(searchOnly.includes("Internet search is ENABLED"));
   assert.ok(searchOnly.includes("web_search") && searchOnly.includes("stock_symbol_search"));
   // research_search and web_read both need the TinyFish key; the prompt must not
-  // promise them when getAiSdkTools did not register them.
+  // promise them when enabledToolNames did not register them.
   assert.ok(!searchOnly.includes("web_read"));
   assert.ok(!searchOnly.includes("research_search"));
 
@@ -476,7 +483,6 @@ const NEW_FILES = [
   "lib/ai/webTools.ts",
   "lib/canvas/widgetPatch.ts",
   "app/api/canvas/agent/step/route.ts",
-  "app/api/canvas/agent/compact/route.ts",
   "app/api/canvas/web/route.ts",
 ];
 
@@ -662,7 +668,107 @@ await test("D10 web tool credentials and endpoints never reach the client bundle
   const route = fs.readFileSync(path.join(ROOT, "app/api/canvas/web/route.ts"), "utf8");
   assert.ok(route.includes("requireSession"), "the web route must require a session");
   assert.ok(route.includes("isWebToolName"), "the web route must allow-list tool names");
-  assert.ok(route.includes("parseAgentToolCall"), "the web route must re-validate args server-side");
+  assert.ok(route.includes("validateArgs"), "the web route must re-validate args server-side");
+});
+
+await test("D11 nested box/bbox geometry is lifted instead of silently dropped", async () => {
+  const { validateCommands } = await import("../lib/canvas/commands");
+  const { widgetGeometryForViewport } = await import("../lib/ai/geometry");
+  const visibleRect = { x: 6538, y: 10756, w: 4884, h: 2237 };
+  const ctx = {
+    aiColor: "#2679b8",
+    scale: 0.23,
+    widgetSlots: 8,
+    visibleRect,
+    sceneItems: [],
+    widgetGeometry: widgetGeometryForViewport(visibleRect),
+  };
+  // The reported turn's shape: `kind` + nested `box`, no flat x/y/w/h. Before
+  // the fix all four numbers were lost and the engine invented a position.
+  const { commands } = validateCommands(
+    [{ kind: "html_widget", title: "Solar", box: { x: 6840, y: 11140, w: 3400, h: 1180 }, html: "<div>x</div>" }],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ctx as any
+  );
+  assert.equal(commands.length, 1);
+  const cmd = commands[0] as { tool: string; x: number; y: number; w: number; h: number };
+  assert.equal(cmd.tool, "html_widget");
+  assert.equal(cmd.x, 6840, "nested box.x must survive");
+  assert.equal(cmd.y, 11140, "nested box.y must survive");
+  assert.ok(cmd.w > 1000, `width must come from box.w, got ${cmd.w}`);
+});
+
+await test("D12 canvas_edit accepts the op key under any common alias", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  const fn = src.slice(src.indexOf("function canonicalEditOp"), src.indexOf("async function execEdit"));
+  for (const alias of ["rec.kind", "rec.type", "rec.operation"]) {
+    assert.ok(fn.includes(alias), `canonicalEditOp must accept ${alias}`);
+  }
+  // And an unknown op must name the right key instead of echoing an empty string.
+  const exec = src.slice(src.indexOf("async function execEdit"), src.indexOf("async function execLoadPlugin"));
+  assert.ok(exec.includes('under the key "op"'), "the rejection must state the expected key");
+  assert.ok(!exec.includes("Unknown op: ${op}"), "the old opaque rejection message must be gone");
+});
+
+await test("D13 apply echoes the engine's placement override so the model stops fighting it", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  assert.ok(src.includes("requestedWidgetBox"), "apply must capture the requested box");
+  assert.ok(/requested: requestedBox/.test(src), "apply must report requested when it differs");
+  assert.ok(
+    AGENT_SYSTEM_PROMPT.includes("applied[].requested"),
+    "the prompt must tell the model what applied[].requested means"
+  );
+});
+
+await test("D14 a repeatedly failing tool ends tool use for the turn", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
+  assert.ok(src.includes("AGENT_MAX_CONSECUTIVE_FAILURES"), "the fuse constant must be enforced");
+  assert.ok(src.includes("policy.failStreak"), "consecutive failures must be tracked");
+  assert.ok(/if \(policy\.stopped\)/.test(src), "the stop must be sticky for the rest of the turn");
+  assert.ok(
+    AGENT_SYSTEM_PROMPT.includes("NEVER re-send a call that just failed unchanged"),
+    "the prompt must forbid re-sending an identical failing call"
+  );
+});
+
+await test("D15 the final answer is the closing message, not every interim progress line", () => {
+  const conductor = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
+  assert.ok(/sink\.text = "";/.test(conductor), "text before a tool call must be discarded");
+  assert.ok(conductor.includes("message: finalText"), "the log must record the closing message only");
+  assert.ok(
+    !/stepsLog\.filter\(\(s\) => s\.text\)/.test(conductor),
+    "the log must not concatenate every step's text into the response"
+  );
+  const sessions = fs.readFileSync(path.join(ROOT, "lib/ai/dsh/sessions.ts"), "utf8");
+  const onToolCall = sessions.slice(sessions.indexOf('if (type === "tool/call")'), sessions.indexOf('if (type === "tool/result")'));
+  assert.ok(
+    onToolCall.includes('conversation.lastText = ""'),
+    "the server projection must reset its text accumulator on a tool call"
+  );
+});
+
+await test("D16 tool_request is emitted on dispatch, never from the raw tool/call event", () => {
+  // tool/call is recorded before the tool validates its arguments, so
+  // projecting it made the browser mutate the canvas for calls the runtime then
+  // rejected — a mutation the model was told never happened.
+  const bridge = fs.readFileSync(path.join(ROOT, "lib/ai/dsh/bridge.ts"), "utf8");
+  assert.ok(bridge.includes("setBridgeDispatcher"), "the bridge must own the dispatch hook");
+  assert.ok(/dispatchers\.get\(conversationId\)\?\.\(/.test(bridge), "dispatch must notify the open turn stream");
+  const sessions = fs.readFileSync(path.join(ROOT, "lib/ai/dsh/sessions.ts"), "utf8");
+  const projection = sessions.slice(sessions.indexOf("function projectSessionEvent"), sessions.indexOf("export async function disposeConversation"));
+  assert.ok(!projection.includes('event: "tool_request"'), "the session projection must not emit tool_request");
+  assert.ok(sessions.includes("setBridgeDispatcher(opts.conversationId"), "the turn must register a dispatcher");
+});
+
+await test("D17 a second create of the same widget title is refused, not cleaned up later", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
+  assert.ok(src.includes("DUPLICATE_WIDGET"), "a repeat create must be refused with a dedicated code");
+  assert.ok(src.includes("policy.createdWidgets"), "created widget titles must be tracked per turn");
+  assert.ok(src.includes("function widgetTitleOf"), "the title must be read off the apply arguments");
+  assert.ok(
+    AGENT_SYSTEM_PROMPT.includes("DUPLICATE_WIDGET"),
+    "the prompt must name the rejection so the model refines instead of retrying"
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -785,12 +891,12 @@ await test("E6 a conflict tells the model to retry directly instead of re-scanni
   );
 });
 
-await test("E7 old assistant tool-call args are pruned, not just tool results", () => {
+await test("E7 seed history caps what leaves the browser (server owns model history)", () => {
   const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
-  const fn = src.slice(src.indexOf("private pruneOldToolResults"), src.indexOf("private async compactHistory"));
-  assert.ok(fn.includes('m.role === "assistant"'), "pruning must cover assistant tool-call args");
-  assert.ok(fn.includes("m.toolCall"), "pruning must clip the toolCall args payload");
-  assert.ok(fn.includes('m.role !== "tool"'), "pruning must still cover tool results");
+  const seed = src.slice(src.indexOf("private seedHistory"));
+  assert.ok(seed.includes("out.length < 60"), "seed must cap entry count");
+  assert.ok(seed.includes("24_000"), "seed must cap characters");
+  assert.ok(seed.includes("[called ${m.toolCall.name}]"), "seed must note prior tool calls");
 });
 
 await test("E8 turn logs report peak input and bump attribution, not only cumulative tokens", () => {
@@ -839,8 +945,9 @@ interface ModelBody {
 const modelState: {
   lastBody: ModelBody | null;
   lastAuth: string | null;
-  mode: "text" | "tool" | "two-tools" | "summary";
-} = { lastBody: null, lastAuth: null, mode: "text" };
+  mode: "text" | "tool" | "two-tools" | "bad-edit" | "summary";
+  streamHits: number;
+} = { lastBody: null, lastAuth: null, mode: "text", streamHits: 0 };
 
 function sseChunksFor(mode: typeof modelState.mode): string {
   const enc = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`;
@@ -872,12 +979,38 @@ function sseChunksFor(mode: typeof modelState.mode): string {
       "data: [DONE]\n\n"
     );
   }
+  if (mode === "bad-edit") {
+    // operations[].kind instead of .op — the exact shape from the reported turn.
+    return (
+      frame({ role: "assistant", content: null }) +
+      frame({
+        tool_calls: [
+          {
+            index: 0,
+            id: "call_1",
+            type: "function",
+            function: {
+              name: "canvas_edit",
+              arguments: '{"baseRevision":7,"operations":[{"kind":"resize_object","objectId":"w1","w":10,"h":10}]}',
+            },
+          },
+        ],
+      }) +
+      frame({}, "tool_calls") +
+      "data: [DONE]\n\n"
+    );
+  }
   return (
     frame({ role: "assistant", content: null }) +
     frame({
       tool_calls: [
         { index: 0, id: "call_1", type: "function", function: { name: "canvas_scan", arguments: "{}" } },
-        { index: 1, id: "call_2", type: "function", function: { name: "canvas_focus", arguments: "{}" } },
+        {
+          index: 1,
+          id: "call_2",
+          type: "function",
+          function: { name: "canvas_focus", arguments: '{"target":"canvas"}' },
+        },
       ],
     }) +
     frame({}, "tool_calls") +
@@ -909,8 +1042,12 @@ const fakeModel = http.createServer((req, res) => {
       );
       return;
     }
+    // Stateful: after a tool batch is answered the loop calls again; answer
+    // with final text so the turn terminates instead of ping-ponging.
+    modelState.streamHits += 1;
+    const followUp = modelState.streamHits % 2 === 0;
     res.writeHead(200, { "content-type": "text/event-stream" });
-    res.end(sseChunksFor(modelState.mode));
+    res.end(followUp ? sseChunksFor("text") : sseChunksFor(modelState.mode));
   });
 });
 
@@ -1026,15 +1163,18 @@ const SEARCH_TOOL_NAMES = [
   "stock_market_data",
 ];
 
+let conversationSeq = 0;
+const freshConversation = () => `t${Date.now().toString(36)}${(conversationSeq += 1)}`;
+
 const validStepBase = {
+  conversation: freshConversation(),
   providerType: "custom",
   baseUrl: MODEL_URL,
   apiKey: API_KEY,
   model: "fake-model",
   loadedPluginIds: ["weather"],
   webSearch: false,
-  messages: [{ role: "user", text: "hi" }],
-  context: { revision: 0, viewport: { x: 0, y: 0, w: 800, h: 600 }, canvasSize: 20000 },
+  text: "hi, draw a cat",
 };
 
 let nextProc: ReturnType<typeof spawn> | null = null;
@@ -1086,14 +1226,15 @@ try {
     assert.ok((await res.json()).error.includes("not-a-plugin"));
   });
 
-  await test("E5 step rejects malformed messages", async () => {
-    const res = await post("/api/canvas/agent/step", { ...validStepBase, messages: "nope" });
-    assert.equal(res.status, 400);
-    const res2 = await post("/api/canvas/agent/step", {
-      ...validStepBase,
-      messages: [{ role: "assistant", text: 42 }],
-    });
-    assert.equal(res2.status, 400);
+  await test("E5 step rejects missing text; conversation suffix is optional (session-owned)", async () => {
+    assert.equal((await post("/api/canvas/agent/step", { ...validStepBase, text: undefined })).status, 400);
+    assert.equal((await post("/api/canvas/agent/step", { ...validStepBase, text: "  " })).status, 400);
+    // No conversation suffix → the user session owns a default conversation.
+    const noConversation = { ...validStepBase, conversation: undefined };
+    const res = await post("/api/canvas/agent/step", noConversation);
+    assert.equal(res.status, 200);
+    assert.ok((res.headers.get("content-type") || "").includes("text/event-stream"));
+    await readSseText(res);
   });
 
   await test("E6 plugins ?doc= returns full card; unknown 404s", async () => {
@@ -1108,14 +1249,18 @@ try {
 
   await test("E7 step E2E: streams text, server-composed prompt, tools bound, key forwarded, plugin contract injected", async () => {
     modelState.mode = "text";
-    const res = await post("/api/canvas/agent/step", validStepBase);
+    modelState.streamHits = 0;
+    const res = await post("/api/canvas/agent/step", { ...validStepBase, conversation: freshConversation() });
     assert.equal(res.status, 200);
     assert.ok((res.headers.get("content-type") || "").includes("text/event-stream"));
     const rawText = await readSseText(res);
     const events = sseEvents(rawText);
-    const deltas = events.filter((e) => e.event === "text_delta");
+    const joined = events
+      .filter((e) => e.event === "text_delta")
+      .map((e) => String(e.data.text || ""))
+      .join("");
+    assert.equal(joined, "Hello world.");
     const final = events.filter((e) => e.event === "final");
-    assert.equal(deltas.length, 2);
     assert.equal(final.length, 1);
     assert.equal(final[0].data.text, "Hello world.");
     assert.equal(events.filter((e) => e.event === "error").length, 0);
@@ -1139,92 +1284,158 @@ try {
     }
   });
 
-  await test("E8 step E2E: tool_call round-trips with parsed args", async () => {
+  // Opens a turn stream and answers every tool_request via /tool-result,
+  // like the browser conductor does. Resolves with all streamed events.
+  async function runTurnAnsweringTools(
+    body: Record<string, unknown>,
+    answer: (name: string, args: unknown) => unknown
+  ): Promise<Array<{ event: string; data: Record<string, unknown> }>> {
+    const conversation = String(body.conversation);
+    const res = await post("/api/canvas/agent/step", body);
+    assert.equal(res.status, 200);
+    const events: Array<{ event: string; data: Record<string, unknown> }> = [];
+    const answered = new Set<string>();
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    const deadline = Date.now() + 90_000;
+    let sawFinal = false;
+    const pump = async (): Promise<void> => {
+      for (;;) {
+        if (Date.now() > deadline) throw new Error("turn stream timed out");
+        const { done, value } = await reader.read();
+        if (done) return;
+        buf += decoder.decode(value, { stream: true });
+        const blocks = buf.split("\n\n");
+        buf = blocks.pop() || "";
+        for (const block of blocks) {
+          const event = /^event: (.+)$/m.exec(block)?.[1];
+          const dataLine = /^data: (.+)$/m.exec(block)?.[1];
+          if (!event || !dataLine) continue;
+          let data: Record<string, unknown> = {};
+          try {
+            const parsed = JSON.parse(dataLine) as unknown;
+            if (parsed && typeof parsed === "object") data = parsed as Record<string, unknown>;
+          } catch {}
+          events.push({ event, data });
+          if (event === "tool_request") {
+            const toolCallId = String(data.toolCallId || "");
+            if (toolCallId && !answered.has(toolCallId)) {
+              answered.add(toolCallId);
+              const result = answer(String(data.name || ""), data.args);
+              const answerRes = await post("/api/canvas/agent/tool-result", {
+                conversation,
+                toolCallId,
+                result,
+              });
+              assert.equal(answerRes.status, 200);
+            }
+          }
+          if (event === "final" || event === "error") sawFinal = true;
+        }
+        if (sawFinal) {
+          // Drain remaining frames, then stop reading.
+          await reader.cancel().catch(() => {});
+          return;
+        }
+      }
+    };
+    await pump();
+    return events;
+  }
+
+  await test("E8 step E2E: tool_request bridges to tool-result and the turn finishes", async () => {
     modelState.mode = "tool";
-    const res = await post("/api/canvas/agent/step", validStepBase);
-    assert.equal(res.status, 200);
-    const events = sseEvents(await readSseText(res));
-    const tc = events.filter((e) => e.event === "tool_call");
-    assert.equal(tc.length, 1);
-    assert.equal(tc[0].data.name, "canvas_scan");
-    assert.deepEqual(tc[0].data.args, { scope: "all" });
-    assert.equal(tc[0].data.extraToolCalls, 0);
-    assert.ok(events.some((e) => e.event === "final"));
-  });
-
-  await test("E9 step E2E: multi-tool batch rejected via decision admission, nothing executed", async () => {
-    modelState.mode = "two-tools";
-    const res = await post("/api/canvas/agent/step", validStepBase);
-    assert.equal(res.status, 200);
-    const events = sseEvents(await readSseText(res));
-    const tc = events.filter((e) => e.event === "tool_call");
-    assert.equal(tc.length, 1);
-    assert.equal(tc[0].data.name, "canvas_scan");
-    assert.equal(tc[0].data.extraToolCalls ?? 0, 0);
-    assert.ok(!events.some((e) => e.event === "tool_call" && e.data.name === "canvas_focus"));
-    assert.ok(
-      typeof tc[0].data.admissionError === "string" && tc[0].data.admissionError.includes("2 tool calls"),
-      `admissionError should name the rejected batch: ${JSON.stringify(tc[0].data.admissionError)}`
+    modelState.streamHits = 0;
+    const seen: string[] = [];
+    const events = await runTurnAnsweringTools(
+      { ...validStepBase, conversation: freshConversation() },
+      (name, args) => {
+        seen.push(name);
+        assert.equal(name, "canvas_scan");
+        assert.deepEqual(args, { scope: "all" });
+        return { revision: 7, objects: [] };
+      }
     );
+    assert.deepEqual(seen, ["canvas_scan"]);
+    const ends = events.filter((e) => e.event === "tool_end");
+    assert.equal(ends.length, 1);
+    assert.equal(ends[0].data.ok, true);
+    assert.ok(events.some((e) => e.event === "final"));
+    assert.equal(events.filter((e) => e.event === "error").length, 0);
   });
 
-  await test("E10 step E2E: system notes render as user turns, tool results as tool role", async () => {
+  await test("E9 step E2E: serial tool loop answers every request in order", async () => {
+    modelState.mode = "two-tools";
+    modelState.streamHits = 0;
+    const seen: string[] = [];
+    const events = await runTurnAnsweringTools(
+      { ...validStepBase, conversation: freshConversation() },
+      (name) => {
+        seen.push(name);
+        return { ok: true };
+      }
+    );
+    assert.deepEqual(seen, ["canvas_scan", "canvas_focus"]);
+    assert.ok(events.some((e) => e.event === "final"));
+    assert.equal(events.filter((e) => e.event === "error").length, 0);
+  });
+
+  await test("E10 step E2E: prior turns seed the conversation as provider-visible context", async () => {
     modelState.mode = "text";
+    modelState.streamHits = 0;
     const res = await post("/api/canvas/agent/step", {
       ...validStepBase,
-      messages: [
-        { role: "user", text: "first question" },
-        { role: "system", text: "older summary", tag: "compact" },
-        {
-          role: "assistant",
-          text: "",
-          toolCall: { id: "call_9", name: "canvas_scan", args: { scope: "all" } },
-        },
-        { role: "tool", toolCallId: "call_9", name: "canvas_scan", result: { items: [] }, isError: false },
+      conversation: freshConversation(),
+      text: "continue the task",
+      history: [
+        { role: "user", text: "first question about widgets" },
+        { role: "assistant", text: "created widget-1" },
       ],
     });
     assert.equal(res.status, 200);
-    const msgs = modelState.lastBody!.messages!;
-    assert.equal(msgs.filter((m) => m.role === "system").length, 1); // only the composed prompt
-    const note = msgs.find((m) => typeof m.content === "string" && m.content.includes("[system note] older summary"));
-    assert.ok(note, "system note missing");
-    assert.equal(note.role, "user");
-    const toolMsg = msgs.find((m) => m.role === "tool");
-    assert.ok(toolMsg, "tool message missing");
-    assert.equal(toolMsg.tool_call_id, "call_9");
-    assert.ok(String(toolMsg.content).includes("items"));
+    await readSseText(res);
+    const wireText = JSON.stringify(modelState.lastBody!.messages!);
+    assert.ok(wireText.includes("first question about widgets"), "prior user turn missing from wire messages");
+    assert.ok(wireText.includes("created widget-1"), "prior assistant turn missing from wire messages");
   });
 
-  await test("E11 compact E2E: returns model summary", async () => {
-    const res = await post("/api/canvas/agent/compact", {
-      providerType: "custom",
-      baseUrl: MODEL_URL,
-      apiKey: API_KEY,
-      model: "fake-model",
-      messages: [
-        { role: "user", text: "q1" },
-        { role: "assistant", text: "a1" },
-      ],
-    });
-    assert.equal(res.status, 200);
-    const data = (await res.json()) as { summary?: string };
-    assert.equal(data.summary, "SUMMARY: kept ids and coords.");
-  });
-
-  await test("E12 compact rejects invalid / missing fields", async () => {
-    assert.equal((await post("/api/canvas/agent/compact", { providerType: "custom", apiKey: "k", model: "m" })).status, 400);
+  await test("E11 step E2E: a mis-keyed canvas_edit is rejected before it reaches the browser", async () => {
+    // The reported turn sent operations[].kind nine times and got
+    // `Unknown op: ` back from the executor. With the schema declared, the
+    // runtime rejects the call pre-dispatch and the browser never sees it.
+    modelState.mode = "bad-edit";
+    modelState.streamHits = 0;
+    const seen: string[] = [];
+    const events = await runTurnAnsweringTools(
+      { ...validStepBase, conversation: freshConversation() },
+      (name) => {
+        seen.push(name);
+        return { ok: true };
+      }
+    );
+    assert.deepEqual(seen, [], "an invalid tool call must never bridge to the canvas");
+    const ends = events.filter((e) => e.event === "tool_end");
+    assert.equal(ends.length, 1);
+    assert.equal(ends[0].data.ok, false, "the invalid call must be reported as a failed tool");
+    assert.ok(events.some((e) => e.event === "final"), "the turn must still finish with an answer");
   });
 
   await test("E13 step E2E: the search flag gates both the tool list and the prompt state line", async () => {
     modelState.mode = "text";
-    await readSseText(await post("/api/canvas/agent/step", { ...validStepBase, webSearch: true }));
+    modelState.streamHits = 0;
+    await readSseText(
+      await post("/api/canvas/agent/step", { ...validStepBase, conversation: freshConversation(), webSearch: true })
+    );
     const onNames = wireToolNames(modelState.lastBody!);
     for (const name of SEARCH_TOOL_NAMES) {
       assert.ok(onNames.includes(name), `missing ${name}`);
     }
     assert.ok(String(modelState.lastBody!.messages![0].content).includes("Internet search is ENABLED"));
 
-    await readSseText(await post("/api/canvas/agent/step", { ...validStepBase, webSearch: false }));
+    await readSseText(
+      await post("/api/canvas/agent/step", { ...validStepBase, conversation: freshConversation(), webSearch: false })
+    );
     const offNames = wireToolNames(modelState.lastBody!);
     for (const name of SEARCH_TOOL_NAMES) {
       assert.ok(!offNames.includes(name), `${name} bound despite webSearch:false`);
@@ -1240,6 +1451,31 @@ try {
     const badArgs = await post("/api/canvas/web", { name: "web_read", args: { urls: [] } });
     assert.equal(badArgs.status, 400);
     assert.equal(((await badArgs.json()) as { code?: string }).code, "INVALID_ARGUMENT");
+  });
+
+  await test("E15 step E2E: image turn admits the snapshot and streams text", async () => {
+    modelState.mode = "text";
+    modelState.streamHits = 0;
+    // 1x1 PNG, like the conductor's canvas atlas snapshots.
+    const tinyPng =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    const res = await post("/api/canvas/agent/step", {
+      ...validStepBase,
+      conversation: freshConversation(),
+      text: "what is in this image",
+      images: [{ id: "img-atlas-test", dataUrl: tinyPng }],
+    });
+    assert.equal(res.status, 200);
+    const events = sseEvents(await readSseText(res));
+    assert.equal(events.filter((e) => e.event === "error").length, 0);
+    const joined = events
+      .filter((e) => e.event === "text_delta")
+      .map((e) => String(e.data.text || ""))
+      .join("");
+    assert.equal(joined, "Hello world.");
+    // The image must reach the model as vision content.
+    const wireImages = JSON.stringify(modelState.lastBody!.messages!).includes("image");
+    assert.ok(wireImages, "no image content reached the model wire request");
   });
 } finally {
   if (nextProc && !nextProc.killed) {

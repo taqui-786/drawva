@@ -423,17 +423,82 @@ function commandInkBox(cmd: CanvasCommand): Rect | null {
   return { x, y, w, h };
 }
 
+/**
+ * Geometry the model asked for on the (at most one) widget-ish command, so the
+ * apply result can report a placement override instead of leaving the model to
+ * guess. Without it, a clamped box reads as "the tool ignored me" and the model
+ * burns the rest of the turn on move/resize calls.
+ */
+function requestedWidgetBox(raw: unknown[]): Rect | null {
+  for (const entry of raw) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    const nested = ["box", "bbox", "rect", "geometry", "bounds", "frame"]
+      .map((key) => rec[key])
+      .find((v): v is Record<string, unknown> => Boolean(v) && typeof v === "object" && !Array.isArray(v));
+    const num = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = Number(rec[key] ?? nested?.[key]);
+        if (Number.isFinite(value)) return value;
+      }
+      return NaN;
+    };
+    const w = num("w", "width");
+    const h = num("h", "height");
+    const x = num("x", "left");
+    const y = num("y", "top");
+    const isWidgetish =
+      rec.html !== undefined || rec.source !== undefined || rec.objects !== undefined || rec.expression !== undefined;
+    if (isWidgetish && [x, y, w, h].every(Number.isFinite)) {
+      return { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+    }
+  }
+  return null;
+}
+
+function sameBox(a: Rect, b: Rect): boolean {
+  return a.x === b.x && a.y === b.y && a.w === b.w && a.h === b.h;
+}
+
 async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const currentRevision = deps.getRevision();
   const conflict = revisionConflict(currentRevision, args, deps);
   if (conflict) return conflict;
-  const raw = Array.isArray(args.commands) ? args.commands : [];
+  // Some providers stringify array arguments. Parsing beats a hard reject: the
+  // alternative is one wasted round trip per occurrence, which is exactly what
+  // the real-user trace shows (steps 1 and 12 of the same turn).
+  let rawArg = args.commands;
+  if (typeof rawArg === "string") {
+    try {
+      rawArg = JSON.parse(rawArg) as unknown;
+    } catch {
+      return toolError("INVALID_ARGUMENT", "commands must be a JSON array of command objects, not a string.");
+    }
+  }
+  const raw = Array.isArray(rawArg) ? rawArg : [];
+  if (raw.length === 0) {
+    return toolError("INVALID_ARGUMENT", "commands[] must hold 1..16 command objects.");
+  }
   const ctx = applyContext(deps);
   const { commands, rejected } = validateCommands(raw, ctx);
   const rejectedRows = rejected.map((reason) => ({ reason }));
   if (commands.length === 0) {
-    return { ok: false, code: "ALL_COMMANDS_REJECTED", revision: currentRevision, applied: [], rejected: rejectedRows };
+    return {
+      ok: false,
+      code: "ALL_COMMANDS_REJECTED",
+      revision: currentRevision,
+      applied: [],
+      rejected: rejectedRows.length
+        ? rejectedRows
+        : [
+            {
+              reason:
+                "no command carried a usable payload — every command needs an explicit tool plus its own field (write_text→text, draw_formula→latex, html_widget→html, diagram_source→source+sourceFormat) and flat x/y/w/h geometry",
+            },
+          ],
+    };
   }
+  const requestedBox = requestedWidgetBox(raw);
 
   const beforeW = new Set(deps.widgets.all().map((w) => w.id));
   const beforeO = new Set(deps.objects.all().map((o) => o.id));
@@ -486,11 +551,20 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   }
   deps.afterBoardChange();
 
-  const applied: { objectId: string; kind: string; box: Rect; maxWidth?: number; fontSize?: number }[] = [];
+  const applied: { objectId: string; kind: string; box: Rect; requested?: Rect; maxWidth?: number; fontSize?: number }[] = [];
   const afterW = new Set(deps.widgets.all().map((w) => w.id));
   const afterO = new Set(deps.objects.all().map((o) => o.id));
   for (const w of deps.widgets.all()) {
-    if (!beforeW.has(w.id)) applied.push({ objectId: w.id, kind: w.kind, box: { x: w.x, y: w.y, w: w.w, h: w.h } });
+    if (beforeW.has(w.id)) continue;
+    const box: Rect = { x: w.x, y: w.y, w: w.w, h: w.h };
+    // Placement/geometry limits can move or shrink a widget. Saying so once here
+    // is what stops the model re-issuing move/resize calls to "fix" it.
+    applied.push({
+      objectId: w.id,
+      kind: w.kind,
+      box,
+      ...(requestedBox && !sameBox(requestedBox, box) ? { requested: requestedBox } : {}),
+    });
   }
   for (const o of deps.objects.all()) {
     if (!beforeO.has(o.id)) {
@@ -538,11 +612,35 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   return { ok: true, revision: deps.getRevision(), applied, rejected: rejectedRows, ...(widgetMutated ? { widgetMutated: true } : {}) };
 }
 
+/** Canonical edit op from whatever key the model used to name it. */
+function canonicalEditOp(rec: Record<string, unknown>): string {
+  const raw = String(rec.op ?? rec.kind ?? rec.type ?? rec.operation ?? rec.action ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[-\s]/g, "_");
+  if (raw === "move_object" || raw === "move") return "move_object";
+  if (raw === "resize_object" || raw === "resize" || raw === "resize_widget" || raw === "resize_image") return "resize_object";
+  if (raw === "delete_object" || raw === "delete" || raw === "remove" || raw === "remove_object") return "delete_object";
+  if (raw) return raw;
+  // Unnamed op, inferred from payload: a bare {objectId, w, h} is a resize.
+  if (rec.dx !== undefined || rec.dy !== undefined) return "move_object";
+  if (rec.w !== undefined || rec.h !== undefined || rec.width !== undefined || rec.height !== undefined) return "resize_object";
+  return "";
+}
+
 async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const currentRevision = deps.getRevision();
   const conflict = revisionConflict(currentRevision, args, deps);
   if (conflict) return conflict;
-  const ops = Array.isArray(args.operations) ? args.operations : [];
+  let opsArg = args.operations;
+  if (typeof opsArg === "string") {
+    try {
+      opsArg = JSON.parse(opsArg) as unknown;
+    } catch {
+      return toolError("INVALID_ARGUMENT", "operations must be a JSON array of operation objects, not a string.");
+    }
+  }
+  const ops = Array.isArray(opsArg) ? opsArg : [];
   if (ops.length === 0) return toolError("INVALID_ARGUMENT", "operations[] is required (move_object, resize_object, delete_object).");
   if (ops.length > 16) return toolError("INVALID_ARGUMENT", "At most 16 operations per canvas_edit.");
 
@@ -559,8 +657,8 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
   deps.history.recordWidgets();
   for (const raw of ops) {
     const rec = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
-    const op = String(rec.op || "");
-    const id = String(rec.objectId || "");
+    const op = canonicalEditOp(rec);
+    const id = String(rec.objectId ?? rec.id ?? "");
     const widget = deps.widgets.get(id);
     const object = widget ? null : deps.objects.get(id);
     const item = widget || object;
@@ -569,10 +667,16 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
       continue;
     }
     if (op === "move_object") {
-      const dx = Number(rec.dx);
-      const dy = Number(rec.dy);
-      if (!Number.isFinite(dx) || !Number.isFinite(dy)) {
-        results.push({ op, objectId: id, ok: false, reason: "dx,dy numbers required" });
+      // dx/dy is the contract, but absolute x/y is the obvious other guess —
+      // convert it rather than spending a round trip teaching the difference.
+      let dx = Number(rec.dx);
+      let dy = Number(rec.dy);
+      if (!Number.isFinite(dx) && Number.isFinite(Number(rec.x))) dx = Number(rec.x) - item.x;
+      if (!Number.isFinite(dy) && Number.isFinite(Number(rec.y))) dy = Number(rec.y) - item.y;
+      if (!Number.isFinite(dx)) dx = 0;
+      if (!Number.isFinite(dy)) dy = 0;
+      if (dx === 0 && dy === 0) {
+        results.push({ op, objectId: id, ok: false, reason: "move_object needs dx/dy offsets (or absolute x/y) that actually move the item" });
         continue;
       }
       if (widget) deps.widgets.move(id, dx, dy);
@@ -580,10 +684,12 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
       results.push({ op, objectId: id, ok: true });
       touched = true;
     } else if (op === "resize_object") {
-      const w = Number(rec.w);
-      const h = Number(rec.h);
+      // One axis is a legitimate request; keep the other as-is instead of
+      // rejecting the whole operation.
+      const w = Number(rec.w ?? rec.width ?? item.w);
+      const h = Number(rec.h ?? rec.height ?? item.h);
       if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
-        results.push({ op, objectId: id, ok: false, reason: "w,h numbers > 0 required" });
+        results.push({ op, objectId: id, ok: false, reason: "resize_object needs w and/or h as numbers > 0" });
         continue;
       }
       if (widget) deps.widgets.resize(id, w, h);
@@ -597,7 +703,12 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
       results.push({ op, objectId: id, ok: true });
       touched = true;
     } else {
-      results.push({ op, objectId: id, ok: false, reason: `Unknown op: ${op}` });
+      results.push({
+        op,
+        objectId: id,
+        ok: false,
+        reason: `Unsupported op ${op ? `"${op}"` : "(missing)"} — use exactly one of move_object (dx,dy), resize_object (w,h), delete_object, under the key "op"`,
+      });
     }
   }
   if (touched) {

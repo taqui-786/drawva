@@ -595,19 +595,6 @@ export function CanvasApp() {
         messageId: prev.currentMessage === label ? prev.messageId : prev.messageId + 1,
         detail: tickerTail(`${prev.currentMessage === label ? prev.detail || "" : ""}${e.text}`),
       }));
-    } else if (e.kind === "compact") {
-      setTickerState((prev) => ({
-        status: "running",
-        currentMessage: "Compacting context…",
-        messageId: prev.messageId + 1,
-        detail: undefined,
-      }));
-    } else if (e.kind === "compact_failed") {
-      setTickerState((prev) => ({
-        status: "running",
-        currentMessage: `Context compaction failed — history kept intact (${e.message.slice(0, 80)})`,
-        messageId: prev.messageId + 1,
-      }));
     } else if (e.kind === "log") {
       setLogs((prev) => [e.entry, ...prev.slice(0, 19)]);
     } else if (e.kind === "turn_end") {

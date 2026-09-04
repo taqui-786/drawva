@@ -372,9 +372,8 @@ function dedupeHits(hits: SearchHit[], limit: number): SearchHit[] {
   return out;
 }
 async function webRead(args: Record<string, unknown>, ctx: WebToolContext): Promise<Record<string, unknown>> {
-  if (!ctx.tinyfishKey) {
-    return webError("WEB_UNAVAILABLE", "Page reading is unavailable: the server has no TINYFISH_API_KEY configured.");
-  }
+  // Argument validation precedes the capability check: a call with no usable URL
+  // is a bad request whether or not the server has a key.
   const requested = Array.isArray(args.urls) ? args.urls.slice(0, WEB_READ_MAX_URLS) : [];
   const urls: string[] = [];
   const rejected: string[] = [];
@@ -387,6 +386,9 @@ async function webRead(args: Record<string, unknown>, ctx: WebToolContext): Prom
     return webError("INVALID_ARGUMENT", "Supply at least one absolute public http(s) URL to read.", {
       ...(rejected.length ? { rejected } : {}),
     });
+  }
+  if (!ctx.tinyfishKey) {
+    return webError("WEB_UNAVAILABLE", "Page reading is unavailable: the server has no TINYFISH_API_KEY configured.");
   }
   const maxChars = bounded(args.maxChars, PAGE_CHARS_DEFAULT, 500, PAGE_CHARS_MAX);
   const purpose = clip(args.purpose, 200) || undefined;

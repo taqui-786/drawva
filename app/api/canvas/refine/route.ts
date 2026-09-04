@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
-import { generateText } from "ai";
 import { z } from "zod";
-import { createChatModel, isFatalAuthError, isRateLimitError } from "@/lib/ai/model";
+import { completeLlmText, isFatalAuthError, isRateLimitError, resolveLlmConfig } from "@/lib/ai/llm";
 import { MAX_BODY_BYTES, AI_TIMEOUT_MS } from "@/lib/ai/prompts";
 import { extractJsonDecision } from "@/lib/ai/agentTools";
 import { requireSession } from "@/lib/api-guard";
@@ -199,9 +198,9 @@ export async function POST(req: Request) {
   if (!body.cropDataUrl) return json({ error: "Missing crop image." }, 400);
   if (!body.selectionRect) return json({ error: "Missing selection rectangle." }, 400);
 
-  let model;
+  let llm;
   try {
-    model = createChatModel({
+    llm = resolveLlmConfig({
       providerType,
       baseUrl,
       apiKey,
@@ -236,35 +235,24 @@ export async function POST(req: Request) {
   const userPrompt = `Refine the content inside the marked selection rectangle. Return ONLY the final JSON object.\n\n${contextParts.join("\n")}`;
 
   try {
-    const result = await generateText({
-      model,
+    const { text: rawContent, usage } = await completeLlmText(llm, {
       system: REFINEMENT_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: [
-            { type: "text", text: userPrompt },
-            { type: "image", image: body.cropDataUrl },
-          ],
-        },
-      ],
-      abortSignal: req.signal,
+      prompt: userPrompt,
+      images: [body.cropDataUrl],
+      signal: req.signal,
     });
 
     try {
-      const usage = await result.usage;
-      if (usage) {
-        await recordAiUsage({
-          providerType,
-          modelId,
-          inputTokens: usage.inputTokens || 0,
-          outputTokens: usage.outputTokens || 0,
-          totalTokens: (usage.inputTokens || 0) + (usage.outputTokens || 0),
-        });
-      }
+      await recordAiUsage({
+        providerType,
+        modelId,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        totalTokens: usage.inputTokens + usage.outputTokens,
+      });
     } catch {}
 
-    const rawText = result.text.trim();
+    const rawText = rawContent.trim();
     let parsedResult: RefineResult | null = null;
 
     // 1. Try direct JSON.parse

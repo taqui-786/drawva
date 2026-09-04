@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { generateText } from "ai";
-import { createChatModel } from "@/lib/ai/model";
+import { completeLlmText, resolveLlmConfig } from "@/lib/ai/llm";
 import { PLUGIN_AUTHORING_PROMPT } from "@/lib/ai/prompts";
 import { parsePluginMarkdown } from "@/lib/plugins/registry";
 import { requireSession } from "@/lib/api-guard";
@@ -36,7 +35,7 @@ export async function POST(req: Request) {
       );
     }
 
-    const model = createChatModel({
+    const llm = resolveLlmConfig({
       providerType: providerType || "custom",
       baseUrl,
       apiKey,
@@ -44,11 +43,10 @@ export async function POST(req: Request) {
       timeoutMs: 45_000,
     });
 
-    const { text: rawContent } = await generateText({
-      model,
-      temperature: 0.2,
+    const { text: rawContent } = await completeLlmText(llm, {
       system: PLUGIN_AUTHORING_PROMPT,
       prompt: `Generate a plugin document for: ${prompt.trim()}`,
+      signal: req.signal,
     });
 
     let text = rawContent.trim();

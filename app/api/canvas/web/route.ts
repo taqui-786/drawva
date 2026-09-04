@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { isWebToolName, parseAgentToolCall } from "@/lib/ai/agentTools";
+import { validateArgs } from "@deepseek-ai/dsh-tools";
+import { AGENT_TOOL_DEFS, isWebToolName } from "@/lib/ai/agentTools";
 import { runWebTool, tinyfishKey } from "@/lib/ai/webTools";
 import { requireSession } from "@/lib/api-guard";
 
@@ -35,20 +36,26 @@ export async function POST(req: Request) {
   }
 
   const name = typeof body.name === "string" ? body.name : "";
-  if (!isWebToolName(name)) {
+  const def = isWebToolName(name) ? AGENT_TOOL_DEFS.find((d) => d.name === name) : undefined;
+  if (!def) {
     return json({ code: "INVALID_ARGUMENT", message: `Unknown web tool: ${name || "(missing)"}.` }, 400);
   }
 
-  const parsed = parseAgentToolCall(name, body.args ?? {});
-  if (!parsed.valid) {
-    return json({ code: "INVALID_ARGUMENT", message: parsed.error ?? `Invalid arguments for ${name}.` }, 400);
+  const args = (body.args ?? {}) as Record<string, unknown>;
+  const violations = validateArgs(def.parameters, args);
+  if (violations.length > 0) {
+    return json({ code: "INVALID_ARGUMENT", message: `Invalid arguments for ${name}: ${violations.join("; ")}` }, 400);
   }
 
-  const result = await runWebTool(name, (parsed.args ?? {}) as Record<string, unknown>, {
+  const result = await runWebTool(name, args, {
     tinyfishKey: tinyfishKey(),
     signal: req.signal,
   });
-  return json(result);
+  // Argument problems the schema cannot express (an empty urls[], an unusable
+  // URL) come back from the tool as INVALID_ARGUMENT; keep them 4xx so a bad
+  // call is a bad request rather than a successful empty answer.
+  const code = (result as { code?: unknown }).code;
+  return json(result, code === "INVALID_ARGUMENT" ? 400 : 200);
 }
 
 function json(body: unknown, status = 200): NextResponse {

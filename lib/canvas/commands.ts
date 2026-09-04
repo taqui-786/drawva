@@ -1196,6 +1196,36 @@ export function extractDiagramSource(input: unknown, depth = 0): string {
   return "";
 }
 
+/**
+ * Lift geometry out of a nested wrapper (`box`, `bbox`, `rect`, `geometry`) and
+ * accept `width`/`height` as `w`/`h`. The contract is flat x/y/w/h, but models
+ * regularly wrap it; before this, `{box:{x,y,w,h}}` silently lost all four
+ * numbers and the placement engine invented a box somewhere else — the model
+ * then spent the rest of the turn trying to move a widget it never placed.
+ */
+function flattenGeometry(c: Record<string, unknown>): Record<string, unknown> {
+  const nested = ["box", "bbox", "rect", "geometry", "bounds", "frame"]
+    .map((key) => c[key])
+    .find((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value));
+  const pick = (...keys: string[]): unknown => {
+    for (const key of keys) {
+      if (c[key] !== undefined && c[key] !== null) return c[key];
+      if (nested && nested[key] !== undefined && nested[key] !== null) return nested[key];
+    }
+    return undefined;
+  };
+  const out = { ...c };
+  const x = pick("x", "left");
+  const y = pick("y", "top");
+  const w = pick("w", "width");
+  const h = pick("h", "height");
+  if (x !== undefined) out.x = x;
+  if (y !== undefined) out.y = y;
+  if (w !== undefined) out.w = w;
+  if (h !== undefined) out.h = h;
+  return out;
+}
+
 export function validateCommand(
   raw: unknown,
   ctx: CommandValidationContext,
@@ -1207,7 +1237,7 @@ export function validateCommand(
     if (onReject) onReject(reason);
     return null;
   }
-  const c = raw as Record<string, unknown>;
+  const c = flattenGeometry(raw as Record<string, unknown>);
   let tool = canonicalToolName(c.tool || c.command || c.type || c.name || c.kind || c.action || c.actionType || c.operation);
 
   // If tool is unrecognized, infer from content structure
