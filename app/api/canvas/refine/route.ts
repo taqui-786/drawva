@@ -247,6 +247,10 @@ export async function POST(req: Request) {
         inputTokens: usage.inputTokens,
         outputTokens: usage.outputTokens,
         totalTokens: usage.inputTokens + usage.outputTokens,
+        intent: "refine",
+        userPrompt: "Refine canvas selection area",
+        snapshotUrl: body.cropDataUrl,
+        response: rawContent.trim(),
       });
     } catch {}
 

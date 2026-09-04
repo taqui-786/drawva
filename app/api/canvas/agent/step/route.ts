@@ -138,9 +138,19 @@ export async function POST(req: Request) {
       }
       const onAbort = () => finish();
       req.signal.addEventListener("abort", onAbort, { once: true });
+      let accumulatedResponse = "";
       try {
         await runConversationTurn(turnOptions, (e) => {
             if (req.signal.aborted) return;
+            if (e.event === "text_delta") {
+              const textDelta = (e.data as Record<string, unknown>)?.text;
+              if (typeof textDelta === "string") accumulatedResponse += textDelta;
+            } else if (e.event === "tool_end") {
+              const d = e.data as Record<string, unknown>;
+              if (typeof d?.summary === "string") {
+                accumulatedResponse += `\n[Tool ${d.name || "call"}: ${d.summary}]`;
+              }
+            }
             if (e.event === "usage") {
               void recordAiUsage({
                 providerType,
@@ -148,6 +158,9 @@ export async function POST(req: Request) {
                 inputTokens: e.data.inputTokens,
                 outputTokens: e.data.outputTokens,
                 totalTokens: e.data.inputTokens + e.data.outputTokens,
+                userPrompt: text || undefined,
+                snapshotUrl: images?.[0]?.dataUrl || undefined,
+                response: accumulatedResponse.trim() || undefined,
               }).catch(() => {});
             }
             send(e.event, e.data);

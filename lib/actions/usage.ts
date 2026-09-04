@@ -16,6 +16,7 @@ export interface AiUsageRecordDto {
   intent?: string | null;
   userPrompt?: string | null;
   snapshotUrl?: string | null;
+  response?: string | null;
   createdAt: number;
 }
 
@@ -35,6 +36,7 @@ export async function recordAiUsage(payload: {
   intent?: string;
   userPrompt?: string;
   snapshotUrl?: string;
+  response?: string;
 }): Promise<{ success: boolean }> {
   try {
     const session = await auth.api.getSession({
@@ -45,9 +47,10 @@ export async function recordAiUsage(payload: {
       return { success: false };
     }
 
-    const isHttpUrl =
-      typeof payload.snapshotUrl === "string" && /^https?:\/\//i.test(payload.snapshotUrl);
-    const snapshotUrl = isHttpUrl ? payload.snapshotUrl : null;
+    const isValidUrl =
+      typeof payload.snapshotUrl === "string" &&
+      (/^https?:\/\//i.test(payload.snapshotUrl) || payload.snapshotUrl.startsWith("data:image/"));
+    const snapshotUrl = isValidUrl ? payload.snapshotUrl : null;
 
     await db.insert(aiUsage).values({
       id: `usage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -58,8 +61,9 @@ export async function recordAiUsage(payload: {
       outputTokens: payload.outputTokens || 0,
       totalTokens: payload.totalTokens || 0,
       intent: payload.intent || null,
-      userPrompt: payload.userPrompt ? payload.userPrompt.slice(0, 500) : null,
+      userPrompt: payload.userPrompt ? payload.userPrompt.slice(0, 4000) : null,
       snapshotUrl,
+      response: payload.response ? payload.response.slice(0, 10000) : null,
       createdAt: new Date(),
     });
 
@@ -114,6 +118,7 @@ export async function getRecentAiUsage(limit = 10): Promise<{
       intent: r.intent,
       userPrompt: r.userPrompt,
       snapshotUrl: r.snapshotUrl,
+      response: r.response,
       createdAt: new Date(r.createdAt).getTime(),
     }));
 

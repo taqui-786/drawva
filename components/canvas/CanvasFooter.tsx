@@ -7,10 +7,12 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { HugeiconsIcon } from "@hugeicons/react";
+import Link from "next/link";
 import {
   ZoomInAreaIcon,
   ZoomOutAreaIcon,
   Refresh01Icon,
+  Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { useSession } from "@/lib/auth-client";
 
@@ -99,6 +101,17 @@ export function CanvasFooter({
                 </div>
               </TooltipContent>
             </Tooltip>
+            {(session.user as { role?: string }).role === "admin" && (
+              <Button
+                variant="outline"
+                size="xs"
+                render={<Link href="/admin" />}
+                className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans"
+              >
+                <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
+                <span>Admin</span>
+              </Button>
+            )}
             <Separator orientation="vertical" className="h-4 hidden sm:block" />
           </>
         )}

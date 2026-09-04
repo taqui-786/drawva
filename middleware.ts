@@ -5,7 +5,7 @@ export async function middleware(request: NextRequest) {
   const sessionCookie = getSessionCookie(request);
   const { pathname } = request.nextUrl;
 
-  if (!sessionCookie && pathname.startsWith("/canvas")) {
+  if (!sessionCookie && (pathname.startsWith("/canvas") || pathname.startsWith("/admin"))) {
     const signInUrl = new URL("/signin", request.url);
     signInUrl.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(signInUrl);
@@ -19,5 +19,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/", "/signin", "/canvas/:path*"],
+  matcher: ["/", "/signin", "/canvas/:path*", "/admin/:path*"],
 };
+

@@ -55,6 +55,16 @@ export function DrawvaNavbar() {
           <div className="flex items-center gap-3">
             {session?.user ? (
               <div className="flex items-center gap-3">
+                {(session.user as { role?: string }).role === "admin" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    render={<Link href="/admin" />}
+                    className="text-xs text-primary border-primary/30 hover:bg-primary/10 gap-1.5"
+                  >
+                    <span>Admin</span>
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="sm"
