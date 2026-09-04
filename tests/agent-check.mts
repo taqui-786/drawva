@@ -427,6 +427,7 @@ await test("C1 agent prompt carries safety + discipline rules", () => {
     "STOP WHEN DONE",
     "applied[].requested",
     "maxWidgetSize",
+    "REFERENTS BIND TO INK",
   ]) {
     assert.ok(AGENT_SYSTEM_PROMPT.includes(needle), `missing: ${needle}`);
   }
@@ -769,6 +770,48 @@ await test("D17 a second create of the same widget title is refused, not cleaned
     AGENT_SYSTEM_PROMPT.includes("DUPLICATE_WIDGET"),
     "the prompt must name the rejection so the model refines instead of retrying"
   );
+});
+
+await test("D18 a text-only turn still lands its answer on the canvas", () => {
+  // There is no chat panel: a reply that exists only in the closing message is
+  // invisible. The reported turn answered "Hey!" with zero mutations.
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
+  assert.ok(src.includes("private async writeAnswerToCanvas"), "a canvas fallback for text-only turns must exist");
+  assert.ok(/if \(finalText\.trim\(\) && !policy\.mutated\)/.test(src), "the fallback must trigger only when nothing was mutated");
+  assert.ok(src.includes("policy.mutated = true"), "successful mutations must clear the fallback");
+  const fallback = src.slice(src.indexOf("private async writeAnswerToCanvas"), src.indexOf("Answer one server-requested tool call"));
+  assert.ok(fallback.includes('tool: "write_text"'), "the fallback must write native text, not a widget");
+  assert.ok(fallback.includes("getInkBox"), "the fallback must anchor near the newest ink");
+  for (const needle of ["THE CANVAS IS THE ONLY OUTPUT SURFACE", "answer it with ONE short write_text"]) {
+    assert.ok(AGENT_SYSTEM_PROMPT.includes(needle), `prompt missing: ${needle}`);
+  }
+});
+
+await test("D19 a stale harness session id can never brick a conversation", () => {
+  // ctx.agents.create throws `session "<id>" already exists` while a previous
+  // session under that id is still in the store. Reusing the conversation id
+  // verbatim made that permanent: every later turn hit the same error.
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/dsh/sessions.ts"), "utf8");
+  assert.ok(src.includes("function sessionIdFor"), "the session id must be derived, not the raw conversation key");
+  assert.ok(src.includes("function bumpEpoch"), "a stale id must be retirable");
+  assert.ok(/already exists/.test(src), "creation must recognise the duplicate-session error");
+  const create = src.slice(src.indexOf("async function createConversation"), src.indexOf("/** Server-owned conversation id"));
+  assert.ok(/for \(let attempt = 0; attempt < 3; attempt\+\+\)/.test(create), "creation must retry under a fresh id");
+  assert.ok(create.includes("bumpEpoch(opts.conversationId)"), "the retry must retire the stale id");
+  const dispose = src.slice(src.indexOf("export async function disposeConversation"), src.indexOf("Run one user turn"));
+  const bumpIdx = dispose.indexOf("bumpEpoch(conversationId)");
+  const awaitIdx = dispose.indexOf("await conversation.handle.dispose()");
+  assert.ok(bumpIdx > 0 && bumpIdx < awaitIdx, "the id must be retired before awaiting teardown");
+  // Concurrent turns must share one creation instead of racing on the same id.
+  assert.ok(src.includes("const opening = new Map"), "in-flight creations must be shared");
+});
+
+await test("D20 clearing the canvas drops the server conversation too", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
+  const clear = src.slice(src.indexOf("clearHistory(): void"), src.indexOf("watch(fn:"));
+  assert.ok(clear.includes("this.postCancel(true)"), "clearHistory must dispose the server conversation");
+  const app = fs.readFileSync(path.join(ROOT, "components/canvas/CanvasApp.tsx"), "utf8");
+  assert.ok(app.includes("conductorRef.current?.clearHistory()"), "the board reset paths must call clearHistory");
 });
 
 // ---------------------------------------------------------------------------

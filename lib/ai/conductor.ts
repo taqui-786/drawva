@@ -101,6 +101,8 @@ interface TurnPolicy {
   failStreak: { name: string; count: number };
   /** Once tripped, every later tool call in this turn short-circuits. */
   stopped: string;
+  /** Any successful board mutation this turn (apply/patch/edit/undo). */
+  mutated: boolean;
   /** Widget title → id created this turn, so a retry cannot duplicate it. */
   createdWidgets: Map<string, string>;
 }
@@ -174,12 +176,18 @@ export class Conductor {
     });
   }
 
+  /**
+   * Drop this canvas's conversation, client and server. The server owns the
+   * model history, so clearing only the local mirror left the agent still
+   * remembering a board the user had just wiped.
+   */
   clearHistory(): void {
     this.messages = [];
     this.images.clear();
     this.latestSnapshotId = null;
     this.atlasImageId = null;
     this.loadedPluginIds.clear();
+    this.postCancel(true);
     clearConversation(this.deps.canvasId?.());
   }
 
@@ -247,13 +255,8 @@ export class Conductor {
 
   reset(): void {
     this.cancel();
-    this.postCancel(true);
-    this.messages = [];
-    this.images.clear();
-    this.latestSnapshotId = null;
     this.turnImageIds = [];
-    this.atlasImageId = null;
-    clearConversation(this.deps.canvasId?.());
+    this.clearHistory();
   }
 
   private emit(e: ConductorEvent): void {
@@ -405,6 +408,7 @@ export class Conductor {
         steps: 0,
         failStreak: { name: "", count: 0 },
         stopped: "",
+        mutated: false,
         createdWidgets: new Map(),
       };
       const stepsLog: AiLogStep[] = [];
@@ -420,6 +424,14 @@ export class Conductor {
       }
       finalText = turnResult.text || "";
       finished = true;
+      // The canvas is the only surface the user reads — there is no chat panel,
+      // and the status line vanishes. A turn that answered only in text (a
+      // greeting, a refusal, a clarifying question) produced nothing visible, so
+      // put that answer on the board next to the newest ink.
+      if (finalText.trim() && !policy.mutated) {
+        await this.writeAnswerToCanvas(finalText, gen, policy, stepsLog);
+        if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
+      }
       this.messages.push({ role: "assistant", text: finalText });
       stepsLog.push({
         stepNumber: policy.steps + 1,
@@ -752,6 +764,56 @@ export class Conductor {
 
 
   /**
+   * Put a text-only answer on the board. Runs when a turn ends having mutated
+   * nothing: the canvas is the whole UI, so an answer that exists only in the
+   * closing message never reaches the user. Placement and wrapping are the
+   * normal apply path (`validateCommands` → `placeContent`), so the note lands
+   * beside the newest ink rather than on top of it.
+   */
+  private async writeAnswerToCanvas(
+    text: string,
+    gen: number,
+    policy: TurnPolicy,
+    stepsLog: AiLogStep[]
+  ): Promise<void> {
+    const ink = this.deps.getInkBox?.() ?? null;
+    const view = this.deps.camera.visibleWorldRect();
+    const anchor = ink && ink.w > 4 && ink.h > 4 ? ink : null;
+    const args = {
+      baseRevision: this.deps.getRevision(),
+      commands: [
+        {
+          tool: "write_text",
+          text: text.trim().slice(0, 800),
+          x: Math.round(anchor ? anchor.x : view.x + view.w * 0.1),
+          y: Math.round(anchor ? anchor.y + anchor.h + 60 : view.y + view.h * 0.25),
+          maxWidth: Math.round(Math.max(600, Math.min(2000, view.w * 0.5))),
+          placement: "below",
+        },
+      ],
+      note: "canvas-only reply",
+    };
+    try {
+      const result = await executeTool("canvas_apply", args, this.toolDeps());
+      if (gen !== this.currentGeneration || this.abort?.signal.aborted) return;
+      const ok = !isFailedResult(result);
+      if (ok) policy.applies += 1;
+      stepsLog.push({
+        stepNumber: policy.steps + 1,
+        tool: "canvas_apply",
+        args,
+        result,
+        isError: !ok,
+        summary: ok ? "wrote the reply to the canvas" : summarizeResult(result),
+      });
+      this.emit({ kind: "tool_end", name: "canvas_apply", ok, summary: summarizeResult(result) });
+    } catch (err) {
+      // Best-effort: a failure here must not turn a completed turn into an error.
+      console.warn("[Conductor] canvas-only reply failed:", err);
+    }
+  }
+
+  /**
    * Answer one server-requested tool call with the client-side policy chain:
    * budgets, idempotency cache, layout-review gate, and board execution.
    * The server loop parks until the answer posts back as a tool result.
@@ -847,6 +909,9 @@ export class Conductor {
               }
               if (result && typeof result === "object") {
                 const rec = result as Record<string, unknown>;
+                if (rec.ok === true && (name === "canvas_apply" || name === "canvas_patch_widget" || name === "canvas_edit" || name === "canvas_undo")) {
+                  policy.mutated = true;
+                }
                 if (name === "canvas_apply" && rec.ok === true) {
                   policy.applies += 1;
                   if (duplicateTitle) {

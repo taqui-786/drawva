@@ -109,7 +109,7 @@ export interface SyncHandlers {
   ) => void;
   onRemoteWidgetRemove?: (id: string) => void;
   onRemoteClear?: () => void;
-  onStatusChange?: (status: SyncStatus, code: string | null, peerCount: number, errorMsg?: string) => void;
+  onStatusChange?: (status: SyncStatus, code: string | null, peerCount: number, errorMsg?: string, peerName?: string | null) => void;
   onPeerConnect?: (peerId: string, isHost: boolean) => void;
   onRequestInitialState?: () => ProjectSnapshot | null;
 }
@@ -124,7 +124,8 @@ export interface PeerConnection {
 
 export interface PeerInstance {
   on: (event: string, callback: (arg?: unknown) => void) => void;
-  connect: (peerId: string, options?: { reliable?: boolean; serialization?: string }) => PeerConnection;
+  off?: (event: string, callback?: (arg?: unknown) => void) => void;
+  connect: (peerId: string, options?: Record<string, unknown>) => PeerConnection;
   destroy: () => void;
 }
 
@@ -403,6 +404,13 @@ export class SyncManager {
   private localColor = COLORS[Math.floor(Math.random() * COLORS.length)];
   private errorMessage: string | undefined = undefined;
   private lastCursorAt = 0;
+  /** Lobby (permission) mode: only dials carrying an authorized requestId are accepted. */
+  private lobbyMode = false;
+  /** requestId → requester display name, filled when the user accepts a pairing request. */
+  private allowedRequests = new Map<string, string>();
+  /** Display name of the currently connected lobby peer (last one in). */
+  private connectedPeerName: string | null = null;
+  private pendingPeerName: string | null = null;
   private widgetParts = new Map<string, WidgetPartBuffer>();
   private inkMoveParts = new Map<string, InkMovePartBuffer>();
   private tileParts = new Map<string, TilePartBuffer>();
@@ -413,11 +421,12 @@ export class SyncManager {
     this.handlers = handlers;
   }
 
-  getStatus(): { status: SyncStatus; roomCode: string | null; peerCount: number; error?: string } {
+  getStatus(): { status: SyncStatus; roomCode: string | null; peerCount: number; peerName: string | null; error?: string } {
     return {
       status: this.status,
       roomCode: this.roomCode,
       peerCount: this.connections.size,
+      peerName: this.connectedPeerName,
       error: this.errorMessage,
     };
   }
@@ -573,6 +582,8 @@ export class SyncManager {
       opened = true;
       this.connections.set(conn.peer, conn);
       this.status = "connected";
+      this.connectedPeerName = this.pendingPeerName;
+      this.pendingPeerName = null;
       this.notifyStatus();
       this.flushPending(conn);
       this.handlers.onPeerConnect?.(conn.peer, isHost);
@@ -596,8 +607,10 @@ export class SyncManager {
       if (this.connections.size === 0 && !isHost) {
         this.status = "idle";
         this.roomCode = null;
+        this.connectedPeerName = null;
       } else if (this.connections.size === 0 && isHost) {
         this.status = "hosting";
+        this.connectedPeerName = null;
       }
       this.notifyStatus();
     });
@@ -1002,10 +1015,146 @@ export class SyncManager {
     this.status = "idle";
     this.roomCode = null;
     this.errorMessage = undefined;
+    this.lobbyMode = false;
+    this.allowedRequests.clear();
+    this.connectedPeerName = null;
+    this.pendingPeerName = null;
     this.notifyStatus();
   }
 
   private notifyStatus(): void {
-    this.handlers.onStatusChange?.(this.status, this.roomCode, this.connections.size, this.errorMessage);
+    this.handlers.onStatusChange?.(this.status, this.roomCode, this.connections.size, this.errorMessage, this.connectedPeerName);
+  }
+
+  /** Display name shown on remote cursors. Defaults to a random Peer-###. */
+  setLocalName(name: string): void {
+    const clean = name.trim().slice(0, 48);
+    if (clean) this.localName = clean;
+  }
+
+  /**
+   * Authorize an accepted pairing request: the requester's dial (which carries
+   * this requestId as PeerJS connection metadata) will be let in.
+   */
+  authorizeRequest(requestId: string, peerName: string): void {
+    this.allowedRequests.set(requestId, peerName);
+  }
+
+  /**
+   * Lobby "open connection": register my stable PeerJS id and listen for
+   * authorized dials. Resolves once the PeerJS cloud acknowledges us.
+   */
+  async goOnline(fullPeerJsId: string): Promise<void> {
+    this.disconnect(false);
+    this.lobbyMode = true;
+    this.roomCode = null;
+    this.status = "connecting";
+    this.errorMessage = undefined;
+    this.notifyStatus();
+
+    const PeerModule = await import("peerjs");
+    const Peer = PeerModule.Peer;
+    const peerInstance = new Peer(fullPeerJsId, {
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
+      },
+    }) as unknown as PeerInstance;
+    this.peer = peerInstance;
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timed out reaching the connection server")), 20000);
+      const onOpen = () => {
+        if (this.peer !== peerInstance) return;
+        clearTimeout(timer);
+        this.status = "hosting";
+        this.notifyStatus();
+        resolve();
+      };
+      const onError = (err: unknown) => {
+        if (this.peer !== peerInstance) return;
+        clearTimeout(timer);
+        console.error("[SyncManager] goOnline peer error:", err);
+        const msg =
+          err && typeof err === "object" && "type" in err && (err as { type: string }).type === "unavailable-id"
+            ? "You are already online in another tab"
+            : "Could not open connection (check network)";
+        this.status = "error";
+        this.errorMessage = msg;
+        this.notifyStatus();
+        reject(new Error(msg));
+      };
+      peerInstance.on("open", onOpen);
+      peerInstance.on("error", onError);
+    });
+
+    peerInstance.on("connection", (conn: unknown) => {
+      const meta = (conn as { metadata?: { requestId?: string } })?.metadata;
+      const requestId = meta?.requestId;
+      const typed = conn as PeerConnection;
+      if (typeof requestId === "string" && this.allowedRequests.has(requestId)) {
+        this.pendingPeerName = this.allowedRequests.get(requestId) ?? null;
+        this.allowedRequests.delete(requestId);
+        this.setupConnection(typed, true);
+      } else {
+        // Lobby mode never accepts unsolicited dials.
+        try {
+          typed.close();
+        } catch {}
+      }
+    });
+  }
+
+  /**
+   * Dial a specific online user after they accepted the pairing request.
+   * The requestId travels as connection metadata so the other side lets us in.
+   */
+  async connectToPeer(
+    targetPeerJsId: string,
+    opts?: { requestId?: string; peerName?: string }
+  ): Promise<void> {
+    this.disconnect(false);
+    this.lobbyMode = true;
+    this.roomCode = null;
+    this.status = "connecting";
+    this.errorMessage = undefined;
+    this.pendingPeerName = opts?.peerName ?? null;
+    this.notifyStatus();
+
+    const PeerModule = await import("peerjs");
+    const Peer = PeerModule.Peer;
+    const peerInstance = new Peer({
+      debug: 1,
+      config: {
+        iceServers: [
+          { urls: "stun:stun.l.google.com:19302" },
+          { urls: "stun:stun1.l.google.com:19302" },
+        ],
+      },
+    }) as unknown as PeerInstance;
+    this.peer = peerInstance;
+
+    this.peer.on("open", () => {
+      if (this.peer !== peerInstance) return;
+      const conn = this.peer?.connect(targetPeerJsId, {
+        ...CONNECT_OPTS,
+        metadata: opts?.requestId ? { requestId: opts.requestId } : undefined,
+      });
+      if (conn) {
+        this.setupConnection(conn, false);
+      }
+    });
+
+    this.peer.on("error", (err: unknown) => {
+      if (this.peer !== peerInstance) return;
+      console.error("[SyncManager] connectToPeer error:", err);
+      this.status = "error";
+      this.errorMessage = "Could not reach that user (they may have gone offline)";
+      this.pendingPeerName = null;
+      this.notifyStatus();
+    });
   }
 }

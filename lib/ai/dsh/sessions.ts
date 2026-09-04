@@ -54,6 +54,8 @@ export type StreamEvent =
 
 interface Conversation {
   handle: AgentHandle;
+  /** Harness session id — the conversation key plus an epoch (see sessionIdFor). */
+  sessionId: string;
   connectionId: string;
   route: string;
   emit: ((e: StreamEvent) => void) | null;
@@ -62,6 +64,26 @@ interface Conversation {
 }
 
 const conversations = new Map<string, Conversation>();
+/** In-flight creations, so concurrent turns share one agent instead of racing. */
+const opening = new Map<string, Promise<Conversation>>();
+/**
+ * Per-conversation agent generation. The harness session store rejects a
+ * duplicate id, and a disposed agent is not always gone from it (a rejected
+ * `handle.dispose()`, a torn-down turn), so the conversation KEY stays stable
+ * for the bridge and the routes while each agent instance gets its own session
+ * id. Without this a single failed dispose bricked the conversation forever:
+ * every later turn re-created the same id and got `already exists`.
+ */
+const epochs = new Map<string, number>();
+
+function sessionIdFor(conversationId: string): string {
+  const epoch = epochs.get(conversationId) ?? 0;
+  return epoch === 0 ? conversationId : `${conversationId}#${epoch}`;
+}
+
+function bumpEpoch(conversationId: string): void {
+  epochs.set(conversationId, (epochs.get(conversationId) ?? 0) + 1);
+}
 
 function dataUrlToEncoded(dataUrl: string): { mediaType: "image/png" | "image/jpeg" | "image/webp" | "image/gif"; data: string; name: string } {
   const match = /^data:([^;]+);base64,([\s\S]*)$/.exec(dataUrl);
@@ -99,72 +121,120 @@ async function ensureConversation(opts: OpenTurnOptions): Promise<{ ctx: Context
   // already own their history and must never see it re-injected.
   const fresh = !conversations.has(opts.conversationId);
   const priorSeed = fresh && opts.priorTurns?.length ? priorTurnsText(opts.priorTurns) : "";
-  let conversation = conversations.get(opts.conversationId);
-  if (!conversation || conversation.connectionId !== opts.connectionId) {
-    if (conversation) await disposeConversation(opts.conversationId).catch(() => {});
-    const sessionId = SessionId(opts.conversationId);
-    const catalog = getPluginMetadataList();
-    const catalogBlock = catalog.map((p) => `${p.id} — ${p.name} — ${p.description}`).join("\n");
-    const web = { tinyfish: opts.hasTinyfishKey, search: opts.webSearch };
-    const systemBase =
-      `${AGENT_SYSTEM_PROMPT}\n\n${webAccessStatus(web.search, web.tinyfish)}\n\n` +
-      `PLUGIN CATALOG (load full docs with load_plugin):\n${catalogBlock || "(none)"}\n\n` +
-      `Use at most one tool call per model step. Treat errors as feedback: correct or switch tools and continue; finish only when complete or unable to proceed.`;
-    const contractDocs = new Map<string, string>();
-    for (const pluginId of opts.loadedPluginIds.slice(0, 12)) {
-      const found = getEnabledPluginDescriptors([pluginId])[0];
-      if (found) contractDocs.set(pluginId, `\n\n=== PLUGIN CONTRACT (durable): ${found.id} v${found.version} ===\n${found.document}`);
-    }
+  const existing = conversations.get(opts.conversationId);
+  if (existing && existing.connectionId === opts.connectionId) {
+    return { ctx, conversation: existing, agent: existing.handle.agent, priorSeed };
+  }
+  // Two turns can arrive before the first agent finishes creating (a retry, a
+  // second tab). Share the in-flight creation instead of creating a second
+  // agent on the same session id.
+  const inFlight = opening.get(opts.conversationId);
+  if (inFlight) {
+    const conversation = await inFlight;
+    return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
+  }
+  const creating = createConversation(ctx, opts, profile);
+  opening.set(opts.conversationId, creating);
+  try {
+    const conversation = await creating;
+    return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
+  } finally {
+    opening.delete(opts.conversationId);
+  }
+}
 
-    const handle: AgentHandle = await ctx.agents.create({
-      sessionId,
-      agentOptions: {
-        provider: profile.route,
-        model: profile.model,
-        ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort as never } : {}),
-        maxTokens: profile.maxTokens,
+async function createConversation(
+  ctx: Context,
+  opts: OpenTurnOptions,
+  profile: { route: string; model: string; reasoningEffort?: string; maxTokens: number }
+): Promise<Conversation> {
+  if (conversations.has(opts.conversationId)) {
+    await disposeConversation(opts.conversationId).catch(() => {});
+  }
+  const catalog = getPluginMetadataList();
+  const catalogBlock = catalog.map((p) => `${p.id} — ${p.name} — ${p.description}`).join("\n");
+  const web = { tinyfish: opts.hasTinyfishKey, search: opts.webSearch };
+  const systemBase =
+    `${AGENT_SYSTEM_PROMPT}\n\n${webAccessStatus(web.search, web.tinyfish)}\n\n` +
+    `PLUGIN CATALOG (load full docs with load_plugin):\n${catalogBlock || "(none)"}\n\n` +
+    `Use at most one tool call per model step. Treat errors as feedback: correct or switch tools and continue; finish only when complete or unable to proceed.`;
+  const contractDocs = new Map<string, string>();
+  for (const pluginId of opts.loadedPluginIds.slice(0, 12)) {
+    const found = getEnabledPluginDescriptors([pluginId])[0];
+    if (found) contractDocs.set(pluginId, `\n\n=== PLUGIN CONTRACT (durable): ${found.id} v${found.version} ===\n${found.document}`);
+  }
+
+  const setup = (agentCtx: Context) => {
+    agentCtx.systemPrompt.section({ name: "drawva:persona", order: 0, text: systemBase });
+    let order = 1;
+    for (const [pluginId, document] of contractDocs) {
+      agentCtx.systemPrompt.section({ name: `drawva:plugin:${pluginId}`, order: order++, text: document });
+    }
+    registerConversationTools(agentCtx, {
+      conversationId: opts.conversationId,
+      webEnabled: web,
+      loadPluginDocument: (pluginId) => {
+        const found = getEnabledPluginDescriptors([pluginId])[0];
+        return found ? found.document : null;
       },
-      setup: (agentCtx) => {
-        agentCtx.systemPrompt.section({ name: "drawva:persona", order: 0, text: systemBase });
-        let order = 1;
-        for (const [pluginId, document] of contractDocs) {
-          agentCtx.systemPrompt.section({ name: `drawva:plugin:${pluginId}`, order: order++, text: document });
+      registerPluginContract: (pluginId, document) => {
+        try {
+          agentCtx.systemPrompt.section({
+            name: `drawva:plugin:${pluginId}`,
+            order: 100 + order++,
+            text: `\n\n=== PLUGIN CONTRACT (durable): ${pluginId} ===\n${document}`,
+          });
+          return "registered";
+        } catch {
+          return "already";
         }
-        const registered = registerConversationTools(agentCtx, {
-          conversationId: opts.conversationId,
-          webEnabled: web,
-          loadPluginDocument: (pluginId) => {
-            const found = getEnabledPluginDescriptors([pluginId])[0];
-            return found ? found.document : null;
-          },
-          registerPluginContract: (pluginId, document) => {
-            try {
-              agentCtx.systemPrompt.section({
-                name: `drawva:plugin:${pluginId}`,
-                order: 100 + order++,
-                text: `\n\n=== PLUGIN CONTRACT (durable): ${pluginId} ===\n${document}`,
-              });
-              return "registered";
-            } catch {
-              return "already";
-            }
-          },
-        });
-        void registered;
       },
     });
-    conversation = { handle, connectionId: opts.connectionId, route: profile.route, emit: null, lastText: "", disposers: [] };
-    conversations.set(opts.conversationId, conversation);
-    const session = handle.agent.session;
-    conversation.disposers.push(
-      ctx.on("session/event", (eventSession, event) => {
-        if (String(eventSession.id) !== opts.conversationId) return;
-        projectSessionEvent(conversation as Conversation, event as { type: string; [key: string]: unknown });
-      })
-    );
-    void session;
+  };
+
+  // Retry on a stale session id. `ctx.agents.create` throws
+  // `session "<id>" already exists` when a session under that id is still in the
+  // harness store — a previous agent whose teardown had not finished or failed.
+  // Bumping the epoch mints a new id under the same conversation key, so the
+  // user is never stuck with a permanently unusable canvas.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const sessionId = sessionIdFor(opts.conversationId);
+    try {
+      const handle: AgentHandle = await ctx.agents.create({
+        sessionId: SessionId(sessionId),
+        agentOptions: {
+          provider: profile.route,
+          model: profile.model,
+          ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort as never } : {}),
+          maxTokens: profile.maxTokens,
+        },
+        setup,
+      });
+      const conversation: Conversation = {
+        handle,
+        sessionId,
+        connectionId: opts.connectionId,
+        route: profile.route,
+        emit: null,
+        lastText: "",
+        disposers: [],
+      };
+      conversations.set(opts.conversationId, conversation);
+      conversation.disposers.push(
+        ctx.on("session/event", (eventSession, event) => {
+          if (String(eventSession.id) !== sessionId) return;
+          projectSessionEvent(conversation, event as { type: string; [key: string]: unknown });
+        })
+      );
+      return conversation;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (!/already exists/.test(message)) throw err;
+      console.warn(`[agent] session ${sessionId} was stale; retrying under a new id.`);
+      bumpEpoch(opts.conversationId);
+    }
   }
-  return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
+  throw new Error("Could not start an agent session. Reload the canvas to start a fresh conversation.");
 }
 
 /** Server-owned conversation id: user session + optional client suffix. */
@@ -258,13 +328,22 @@ export async function disposeConversation(conversationId: string): Promise<void>
   const conversation = conversations.get(conversationId);
   if (!conversation) return;
   conversations.delete(conversationId);
+  // Retire the session id BEFORE awaiting teardown. `handle.dispose()` removes
+  // the session from the harness store asynchronously, and the client fires
+  // cancel/reset without waiting — so a turn starting right after a reset used
+  // to hit `session "<id>" already exists` against the still-draining session.
+  bumpEpoch(conversationId);
   cancelConversationCalls(conversationId, new Error("Conversation ended."));
   for (const dispose of conversation.disposers) {
     try {
       dispose();
     } catch {}
   }
-  await conversation.handle.dispose().catch(() => {});
+  try {
+    await conversation.handle.dispose();
+  } catch (err) {
+    console.warn(`[agent] dispose failed for ${conversation.sessionId}:`, err instanceof Error ? err.message : err);
+  }
 }
 
 /**

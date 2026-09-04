@@ -26,6 +26,7 @@ import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
 import { UserManualDialog } from "./UserManualDialog";
 import { CanvasFooter, type GenerationTickerState } from "./CanvasFooter";
+import { AiGenerationFloat } from "./AiGenerationFloat";
 import { WidgetManager, type WidgetItem } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
 import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
@@ -183,11 +184,13 @@ export function CanvasApp() {
     status: SyncStatus;
     roomCode: string | null;
     peerCount: number;
+    peerName?: string | null;
     error?: string;
   }>({
     status: "idle",
     roomCode: null,
     peerCount: 0,
+    peerName: null,
   });
   const [connectOpen, setConnectOpen] = useState(false);
   const { data: session } = useSession();
@@ -199,7 +202,9 @@ export function CanvasApp() {
   useEffect(() => {
     isAuthenticatedRef.current = isAuthenticated;
     cloudSync.current?.setAuthenticated(isAuthenticated);
-  }, [isAuthenticated]);
+    const name = session?.user?.name;
+    if (name) syncManager.current?.setLocalName(name);
+  }, [isAuthenticated, session?.user?.name]);
 
   const lastMoveSyncRef = useRef<Record<string, number>>({});
   function broadcastMove(kind: "widget" | "object", packet: Extract<import("@/lib/canvas/sync").SyncPacket, { id: string }>): void {
@@ -1738,12 +1743,13 @@ export function CanvasApp() {
     });
 
     sm.setHandlers({
-      onStatusChange: (status, roomCode, peerCount, error) => {
-        setSyncState({ status, roomCode, peerCount, error });
+      onStatusChange: (status, roomCode, peerCount, error, peerName) => {
+        setSyncState({ status, roomCode, peerCount, peerName: peerName ?? null, error });
       },
       onPeerConnect: (_peerId, isHost) => {
         if (isHost) {
-          toast.success("User connected to session!");
+          const name = sm.getStatus().peerName;
+          toast.success(name ? `${name} connected!` : "User connected to session!");
           setConnectOpen(false);
         }
       },
@@ -2769,13 +2775,14 @@ export function CanvasApp() {
             }}
           />
         )}
+
+        <AiGenerationFloat tickerState={tickerState} />
       </div>
 
       <CanvasFooter
         onZoomIn={() => zoomBy(-100)}
         onZoomOut={() => zoomBy(100)}
         onReset={resetView}
-        tickerState={tickerState}
       />
 
       <input
@@ -2827,10 +2834,19 @@ export function CanvasApp() {
         status={syncState.status}
         roomCode={syncState.roomCode}
         peerCount={syncState.peerCount}
+        peerName={syncState.peerName}
+        displayName={session?.user?.name ?? null}
         errorMessage={syncState.error}
         onHost={() => syncManager.current!.hostSession()}
         onJoin={(code) => syncManager.current!.joinSession(code)}
         onDisconnect={() => syncManager.current!.disconnect()}
+        onGoOnline={(peerJsId) => syncManager.current!.goOnline(peerJsId)}
+        onConnectToPeer={(targetPeerJsId, opts) => {
+          void syncManager.current!.connectToPeer(targetPeerJsId, opts).catch(() => {});
+        }}
+        onAuthorizeRequest={(requestId, peerName) =>
+          syncManager.current!.authorizeRequest(requestId, peerName)
+        }
       />
       <UserManualDialog
         open={manualOpen}
