@@ -7,7 +7,6 @@ import { p2pPresence } from "@/lib/db/schema";
 export const runtime = "nodejs";
 export const maxDuration = 15;
 
-/** Peers unseen for this long are treated as offline. */
 export const PRESENCE_TTL_MS = 75_000;
 
 function validPeerId(value: unknown): value is string {
@@ -19,7 +18,6 @@ function validPeerId(value: unknown): value is string {
   );
 }
 
-/** List online peers (excluding the caller). */
 export async function GET(req: Request) {
   try {
     const session = await auth.api.getSession({ headers: req.headers });
@@ -54,7 +52,6 @@ export async function GET(req: Request) {
   }
 }
 
-/** Announce / heartbeat my presence. */
 export async function POST(req: Request) {
   try {
     const session = await auth.api.getSession({ headers: req.headers });
@@ -91,7 +88,6 @@ export async function POST(req: Request) {
   }
 }
 
-/** Withdraw my presence (go offline). */
 export async function DELETE(req: Request) {
   try {
     const session = await auth.api.getSession({ headers: req.headers });

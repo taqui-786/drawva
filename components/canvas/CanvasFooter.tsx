@@ -18,7 +18,6 @@ export interface GenerationTickerState {
   status: "idle" | "running" | "done" | "error";
   currentMessage: string;
   messageId: number;
-  /** Live tail of the model's streamed text / tool args (already truncated server-side by state). */
   detail?: string;
 }
 
@@ -36,7 +35,6 @@ export function CanvasFooter({
 
   return (
     <footer className="flex h-10 shrink-0 items-center justify-between gap-2 border-t bg-background/95 backdrop-blur-xs px-3 overflow-hidden select-none">
-      {/* Left: Viewport Controls */}
       <div className="flex items-center gap-1 shrink-0">
         <Tooltip>
           <TooltipTrigger
@@ -75,10 +73,8 @@ export function CanvasFooter({
         </Tooltip>
       </div>
 
-      {/* Center: flexible spacer (generation status now floats over the canvas) */}
       <div className="flex-1 min-w-0 px-2" />
 
-      {/* Right: User status & Coordinates (Viewport Center) */}
       <div className="flex items-center gap-2.5 text-xs text-muted-foreground font-mono tabular-nums shrink-0">
         {session?.user && (
           <>

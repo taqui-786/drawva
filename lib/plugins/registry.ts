@@ -234,7 +234,6 @@ export function loadAllPlugins(forceRefresh = false): PluginManifest[] {
     console.error("[Plugins] Failed to read plugins directory:", err);
   }
 
-  // Sort: general, flowchart first, then alphabetically
   manifests.sort((a, b) => {
     const priority = (id: string) => (id === "general" ? 0 : id === "flowchart" ? 1 : 2);
     const diff = priority(a.id) - priority(b.id);

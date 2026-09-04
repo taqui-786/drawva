@@ -307,7 +307,6 @@ function ProviderTabContent({
   useEffect(() => {
     void (async () => {
       const entries = await refreshCustomEntries();
-      // If active config is custom with a baseUrl matching a saved entry, select it.
       if (initial?.type === "custom" && initial.baseUrl && !initial.customName) {
         const match = entries.find(
           (e) => e.baseUrl.trim().toLowerCase() === initial.baseUrl?.trim().toLowerCase()
@@ -350,7 +349,6 @@ function ProviderTabContent({
       const saved = await loadSavedProviderCredentialsFromDb(type);
       if (saved) {
         setApiKey(saved.apiKey || "");
-        // Built-ins use their fixed endpoint; ignore any stored custom URL.
         setBaseUrl(info.defaultBaseUrl || "");
         return;
       }
@@ -382,10 +380,8 @@ function ProviderTabContent({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedKey]);
 
-  /** Persist a custom endpoint to IndexedDB (+localStorage mirror) and return its name. */
   const persistCustomEndpoint = async (url: string, key: string) => {
     const baseName = deriveCustomProviderName(url);
-    // Ensure uniqueness when the same name points at a different URL.
     const existing = await loadAllSavedProviderCredentialsFromDb();
     let name = baseName;
     let suffix = 2;
@@ -543,7 +539,6 @@ function ProviderTabContent({
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Compact Provider Selection */}
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="provider-select" className="text-xs font-medium">Provider</Label>
         <Select
@@ -582,7 +577,6 @@ function ProviderTabContent({
         </Select>
       </div>
 
-      {/* Credentials Card */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
@@ -806,7 +800,6 @@ function GeneralSettingsTabContent() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col divide-y divide-border/60">
-          {/* Auto Save Row */}
           <div className="flex items-center justify-between py-3 first:pt-0">
             <div className="flex flex-col gap-0.5 pr-4">
               <Label htmlFor="toggle-autosave" className="text-sm font-medium cursor-pointer">
@@ -823,7 +816,6 @@ function GeneralSettingsTabContent() {
             />
           </div>
 
-          {/* Internet Search Row */}
           <div className="flex items-center justify-between py-3 last:pb-0">
             <div className="flex flex-col gap-0.5 pr-4">
               <Label htmlFor="toggle-websearch" className="text-sm font-medium cursor-pointer">
@@ -876,7 +868,6 @@ function UsageTabContent() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Metric Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <Card size="sm">
           <CardHeader>
@@ -923,7 +914,6 @@ function UsageTabContent() {
         </Card>
       </div>
 
-      {/* Audit Log */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">

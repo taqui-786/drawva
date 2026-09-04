@@ -76,12 +76,7 @@ export interface ConductorDeps {
   camera: Camera;
   provider: () => ProviderConfig | null;
   getRevision: () => number;
-  /** Content fingerprint of the board — see lib/canvas/fingerprint.ts. */
   getFingerprint: () => string;
-  /**
-   * Cumulative caller-frame → revision-bump tally. Diffed across the turn and
-   * written to the log as `revisionBumps` so a conflict storm names its source.
-   */
   getRevisionAudit?: () => Record<string, number>;
   onEvent: (e: ConductorEvent) => void;
   afterBoardChange: () => void;
@@ -98,17 +93,12 @@ interface TurnPolicy {
   readOnlyStreak: number;
   layoutReviewNeeded: boolean;
   steps: number;
-  /** Consecutive failures of the same tool — the anti-thrash fuse. */
   failStreak: { name: string; count: number };
-  /** Once tripped, every later tool call in this turn short-circuits. */
   stopped: string;
-  /** Any successful board mutation this turn (apply/patch/edit/undo). */
   mutated: boolean;
-  /** Widget title → id created this turn, so a retry cannot duplicate it. */
   createdWidgets: Map<string, string>;
 }
 
-/** Finite number guard for target-hint extraction. */
 function finiteNum(v: unknown): number | undefined {
   return typeof v === "number" && Number.isFinite(v) ? v : undefined;
 }
@@ -122,11 +112,6 @@ function hintBoxOf(rec: unknown): { x: number; y: number; w: number; h: number }
   return { x, y, w: finiteNum(r.w) ?? 0, h: finiteNum(r.h) ?? 0 };
 }
 
-/**
- * Spatial hint for the agent character: which element/region a tool is about
- * to touch, lifted from the tool args. Point-only boxes (w=h=0) are valid —
- * commands like write_text know x/y before the renderer sizes the content.
- */
 export function extractToolTarget(name: string, args: unknown): ToolTargetHint | undefined {
   if (!args || typeof args !== "object") return undefined;
   const a = args as Record<string, unknown>;
@@ -165,10 +150,6 @@ export function extractToolTarget(name: string, args: unknown): ToolTargetHint |
   return hint;
 }
 
-/**
- * Post-execution spatial hint: authoritative boxes/ids from tool results
- * (applied[].box is where content actually landed after clamping).
- */
 export function extractToolResultTarget(result: unknown): ToolTargetHint | undefined {
   if (!result || typeof result !== "object") return undefined;
   const r = result as Record<string, unknown>;
@@ -207,7 +188,6 @@ export function extractToolResultTarget(result: unknown): ToolTargetHint | undef
   return hint;
 }
 
-/** Normalized widget title of a create command, or "" when this apply makes none. */
 function widgetTitleOf(args: unknown): string {
   const commands = (args as { commands?: unknown })?.commands;
   const list = Array.isArray(commands) ? commands : [];
@@ -222,7 +202,6 @@ function widgetTitleOf(args: unknown): string {
   return "";
 }
 
-/** Thrown to unwind the turn pump on cancel/generation change. */
 class TurnAborted extends Error {
   constructor() {
     super("Turn aborted.");
@@ -242,27 +221,13 @@ export class Conductor {
   private atlasImageId: string | null = null;
   private listeners = new Set<(e: ConductorEvent) => void>();
   private turnUsage = { inputTokens: 0, outputTokens: 0 };
-  /**
-   * Largest single-step input token count in the turn. `turnUsage.inputTokens`
-   * is the *sum* over steps, so a 14-step turn reports ~14× the real context
-   * size; without this number the total is easy to misread as one request.
-   */
   private turnPeakInput = 0;
   private turnSteps = 0;
-  /**
-   * revision → board fingerprint, recorded whenever a revision is reported to
-   * the model. Lets the conflict check ask "did the content the model saw at
-   * `baseRevision` actually change?" instead of "did the counter move?".
-   */
   private revisionFingerprints = new Map<number, string>();
-  /** Bump tally at turn start; the turn's own bumps are the difference. */
   private auditAtTurnStart: Record<string, number> = {};
   private revisionAtTurnStart = 0;
-  /** Plugin ids whose contracts are injected into the server-side system prompt. */
   private loadedPluginIds = new Set<string>();
-  /** Per-turn idempotency: SHA-256 of {name,args} → replayed outcome. */
   private toolCache = new Map<string, { result: unknown; isError: boolean }>();
-  /** Revision the cache was built at — replays must never return stale revision-scoped state. */
   private toolCacheRevision = -1;
 
   constructor(private deps: ConductorDeps) {
@@ -276,11 +241,6 @@ export class Conductor {
     });
   }
 
-  /**
-   * Drop this canvas's conversation, client and server. The server owns the
-   * model history, so clearing only the local mirror left the agent still
-   * remembering a board the user had just wiped.
-   */
   clearHistory(): void {
     this.messages = [];
     this.images.clear();
@@ -335,8 +295,6 @@ export class Conductor {
       void this.send(trimmed);
       return;
     }
-    // The agent loop runs server-side; steering posts straight into the
-    // running turn and its events arrive on the open turn stream.
     this.messages.push({ role: "user", text: trimmed });
     this.persistConversation();
     this.postSteer(trimmed);
@@ -364,11 +322,6 @@ export class Conductor {
     for (const fn of this.listeners) fn(e);
   }
 
-  /**
-   * Bumps attributed to this turn: total counter movement plus the per-caller
-   * delta. A total far above the number of successful mutations means something
-   * is calling afterBoardChange() without changing the board.
-   */
   private turnRevisionBumps(): { total: number; byCaller: Record<string, number> } {
     const now = this.deps.getRevisionAudit?.() ?? {};
     const byCaller: Record<string, number> = {};
@@ -379,10 +332,6 @@ export class Conductor {
     return { total: this.deps.getRevision() - this.revisionAtTurnStart, byCaller };
   }
 
-  /**
-   * Remember the fingerprint the board had at the current revision. First
-   * observation wins: that is the state the model was shown for that revision.
-   */
   private recordRevisionFingerprint(): void {
     const revision = this.deps.getRevision();
     if (this.revisionFingerprints.has(revision)) return;
@@ -458,7 +407,6 @@ export class Conductor {
       }
 
       let atlasMeta: { sourceRect: Rect; imageScale: number; changedBox?: Rect } | undefined;
-      // If no image files were uploaded, capture the canvas so the vision model sees what the user wrote and drew!
       if (images.length === 0) {
         try {
           const viewport = this.deps.camera.visibleWorldRect();
@@ -513,9 +461,6 @@ export class Conductor {
       };
       const stepsLog: AiLogStep[] = [];
 
-      // The agent loop runs server-side: one turn stream carries text deltas
-      // and tool requests; this side answers tool requests with the same
-      // budget/cache/layout policy the per-step loop used to enforce.
       const turnResult = await this.postTurn(userText, images, gen, policy, stepsLog);
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
       if (turnResult.kind === "error") {
@@ -524,10 +469,6 @@ export class Conductor {
       }
       finalText = turnResult.text || "";
       finished = true;
-      // The canvas is the only surface the user reads — there is no chat panel,
-      // and the status line vanishes. A turn that answered only in text (a
-      // greeting, a refusal, a clarifying question) produced nothing visible, so
-      // put that answer on the board next to the newest ink.
       if (finalText.trim() && !policy.mutated) {
         await this.writeAnswerToCanvas(finalText, gen, policy, stepsLog);
         if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
@@ -572,9 +513,6 @@ export class Conductor {
           inputTokens: this.turnUsage.inputTokens,
           outputTokens: this.turnUsage.outputTokens,
           totalTokens: this.turnUsage.inputTokens + this.turnUsage.outputTokens,
-          // inputTokens is the sum over every step in the turn — each step
-          // resends the system prompt and the whole conversation. These two make
-          // that readable: peak is the largest single request's context.
           peakInputTokens: this.turnPeakInput,
           billedSteps: this.turnSteps,
         },
@@ -584,7 +522,6 @@ export class Conductor {
         },
       };
       this.emit({ kind: "log", entry: logEntry });
-      // Durable per-turn trace: redacted copy survives reloads for debugging.
       void saveAgentLog(redactLogEntry(logEntry));
     } catch (err) {
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
@@ -658,8 +595,6 @@ export class Conductor {
         return { kind: "cancelled" };
       }
       if (isRetryableTurnError(err)) {
-        // Server already retried with backoff; this client retry covers HTTP-level
-        // failures. Delay so a rate-limited provider gets breathing room.
         await sleep(1500, this.abort?.signal);
         try {
           return await attempt();
@@ -674,11 +609,6 @@ export class Conductor {
     }
   }
 
-  /**
-   * Read one turn stream: text/reasoning/usage events project straight
-   * through; each tool request runs the client policy chain and posts back
-   * as a tool result on the same conversation.
-   */
   private async pumpTurnStream(
     res: Response,
     gen: number,
@@ -688,9 +618,6 @@ export class Conductor {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    // Mutable so a tool call can clear it: interim "working on it" lines are
-    // progress, not the answer, and concatenating them produced the 25-sentence
-    // final message in the reported trace.
     const sink = { text: "" };
     const checkLive = () => {
       if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
@@ -722,11 +649,6 @@ export class Conductor {
     return { kind: "final", text: sink.text };
   }
 
-  /**
-   * Handle one SSE frame. Returns "final"/"error" when the turn stream is
-   * complete, "continue" otherwise. Tool requests are answered inline before
-   * reading resumes so the server loop keeps flowing on this same stream.
-   */
   private async handleTurnFrame(
     block: string,
     gen: number,
@@ -749,19 +671,15 @@ export class Conductor {
       sink.text += rec.text;
       this.emit({ kind: "text_delta", text: rec.text });
     } else if (eventName === "reasoning" && typeof rec.text === "string") {
-      // Reasoning tokens never become the final answer — detail only.
       this.emit({ kind: "reasoning_delta", text: rec.text });
     } else if (eventName === "tool_request" && typeof rec.name === "string") {
-      // Anything said before a tool call was a progress line, not the answer.
       sink.text = "";
       const toolCallId = String(rec.toolCallId || `call-${Date.now()}`);
       const answer = await this.answerToolRequest(String(rec.name), rec.args, toolCallId, gen, policy, stepsLog);
       if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
       await this.postToolResult(toolCallId, answer.result, answer.isError);
     } else if (eventName === "tool_end") {
-      // Server echo of the posted result; the client already emitted its own.
     } else if (eventName === "agent_status") {
-      // Server lifecycle mirror; the client owns running state.
     } else if (eventName === "final") {
       if (typeof rec.text === "string" && rec.text) sink.text = rec.text;
       return "final";
@@ -835,16 +753,11 @@ export class Conductor {
     }).catch(() => {});
   }
 
-  /** Server conversation suffix: per canvas, safe alphabet only. */
   private conversationSuffix(): string {
     const raw = this.deps.canvasId?.() || "default";
     return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(raw) ? raw : "default";
   }
 
-  /**
-   * Seed text for a fresh server conversation: recent user/assistant texts
-   * only (tool payloads stay local). Established server sessions ignore it.
-   */
   private seedHistory(): { role: string; text: string }[] {
     const out: { role: string; text: string }[] = [];
     let chars = 0;
@@ -862,14 +775,6 @@ export class Conductor {
     return out;
   }
 
-
-  /**
-   * Put a text-only answer on the board. Runs when a turn ends having mutated
-   * nothing: the canvas is the whole UI, so an answer that exists only in the
-   * closing message never reaches the user. Placement and wrapping are the
-   * normal apply path (`validateCommands` → `placeContent`), so the note lands
-   * beside the newest ink rather than on top of it.
-   */
   private async writeAnswerToCanvas(
     text: string,
     gen: number,
@@ -914,16 +819,10 @@ export class Conductor {
         target: extractToolResultTarget(result),
       });
     } catch (err) {
-      // Best-effort: a failure here must not turn a completed turn into an error.
       console.warn("[Conductor] canvas-only reply failed:", err);
     }
   }
 
-  /**
-   * Answer one server-requested tool call with the client-side policy chain:
-   * budgets, idempotency cache, layout-review gate, and board execution.
-   * The server loop parks until the answer posts back as a tool result.
-   */
   private async answerToolRequest(
     name: string,
     args: unknown,
@@ -932,8 +831,6 @@ export class Conductor {
     policy: TurnPolicy,
     stepsLog: AiLogStep[]
   ): Promise<{ result: unknown; isError: boolean }> {
-    // Sticky terminal stop. Without it the model kept re-issuing the same
-    // rejected call for the rest of the turn (25 steps, 3 landed).
     if (policy.stopped) {
       return { result: { ok: true, code: "STOPPED", message: policy.stopped }, isError: false };
     }
@@ -964,9 +861,6 @@ export class Conductor {
               "Widgets were just created or moved. Call canvas_snapshot with target=canvas, quality=basic to review the full layout before the next mutation.",
           };
         } else if (alreadyMade) {
-          // The reported turn created "Animated Solar System" twice and then
-          // spent nine steps trying to delete the copy. A retry of a widget you
-          // already made is a patch/edit on the existing one, not a new create.
           isError = true;
           result = {
             code: "DUPLICATE_WIDGET",
@@ -974,8 +868,6 @@ export class Conductor {
             objectId: alreadyMade,
           };
         } else if (spent && spent.used >= spent.cap) {
-          // Exhausting a budget ends tool use for the turn instead of leaving the
-          // model free to pivot to another tool and keep spinning.
           policy.stopped = `${name} budget reached (${spent.cap}). Tool use is closed for this turn: keep the best valid result and reply with a final answer now.`;
           result = { ok: true, code: "BUDGET_REACHED", message: policy.stopped };
         } else if (
@@ -989,9 +881,6 @@ export class Conductor {
             message: `Detail-snapshot budget reached (${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}/${AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN}). Use quality=basic or act on the detail you already have.`,
           };
         } else {
-          // Any board change (apply, user ink, rollback) invalidates replays:
-          // cached scan/snapshot results embed revision-scoped state and a
-          // stale replayed revision poisons every subsequent baseRevision.
           const revisionNow = this.deps.getRevision();
           if (revisionNow !== this.toolCacheRevision) {
             this.toolCache.clear();
@@ -1000,8 +889,6 @@ export class Conductor {
           const signature = await toolSignature(name, args);
           const cached = this.toolCache.get(signature);
           if (cached) {
-            // Idempotent replay: identical {name,args} within the turn returns
-            // the earlier outcome instead of executing again.
             result = cached.result;
             isError = cached.isError;
           } else {
@@ -1036,8 +923,6 @@ export class Conductor {
                   policy.snapshots += 1;
                   if ((args as { quality?: string } | null)?.quality === "detail") policy.detailSnapshots += 1;
                 }
-                // Layout-review gate: only a content-covering snapshot proves the
-                // layout — a zoomed region/object view cannot verify composition.
                 if (rec.widgetMutated === true) policy.layoutReviewNeeded = true;
                 if (name === "canvas_snapshot" && rec.ok !== false && rec.coversContent === true) {
                   policy.layoutReviewNeeded = false;
@@ -1058,9 +943,6 @@ export class Conductor {
         }
 
         isError = isError || isFailedResult(result);
-        // Anti-thrash fuse. The real-user trace shows the same rejected
-        // canvas_edit re-sent five times in one turn; after N consecutive
-        // failures of one tool, tool use ends and the model must answer.
         if (isError) {
           policy.failStreak =
             policy.failStreak.name === name
@@ -1073,9 +955,6 @@ export class Conductor {
         } else {
           policy.failStreak = { name: "", count: 0 };
         }
-        // Read-only streak nudge. It rides on the tool result because that is
-        // the only channel the server-side loop actually shows the model —
-        // this.messages only seeds a *fresh* server session.
         if (name === "canvas_scan" || name === "canvas_snapshot" || name === "canvas_read" || name === "canvas_focus") {
           policy.readOnlyStreak += 1;
         } else {
@@ -1089,9 +968,6 @@ export class Conductor {
               "4 reads without a mutation. You have enough context — act now (canvas_apply/canvas_edit/canvas_patch_widget) or finish with a final answer. Do not re-capture a region you already saw.",
           };
         }
-        // Every revision handed to the model gets its content fingerprint
-        // recorded, so the next mutation's conflict check can distinguish
-        // "the board changed" from "the counter moved".
         this.recordRevisionFingerprint();
         const toolImages = this.imagesForTool(name, result);
         stepsLog.push({
@@ -1117,7 +993,6 @@ export class Conductor {
           isError,
           images: toolImages,
         });
-        // Crash durability: the turn's tool history survives a tab crash mid-run.
         this.persistConversation();
         this.emit({
           kind: "tool_end",
@@ -1150,9 +1025,6 @@ export class Conductor {
       sourceRect: atlasMeta?.sourceRect || viewport,
       imageScale: atlasMeta?.imageScale || 1,
       canvasSize: SIZE,
-      // The placement engine clamps any widget past this, preserving aspect.
-      // Without it in the prompt the model asked for 3400x1180, silently got
-      // 2500x867, and spent the rest of the turn trying to resize it back.
       maxWidgetSize: widgetMax,
       selectedIds: selected,
       newestInkBox: ink,
@@ -1163,8 +1035,6 @@ export class Conductor {
   private activeImageIds(): Set<string> {
     const ids = new Set<string>(this.turnImageIds);
     if (this.latestSnapshotId) ids.add(this.latestSnapshotId);
-    // Once the agent takes a fresher snapshot, the turn-opening atlas is
-    // superseded — stop re-paying its vision tokens on every subsequent step.
     if (this.latestSnapshotId && this.atlasImageId && this.latestSnapshotId !== this.atlasImageId) {
       ids.delete(this.atlasImageId);
     }
@@ -1200,7 +1070,6 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   });
 }
 
-/** Stable SHA-256 signature of a tool call for the idempotency cache. */
 async function toolSignature(name: string, args: unknown): Promise<string> {
   const payload = JSON.stringify({ name, args: stableValue(args) });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(payload));

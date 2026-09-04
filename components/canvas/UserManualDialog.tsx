@@ -69,7 +69,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
       }}
     >
       <DialogContent className="max-w-2xl overflow-hidden p-0 gap-0 border border-border/80 bg-background shadow-2xl rounded-2xl sm:max-w-2xl">
-        {/* Header bar with progress dots */}
         <DialogHeader className="px-6 pt-5 pb-3 border-b border-border/60 bg-muted/30 flex flex-row items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
@@ -85,7 +84,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
             </div>
           </div>
 
-          {/* Slide Indicator Dots */}
           <div className="flex items-center gap-1.5 pr-6">
             {Array.from({ length: totalSlides }).map((_, i) => (
               <button
@@ -102,9 +100,7 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
           </div>
         </DialogHeader>
 
-        {/* Slide Content Area */}
         <div className="p-6 min-h-[380px] flex flex-col justify-center">
-          {/* ── Slide 1: Welcome & App Intro ───────────────────────────── */}
           {currentSlide === 0 && (
             <div className="space-y-4 animate-in fade-in-50 duration-200">
               <div className="flex flex-col items-center text-center space-y-3">
@@ -165,7 +161,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
             </div>
           )}
 
-          {/* ── Slide 2: AI Generation Modes ───────────────────────────── */}
           {currentSlide === 1 && (
             <div className="space-y-4 animate-in fade-in-50 duration-200">
               <div className="space-y-1">
@@ -179,7 +174,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                {/* Auto Generation Card */}
                 <Card className="border-primary/30 bg-primary/5 shadow-xs overflow-hidden">
                   <CardContent className="p-3.5 space-y-2.5">
                     <div className="flex items-center justify-between">
@@ -205,7 +199,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
                   </CardContent>
                 </Card>
 
-                {/* Manual Generation Card */}
                 <Card className="border-border/80 bg-card/60 shadow-xs overflow-hidden">
                   <CardContent className="p-3.5 space-y-2.5">
                     <div className="flex items-center justify-between">
@@ -234,7 +227,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
             </div>
           )}
 
-          {/* ── Slide 3: AI Model & Provider Setup ─────────────────────── */}
           {currentSlide === 2 && (
             <div className="space-y-4 animate-in fade-in-50 duration-200">
               <div className="space-y-1">
@@ -247,7 +239,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
                 </p>
               </div>
 
-              {/* Crucial Vision Notice */}
               <div className="p-3 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-900 dark:text-amber-200 space-y-1.5">
                 <div className="flex items-center gap-2 text-xs font-bold">
                   <HugeiconsIcon icon={EyeIcon} className="size-4 shrink-0 text-amber-500" />
@@ -258,7 +249,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
                 </p>
               </div>
 
-              {/* Instructions & Gear Icon screenshot */}
               <div className="flex flex-col sm:flex-row items-center gap-3 p-3 rounded-xl border border-border/70 bg-card/60">
                 <div className="flex items-center justify-center p-2 bg-background rounded-lg border border-border shrink-0">
                   <Image
@@ -282,7 +272,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
             </div>
           )}
 
-          {/* ── Slide 4: Plugins ────────────────────────────────────────── */}
           {currentSlide === 3 && (
             <div className="space-y-4 animate-in fade-in-50 duration-200">
               <div className="space-y-1">
@@ -322,7 +311,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
             </div>
           )}
 
-          {/* ── Slide 5: AI Widgets on Canvas ──────────────────────────── */}
           {currentSlide === 4 && (
             <div className="space-y-4 animate-in fade-in-50 duration-200">
               <div className="space-y-1">
@@ -370,7 +358,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
             </div>
           )}
 
-          {/* ── Slide 6: About Creator & Credits ───────────────────────── */}
           {currentSlide === 5 && (
             <div className="space-y-4 animate-in fade-in-50 duration-200">
               <div className="space-y-1">
@@ -454,7 +441,6 @@ export function UserManualDialog({ open, onOpenChange }: UserManualDialogProps) 
           )}
         </div>
 
-        {/* Footer controls: Skip / Prev / Next */}
         <div className="px-6 py-3.5 border-t border-border/60 bg-muted/30 flex items-center justify-between">
           <Button
             variant="ghost"

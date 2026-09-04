@@ -1,7 +1,3 @@
-/**
- * Lobby client: presence + pairing requests for permission-based P2P.
- * Signaling only — the canvas itself still flows over PeerJS data channels.
- */
 
 export const LOBBY_PEER_PREFIX = "drawva-user-";
 const PEER_ID_KEY = "drawva.lobbyPeerId";
@@ -33,7 +29,6 @@ export interface LobbyRequest {
   updatedAt: number;
 }
 
-/** Stable per-browser identity for the lobby. */
 export function getMyPeerId(): string {
   if (typeof window === "undefined") return "";
   try {

@@ -6,9 +6,7 @@ export const AGENT_MAX_PATCHES_PER_TURN = 8;
 export const AGENT_MAX_EDITS_PER_TURN = 12;
 export const AGENT_MAX_SNAPSHOTS_PER_TURN = 10;
 export const AGENT_MAX_DETAIL_SNAPSHOTS_PER_TURN = 4;
-/** Consecutive failed tool calls before the turn's tool use is cut off. */
 export const AGENT_MAX_CONSECUTIVE_FAILURES = 3;
-/** Capture quality tiers (long-edge / pixel / webp-quality / byte budgets). */
 export const SNAPSHOT_BASIC: CapturePolicy = {
   maxLongEdge: 1024,
   maxPixels: 520_000,
@@ -34,24 +32,9 @@ export const AGENT_MAX_TURN_IMAGES = 5;
 export const AGENT_SCENE_JSON_MAX = 8_000;
 export const AGENT_CONVERSATION_MAX_BYTES = 512 * 1024;
 export const SCAN_MAX_ITEMS = 60;
-/** Idempotency cache: replayed identical tool calls within one turn. */
 export const AGENT_TOOL_CACHE_ENTRIES = 20;
-/** Per-turn revision→fingerprint ledger used by the conflict check. */
 export const REVISION_FINGERPRINT_ENTRIES = 256;
-/** Per-turn cap on plugin contracts injected into the system prompt. */
 export const AGENT_MAX_LOADED_PLUGINS = 12;
-
-/**
- * Tool parameter schemas in the agent-tool DSL — the single source of truth.
- * `lib/ai/dsh/tools.ts` registers these verbatim, so what the model is offered,
- * what the agent runtime validates before dispatch, and what the browser executor
- * reads can never drift apart. A second (zod) copy of these shapes is exactly
- * how `canvas_edit` ended up advertising `op` while validating nothing.
- *
- * Command/operation items stay OPEN (`additionalProperties: true`): the browser
- * validator infers a missing `tool` from payload keys and accepts synonyms, and
- * rejecting those here would burn a whole round trip on a repairable call.
- */
 
 const regionSpec = {
   type: "object",
@@ -77,14 +60,6 @@ const COMMAND_TOOLS = [
   "erase",
 ] as const;
 
-/**
- * Command items stay OPEN and their `tool` optional: the browser validator
- * genuinely repairs loose command shapes (infers the tool from payload keys,
- * lifts a nested `box`, accepts field synonyms), and rejecting those here would
- * spend a whole round trip on a call that would have worked. The declared keys
- * are what the model reads, and that is the point — the previous spec passed
- * `items: { type: "json" }`, i.e. no keys at all.
- */
 const commandItemSpec = {
   type: "object",
   additionalProperties: true,
@@ -139,15 +114,6 @@ const commandItemSpec = {
   },
 } as const;
 
-/**
- * Edit operations are a CLOSED vocabulary of three verbs, so the spec is closed
- * too: a mis-keyed operation is rejected before dispatch with a violation that
- * names the offending key, and the canvas is never touched. The old spec
- * declared nothing, so the model sent `kind` nine times in one real turn and
- * read `Unknown op: ` back each time. Synonyms that carry real intent
- * (absolute x/y for a move, width/height for a resize) are declared so the
- * obvious alternative phrasing is legal instead of a wasted round trip.
- */
 const editOpSpec = {
   type: "object",
   additionalProperties: false,
@@ -426,11 +392,6 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
   },
 ];
 
-/**
- * Which tools exist for a given web-capability state. Shared by the runtime
- * registration and the prompt's WEB ACCESS STATE line so the model is never
- * told about a tool that was not registered.
- */
 export function enabledToolNames(web: WebToolFlags = {}): string[] {
   return AGENT_TOOL_DEFS.filter((d) => {
     if (d.name === "web_read") return web.tinyfish === true;
@@ -440,11 +401,6 @@ export function enabledToolNames(web: WebToolFlags = {}): string[] {
   }).map((d) => d.name);
 }
 
-/**
- * Extract the first balanced JSON object/array from text that may be wrapped in
- * prose or fences. A greedy first-{-to-last-} regex mis-slices multiple objects;
- * this scans bracket pairs and returns the first candidate that parses.
- */
 export function extractJsonDecision(text: string): Record<string, unknown> | null {
   if (!text || !/[{[]/.test(text)) return null;
   const starts = ["{", "["];

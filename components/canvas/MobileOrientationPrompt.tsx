@@ -19,7 +19,6 @@ export function MobileOrientationPrompt() {
 
     check();
 
-    // Try background orientation lock on mount / touch if allowed
     attemptLandscapeLock().catch(() => {});
 
     window.addEventListener("resize", check);

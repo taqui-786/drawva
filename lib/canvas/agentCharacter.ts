@@ -1,20 +1,3 @@
-/**
- * AgentCharacterController — a tiny pixel-art AI worker living on the canvas.
- *
- * The character is NOT decorative: it is driven entirely by real Conductor
- * agent/tool events. It spawns when a turn starts, walks (in world coords) to
- * the canvas region the current tool touches, plays a per-tool working pose,
- * celebrates on completion and fades out.
- *
- * Rendering uses a dedicated overlay canvas (pointer-events: none, above the
- * widget/object DOM hosts) driven by its own rAF loop that only runs while a
- * character exists. World coordinates come from the same camera transform as
- * the engine layers, so pan/zoom keep the character glued to the canvas.
- * No new dependencies.
- *
- * The character map is keyed by agentId so sub-agent characters can be added
- * later without restructuring (only "main" is fed today).
- */
 
 import type { CanvasEngine } from "./engine";
 import type { WidgetManager } from "./widgets";
@@ -23,7 +6,6 @@ import type { Rect } from "./types";
 import { SIZE } from "./constants";
 import { getSpriteFrame, SPRITE_H, SPRITE_W, type SpriteFrameName } from "./pixelSprites";
 
-/** Spatial hint extracted from a tool call / result: what the tool touches. */
 export interface ToolTargetHint {
   objectId?: string;
   objectIds?: string[];
@@ -43,9 +25,7 @@ export interface AgentCharacterDeps {
   engine: CanvasEngine;
   widgets: () => WidgetManager | null;
   objects: () => ObjectManager | null;
-  /** Newest user ink bounding box, or null. */
   getInkBox: () => Rect | null;
-  /** Currently selected element boxes (widgets/objects/ink selection). */
   getSelectionBoxes: () => Rect[];
 }
 
@@ -61,26 +41,19 @@ type CharState =
 
 interface Character {
   id: string;
-  /** World position of the character's feet (bottom-center). */
   pos: { x: number; y: number };
   landing: { x: number; y: number } | null;
   targetBox: Rect | null;
   state: CharState;
-  /** Animation to switch to once the walk finishes. */
   queuedState: CharState | null;
-  /** State to resume after a stumble. */
   resumeState: CharState | null;
   facing: 1 | -1;
-  /** Dominant walk axis — picks side sprites (h) or front sprites (v). */
   walkDir: "h" | "v";
   stateSince: number;
   alpha: number;
   fadingOut: boolean;
-  /** Live agent narration shown in the thought bubble (null = hidden). */
   narration: string | null;
-  /** User is hand-carrying the character — freeze autonomous behavior. */
   dragging: boolean;
-  /** Turn ended while the user was dragging; wrap up (celebrate/fade) on drop. */
   pendingEnd: "done" | "cancelled" | "error" | null;
 }
 
@@ -132,9 +105,7 @@ function animForTool(tool: string): CharState {
 
 interface FrameChoice {
   name: SpriteFrameName;
-  /** Jump arc while celebrating (fraction of sprite height). */
   jump: number;
-  /** Horizontal shiver while stumbling (fraction of sprite width). */
   shake: number;
 }
 
@@ -142,11 +113,6 @@ export class AgentCharacterController {
   private chars = new Map<string, Character>();
   private lastT = typeof performance !== "undefined" ? performance.now() : 0;
   private reduced = false;
-  /**
-   * Dedicated overlay canvas above all canvas content (widgets/objects are
-   * DOM hosts at z-index 20/40; the engine's interaction layer sits below
-   * them). The character and his bubble must never hide behind content.
-   */
   private overlay: HTMLCanvasElement;
   private overlayCtx: CanvasRenderingContext2D | null;
   private rafId: number | null = null;
@@ -173,12 +139,10 @@ export class AgentCharacterController {
     this.chars.clear();
   }
 
-  /** Visible character count (tests / debugging). */
   get size(): number {
     return this.chars.size;
   }
 
-  /** Run the paint loop while any character exists. */
   private ensureLoop(): void {
     if (this.rafId !== null || this.chars.size === 0) return;
     this.rafId = requestAnimationFrame(() => this.paintOverlay());
@@ -225,11 +189,6 @@ export class AgentCharacterController {
     this.ensureLoop();
   }
 
-  /**
-   * Feed the live agent narration (ticker message + stream tail).
-   * null/empty hides the bubble immediately. The bubble only renders while
-   * the character is stationary — never mid-walk.
-   */
   setNarration(text: string | null): void {
     const clean = text && text.trim() ? text.trim().slice(0, 160) : null;
     let changed = false;
@@ -242,13 +201,9 @@ export class AgentCharacterController {
     if (changed) this.ensureLoop();
   }
 
-  // ── Interactive dragging (user carries the character) ─────────
-
   private dragId: string | null = null;
-  /** Narration captured at pick-up so endDrag can restore it. */
   private dragNarration: string | null = null;
 
-  /** Pointer (world coords) over any character's sprite? */
   hitTest(world: { x: number; y: number }): boolean {
     for (const ch of this.chars.values()) {
       if (ch.alpha <= 0.1) continue;
@@ -276,7 +231,6 @@ export class AgentCharacterController {
     return this.dragId !== null;
   }
 
-  /** Pick the character up at the pointer. Returns false when none hit. */
   beginDrag(world: { x: number; y: number }): boolean {
     for (const [id, ch] of this.chars.entries()) {
       if (ch.alpha <= 0.1) continue;
@@ -290,8 +244,6 @@ export class AgentCharacterController {
       ) {
         this.dragId = id;
         ch.dragging = true;
-        // Hide the bubble while carried, but remember it so dropping
-        // restores the live narration instead of losing it forever.
         this.dragNarration = ch.narration;
         ch.narration = null;
         this.setState(ch, "idle");
@@ -302,7 +254,6 @@ export class AgentCharacterController {
     return false;
   }
 
-  /** Carry the character under the pointer. */
   dragTo(world: { x: number; y: number }): void {
     const ch = this.dragId ? this.chars.get(this.dragId) : null;
     if (!ch) return;
@@ -320,7 +271,6 @@ export class AgentCharacterController {
     if (ch) {
       ch.dragging = false;
       ch.narration = this.dragNarration;
-      // If the turn ended while the user was carrying him, wrap up now.
       if (ch.pendingEnd) {
         const reason = ch.pendingEnd;
         ch.pendingEnd = null;
@@ -353,10 +303,6 @@ export class AgentCharacterController {
     }
     const ch = this.chars.get(id);
     if (!ch) return;
-    // While the user is carrying him, his body is theirs — defer autonomous
-    // behavior until he is dropped. A turn_end is remembered so the drop
-    // still triggers the wrap-up (celebrate/sad → fade out); otherwise a
-    // generation finishing mid-drag left the character on the board forever.
     if (ch.dragging) {
       if (e.kind === "turn_end") {
         ch.pendingEnd = e.reason;
@@ -388,11 +334,9 @@ export class AgentCharacterController {
         break;
       }
       case "turn_end": {
-        // Turn over: the bubble is no longer meaningful — drop it now.
         ch.narration = null;
         const final: CharState = e.reason === "done" ? "celebrating" : "sad";
         if (ch.state === "walking" && ch.landing) {
-          // Finish the walk to the result, then celebrate/droop there.
           ch.queuedState = final;
         } else {
           ch.landing = null;
@@ -403,14 +347,6 @@ export class AgentCharacterController {
     }
   }
 
-  // ── Target resolution ─────────────────────────────────────────
-
-  /**
-   * True when a box is so large it covers (nearly) the whole viewport —
-   * e.g. canvas_scan / canvas_snapshot with target=viewport. Those regions
-   * describe what the agent is LOOKING at, not a place to walk to; treating
-   * them as walk targets sends the character to the edge of the screen.
-   */
   private isWholeViewport(box: Rect): boolean {
     const v = this.deps.engine.camera.visibleWorldRect();
     if (v.w <= 0 || v.h <= 0) return false;
@@ -429,7 +365,6 @@ export class AgentCharacterController {
       return null;
     };
 
-    // 1. Live referenced elements — always the most authoritative target.
     const elementBoxes: Rect[] = [];
     if (hint?.objectId) {
       const b = boxOf(hint.objectId);
@@ -446,8 +381,6 @@ export class AgentCharacterController {
       if (!this.isWholeViewport(box)) return { box, source: "element" };
     }
 
-    // 2. Real-area boxes (tool results / planned widgets). Point-only
-    //    requested coords (w=h=0) are kept as a weak last resort below.
     const realBoxes: Rect[] = [];
     if (hint?.region && Number.isFinite(hint.region.x) && Number.isFinite(hint.region.y)) {
       const r = normRect(hint.region);
@@ -462,23 +395,18 @@ export class AgentCharacterController {
       }
     }
     if (realBoxes.length) {
-      // Several boxes → prefer the most specific (smallest area), not the
-      // union: a far-flung union pulls the character between contents.
       const best = realBoxes.reduce((a, b) => (a.w * a.h <= b.w * b.h ? a : b));
       if (!this.isWholeViewport(best)) return { box: best, source: "boxes" };
     }
 
-    // 3. User's current selection.
     const sel = this.deps.getSelectionBoxes();
     if (sel.length) return { box: unionAll(sel), source: "selection" };
 
-    // 4. Newest user ink.
     const ink = this.deps.getInkBox();
     if (ink && ink.w > 4 && ink.h > 4 && !this.isWholeViewport(ink)) {
       return { box: ink, source: "ink" };
     }
 
-    // 5. Weak: point-only command coords (w=h=0) — where content is ABOUT to land.
     if (hint?.boxes?.length) {
       const points = hint.boxes
         .filter((b) => Number.isFinite(b.x) && Number.isFinite(b.y) && !b.w && !b.h)
@@ -489,8 +417,6 @@ export class AgentCharacterController {
       }
     }
 
-    // 6. Fallback: viewport — but never "walk" to a whole-viewport ring;
-    //    stand where you are and just look at it.
     const v = this.deps.engine.camera.visibleWorldRect();
     if (v.w > 0 && v.h > 0) {
       const focus: Rect = {
@@ -504,16 +430,9 @@ export class AgentCharacterController {
     return null;
   }
 
-  /**
-   * Stand-off landing: the character stops beside the content, never on top.
-   * Candidates ring the box (below → right → above → left); nearest wins so
-   * back-to-back tools produce short, natural hops.
-   */
   private landingFor(box: Rect, ch: Character): { x: number; y: number } {
     const scale = this.deps.engine.camera.scale || 1;
     const charW = this.charWorldWidth();
-    // Stand close enough to read as "working on it" (~a body's width away),
-    // never touching the content itself.
     const pad = charW * 0.55 + clamp(18 / scale, 12, 200);
     const cx = box.x + box.w / 2;
     const cy = box.y + box.h / 2;
@@ -550,9 +469,6 @@ export class AgentCharacterController {
       return;
     }
 
-    // Observation targets (scan/snapshot of what's visible): the character
-    // is already looking at that area. Never cancel an in-flight walk — the
-    // first scan of a turn used to strand him mid-route far from the ink.
     if (target.source === "viewport" || this.isWholeViewport(target.box)) {
       ch.targetBox = target.box;
       if (ch.state === "walking" && ch.landing) {
@@ -627,12 +543,8 @@ export class AgentCharacterController {
     ch.stateSince = performance.now();
   }
 
-  // ── Simulation + rendering ────────────────────────────────────
-
   private charWorldWidth(): number {
     const engine = this.deps.engine;
-    // Integer multiple of the 24px grid (3×24 / 2×24 screen px) so every
-    // sprite pixel maps to exactly N whole screen pixels — crisp at any zoom.
     const target = engine.cssWidth > 0 && engine.cssWidth < 640 ? SPRITE_W * 2 : SPRITE_W * 3;
     return clamp(target / (engine.camera.scale || 1), SPRITE_W, 6000);
   }
@@ -645,8 +557,6 @@ export class AgentCharacterController {
     if (ch.alpha < 1) ch.alpha = Math.min(1, ch.alpha + dt / 0.25);
     if (ch.dragging) return;
 
-    // Stationary characters face the content they are working on — never a
-    // stale walk direction (that made the hammer point away from the target).
     if (ch.state !== "walking") this.faceContent(ch);
 
     const elapsed = now - ch.stateSince;
@@ -654,7 +564,6 @@ export class AgentCharacterController {
       const resume = ch.resumeState ?? "idle";
       this.setState(ch, resume);
     } else if (ch.state === "celebrating" && elapsed > 1500) {
-      // Task done: wrap up and leave immediately — no idle lingering.
       ch.fadingOut = true;
     } else if (ch.state === "sad" && elapsed > 1700) {
       ch.fadingOut = true;
@@ -675,8 +584,6 @@ export class AgentCharacterController {
       const dist = Math.hypot(dx, dy);
       const step = speed * dt;
       if (Math.abs(dx) > 1) ch.facing = dx < 0 ? -1 : 1;
-      // Side sprites when walking across the board, front when walking
-      // toward/away (top-down whiteboard has no true "back").
       ch.walkDir = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
       if (dist <= step || dist < 4 / scale) {
         ch.pos = { ...ch.landing };
@@ -690,7 +597,6 @@ export class AgentCharacterController {
     }
   }
 
-  /** Aim the character (and thus his tool side) at the target content. */
   private faceContent(ch: Character): void {
     if (!ch.targetBox) return;
     const cx = ch.targetBox.x + ch.targetBox.w / 2;
@@ -742,10 +648,6 @@ export class AgentCharacterController {
     }
   }
 
-  /**
-   * Tiny pixel activity glyph above the head — ✓ done, ✦ working, ! sad.
-   * Drawn as crisp pixel squares so it reads as pixel-art, not emoji.
-   */
   private drawGlyph(
     ctx: CanvasRenderingContext2D,
     ch: Character,
@@ -760,20 +662,17 @@ export class AgentCharacterController {
     ctx.globalAlpha = ch.alpha;
     ctx.fillStyle = kind === "done" ? "#22c55e" : kind === "working" ? "#f59e0b" : "#ef4444";
     if (kind === "done") {
-      // 5×5 pixel check mark
       ctx.fillRect(cx - px * 1.5, cy - px * 0.5, px, px);
       ctx.fillRect(cx - px * 0.5, cy + px * 0.5, px, px);
       ctx.fillRect(cx + px * 0.5, cy - px * 1.5, px, px);
       ctx.fillRect(cx + px * 1.5, cy - px * 2.5, px, px);
     } else if (kind === "working") {
-      // two 4-point pixel sparkles pulsing out from center
       const phase = Math.floor(now / 150) % 2;
       ctx.fillRect(cx - px, cy - phase * px, px, px);
       ctx.fillRect(cx + phase * px, cy, px, px);
       ctx.fillRect(cx, cy + phase * px, px, px);
       ctx.fillRect(cx - px, cy + px, px, px);
     } else {
-      // 1×5 exclamation bar + dot
       ctx.fillRect(cx - px * 0.5, cy - px * 2, px, px * 2.5);
       ctx.fillRect(cx - px * 0.5, cy + px, px, px);
     }
@@ -797,11 +696,6 @@ export class AgentCharacterController {
     ctx.closePath();
   }
 
-  /**
-   * Thought-bubble geometry + wrapped text. Returns null whenever the bubble
-   * must not show: no narration, mid-walk, or terminal poses.
-   * When `measureCtx` is null only the rect is needed (dirty-box path).
-   */
   private bubbleFor(
     ch: Character,
     measureCtx: CanvasRenderingContext2D | null
@@ -874,7 +768,6 @@ export class AgentCharacterController {
     ctx.strokeStyle = "rgba(38,48,56,0.85)";
     ctx.lineWidth = Math.max(1 / scale, b.fs * 0.1);
 
-    // Thought tail: two shrinking circles from the head to the bubble.
     const tailX = ch.facing === 1 ? b.rect.x + b.fs * 0.6 : b.rect.x + b.rect.w - b.fs * 0.6;
     const r1 = b.fs * 0.42;
     const r2 = b.fs * 0.24;
@@ -912,7 +805,6 @@ export class AgentCharacterController {
     const dy = -h * jump - lift;
     const dx = shake ? Math.sin(now / 25) * w * 0.06 : 0;
 
-    // Snap to whole screen pixels so nearest-neighbor scaling stays crisp.
     const cam = this.deps.engine.camera;
     const rawSx = ch.pos.x * cam.scale + cam.panX;
     const rawSy = (ch.pos.y + lift) * cam.scale + cam.panY;
@@ -923,7 +815,6 @@ export class AgentCharacterController {
     ctx.imageSmoothingEnabled = false;
     ctx.globalAlpha = ch.alpha;
 
-    // Grounding shadow (stays on the floor; shrinks while carried).
     ctx.fillStyle = "rgba(15, 23, 42, 0.16)";
     ctx.beginPath();
     ctx.ellipse(
@@ -942,15 +833,12 @@ export class AgentCharacterController {
     ctx.drawImage(getSpriteFrame(name), -w / 2, -h, w, h);
     ctx.restore();
 
-    // Pixel activity indicator above the head.
     if (ch.state === "celebrating") this.drawGlyph(ctx, ch, "done", now);
     else if (ch.state === "working") this.drawGlyph(ctx, ch, "working", now);
     else if (ch.state === "sad" || ch.state === "stumble") this.drawGlyph(ctx, ch, "error", now);
 
-    // Thought bubble (skipped automatically while walking).
     this.drawBubble(ctx, ch);
 
-    // Pencil sparks at the nearest edge of the content being drawn on.
     if (ch.state === "working" && ch.targetBox) {
       const b = ch.targetBox;
       const px = clamp(ch.pos.x, b.x, b.x + b.w);

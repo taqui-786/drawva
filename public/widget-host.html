@@ -12,22 +12,13 @@
 <body>
 <script>
 "use strict";
-// Drawva widget host. Runs inside a sandboxed outer iframe and renders untrusted
-// widget HTML inside a NO-SAME-ORIGIN inner iframe. Parent communicates via
-// postMessage; the parent origin is validated before any reply is sent.
 (() => {
   const MAX_HTML_LENGTH = 200000;
   const MAX_THEME_TOKENS = 48;
   const MAX_THEME_VALUE_LENGTH = 120;
   const THEME_TOKEN_PATTERN = /^[a-z0-9-]{1,32}$/;
-  // Values come from our own stylesheet, but they are interpolated into a
-  // stylesheet inside another document, so reject anything that could end a
-  // declaration or start a new rule / at-rule.
   const THEME_VALUE_BLOCKLIST = /[;{}<>\\]|\/\*|@|url\s*\(/i;
 
-  // Mirrors the `@theme inline` radius scale in app/globals.css. Those
-  // variables are tree shaken out of the compiled stylesheet when unused, so
-  // they cannot be read from the DOM and are re-derived here instead.
   const THEME_DERIVED =
     "--radius-sm:calc(var(--radius) * 0.6);" +
     "--radius-md:calc(var(--radius) * 0.8);" +
@@ -64,8 +55,6 @@
       .map((token) => "--" + token + ":" + currentTheme[token])
       .join(";");
     if (!declarations) return "";
-    // `@import` has to lead its own stylesheet, so the theme gets a dedicated
-    // <style> element ahead of the transparency base sheet.
     return (
       "<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');" +
       ":root{" + declarations + ";" + THEME_DERIVED + "}" +
@@ -270,9 +259,6 @@
            } catch (e) {}
          }
 
-         // Canvas widgets use world pixels, so ordinary 12-16px web type is
-         // unreadably small in a large user-drawn box. Leave graphics and
-         // deliberately large typography alone, and set scale property for micro text.
          var adaptiveLayout = { width: 0, height: 0, factor: 1 };
          function adaptHtmlTypography(width, height) {
            if (document.querySelector('svg, canvas')) return;
@@ -402,8 +388,6 @@
           } else if (ev.data.type === 'drawva-widget-check-size') {
             postContentSize();
           } else if (ev.data.type === 'drawva-widget-theme') {
-            // Custom-property writes only: never touches layout inputs, so the
-            // auto-fit geometry and measured content size are unaffected.
             var theme = ev.data.theme;
             if (!theme || typeof theme !== 'object') return;
             var root = document.documentElement;
@@ -458,17 +442,11 @@
     inner.srcdoc = source;
   }
 
-  // Theme changes are pushed as custom-property writes rather than a srcdoc
-  // rewrite: rewriting srcdoc would remount the document and destroy live
-  // widget state, animation timers, and measured content size.
   function pushTheme() {
     if (!currentTheme || !inner.contentWindow) return;
     inner.contentWindow.postMessage({ type: "drawva-widget-theme", theme: currentTheme }, "*");
   }
 
-  // A theme change can land while the inner document is still parsing, before
-  // its message listener exists. Replay it on load, but only when it differs
-  // from what was baked into srcdoc.
   inner.addEventListener("load", () => {
     if (!currentTheme) return;
     if (JSON.stringify(currentTheme) === writtenThemeJson) return;
@@ -488,8 +466,6 @@
     if (data.type === "drawva-widget-init") {
       if (!fromParent) return;
       if (typeof data.html !== "string" || data.html.length > MAX_HTML_LENGTH) return;
-      // Theme must be resolved before the document is written so the tokens are
-      // present on the very first paint (no flash of unresolved var()).
       const initTheme = sanitizeTheme(data.theme);
       if (initTheme) currentTheme = initTheme;
       writeInner(data.html);

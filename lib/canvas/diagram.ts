@@ -35,7 +35,6 @@ export function detectDiagramFormat(
   const src = String(source || "").trim();
   const tit = String(title || "").trim();
 
-  // If title or source indicates SMILES / chemical molecule:
   if (
     norm === "smiles" ||
     /smiles|molecule|chemical|c1ccccc1|aspirin|c@/i.test(tit) ||
@@ -46,20 +45,16 @@ export function detectDiagramFormat(
     return "smiles";
   }
 
-  // If JSON structure:
   if (src.startsWith("{") || src.startsWith("[")) {
     if (/\"\$schema\"|\"mark\"|\"encoding\"|\"data\"/i.test(src)) return "vega-lite";
     if (/\"nodes\"|\"edges\"|\"elements\"/i.test(src)) return "cytoscape-json";
     if (/\"FeatureCollection\"|\"geometry\"|\"coordinates\"/i.test(src)) return "geojson";
   }
 
-  // If XML structure:
   if (/<\?xml|<bpmn|<definitions/i.test(src)) return "bpmn-xml";
 
-  // If DOT graph:
   if (/^\s*(di)?graph\s*(\w+)?\s*\{/i.test(src)) return "dot";
 
-  // If norm is a recognized valid format:
   if (norm && (DIAGRAM_SOURCE_FORMATS as Set<string>).has(norm)) {
     return norm as DiagramFormat;
   }
@@ -103,7 +98,6 @@ export function sanitizeMermaidSource(raw: string): string {
   let s = String(raw || "").trim();
   s = s.replace(/^```(?:mermaid)?\s*/i, "").replace(/\s*```$/, "").trim();
 
-  // Auto-quote unquoted labels containing special characters like parentheses, colons, formulas, etc.
   s = s.replace(/(\b[A-Za-z0-9_]+)\[([^"\]\r\n][^\]\r\n]*)\]/g, (match, id, label) => {
     if (/[()\[\]{}":;=<>#]/.test(label)) {
       const cleanLabel = label.replace(/"/g, "'");

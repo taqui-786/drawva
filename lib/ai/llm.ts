@@ -1,12 +1,3 @@
-/**
- * One-shot LLM text calls for the non-agent routes (`canvas/refine`,
- * `plugins/author`).
- *
- * The agent loop does NOT come through here: it runs on the DeepSeek harness
- * (`lib/ai/dsh/*`), which owns the session log, tool registry, streaming, and
- * compaction. This module is the small remainder — a single prompt in, text
- * out, over plain `fetch` with retries and a hard timeout.
- */
 import { PROVIDER_INFOS, type ProviderType } from "./provider";
 
 export const LLM_MAX_RETRIES = 2;
@@ -68,7 +59,6 @@ export function resolveLlmConfig(options: {
     authorization: `Bearer ${apiKey}`,
   };
   if (effectiveBaseUrl.includes("agentrouter.org")) {
-    // ponytail: single header quirk kept — AgentRouter rejects non-CLI user agents.
     headers["user-agent"] = "claude-cli/0.2.29 (external, cli)";
   }
   if (effectiveBaseUrl.includes("openrouter.ai")) {
@@ -88,10 +78,6 @@ export function resolveLlmConfig(options: {
 function isOpenAiCompatOverride(baseUrl: string): boolean {
   return baseUrl.includes("/v1") || baseUrl.includes("openrouter.ai") || baseUrl.includes("agentrouter.org");
 }
-
-// ---------------------------------------------------------------------------
-// Error classification (routes map these onto user-facing messages)
-// ---------------------------------------------------------------------------
 
 export function isRateLimitError(err: unknown): boolean {
   if (!err) return false;
@@ -132,10 +118,6 @@ export class LlmHttpError extends Error {
     this.status = status;
   }
 }
-
-// ---------------------------------------------------------------------------
-// Transport
-// ---------------------------------------------------------------------------
 
 function timeoutSignal(
   timeoutMs: number | undefined,
@@ -216,10 +198,6 @@ function splitDataUrl(dataUrl: string): { mediaType: string; data: string } {
   if (match) return { mediaType: match[1], data: match[2] };
   return { mediaType: "image/png", data: dataUrl };
 }
-
-// ---------------------------------------------------------------------------
-// One-shot completion (refine / plugin author — text only, no tools)
-// ---------------------------------------------------------------------------
 
 export async function completeLlmText(
   config: LlmConfig,

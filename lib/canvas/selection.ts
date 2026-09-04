@@ -68,11 +68,6 @@ export function eraseRegion(engine: CanvasEngine, rect: Rect): void {
   engine.requestRender();
 }
 
-/**
- * Erase ONLY the ink strokes whose connected components are primarily/wholly inside rect.
- * Strokes that originate outside or extend significantly beyond rect into the padding
- * (such as pointing arrows or touching outer annotations) are preserved intact.
- */
 export function eraseContainedInk(engine: CanvasEngine, rect: Rect): void {
   const pad = 32;
   const extRect = clipRect({
@@ -150,8 +145,6 @@ export function eraseContainedInk(engine: CanvasEngine, rect: Rect): void {
         }
       }
 
-      // If a component extends into the outer margin, it belongs to an outside context stroke: keep it.
-      // If it is almost entirely inside the selection (<= 15px outside and < 10% outside), it is an inner element: erase it.
       const isInner = compInside > 0 && (compOutside === 0 || (compOutside <= 15 && compOutside / queue.length < 0.1));
 
       if (isInner) {

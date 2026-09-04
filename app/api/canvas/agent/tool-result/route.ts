@@ -7,7 +7,6 @@ import { requireSession } from "@/lib/api-guard";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-/** Browser answers to `tool_request` frames from the open turn stream. */
 export async function POST(req: Request) {
   let raw: string;
   try {

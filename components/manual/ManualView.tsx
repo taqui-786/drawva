@@ -253,7 +253,6 @@ export function ManualView() {
         </aside>
 
         <main className="flex min-w-0 max-w-3xl flex-col gap-16">
-          {/* ── Introduction ─────────────────────────────────────────── */}
           <Section
             id="introduction"
             eyebrow="Overview"
@@ -312,7 +311,6 @@ export function ManualView() {
             </Card>
           </Section>
 
-          {/* ── Quick Start ──────────────────────────────────────────── */}
           <Section
             id="quick-start"
             eyebrow="Overview"
@@ -339,7 +337,6 @@ export function ManualView() {
 
           <Separator />
 
-          {/* ── Tools ────────────────────────────────────────────────── */}
           <Section
             id="tools"
             eyebrow="Canvas"
@@ -400,7 +397,6 @@ export function ManualView() {
             </Card>
           </Section>
 
-          {/* ── Saving ───────────────────────────────────────────────── */}
           <Section
             id="saving"
             eyebrow="Canvas"
@@ -437,7 +433,6 @@ export function ManualView() {
 
           <Separator />
 
-          {/* ── Provider Setup ───────────────────────────────────────── */}
           <Section
             id="providers"
             eyebrow="AI"
@@ -509,7 +504,6 @@ export function ManualView() {
             </Alert>
           </Section>
 
-          {/* ── Local Models ─────────────────────────────────────────── */}
           <Section
             id="local-models"
             eyebrow="AI"
@@ -570,7 +564,6 @@ ollama serve               # default port 11434`}
             </Card>
           </Section>
 
-          {/* ── Generation Modes ─────────────────────────────────────── */}
           <Section
             id="modes"
             eyebrow="AI"
@@ -636,7 +629,6 @@ ollama serve               # default port 11434`}
             </Card>
           </Section>
 
-          {/* ── Drawva Agent ──────────────────────────────────────────── */}
           <Section
             id="agent"
             eyebrow="AI"
@@ -746,7 +738,6 @@ ollama serve               # default port 11434`}
 
           <Separator />
 
-          {/* ── Plugins ──────────────────────────────────────────────── */}
           <Section
             id="plugins"
             eyebrow="AI"
@@ -769,7 +760,6 @@ ollama serve               # default port 11434`}
             </Card>
           </Section>
 
-          {/* ── Token Usage ──────────────────────────────────────────── */}
           <Section
             id="usage"
             eyebrow="AI"
@@ -814,7 +804,6 @@ ollama serve               # default port 11434`}
 
           <Separator />
 
-          {/* ── P2P ──────────────────────────────────────────────────── */}
           <Section
             id="p2p"
             eyebrow="Collaboration"
@@ -893,7 +882,6 @@ ollama serve               # default port 11434`}
             </Card>
           </Section>
 
-          {/* ── Formats ──────────────────────────────────────────────── */}
           <Section
             id="formats"
             eyebrow="Reference"
@@ -927,7 +915,6 @@ ollama serve               # default port 11434`}
             </p>
           </Section>
 
-          {/* ── FAQ ──────────────────────────────────────────────────── */}
           <Section
             id="faq"
             eyebrow="Reference"
@@ -947,7 +934,6 @@ ollama serve               # default port 11434`}
 
           <Separator />
 
-          {/* ── Footer ───────────────────────────────────────────────── */}
           <footer className="flex flex-col gap-4 pb-10">
             <Card>
               <CardContent className="flex flex-col items-start gap-4 sm:flex-row sm:items-center sm:justify-between">

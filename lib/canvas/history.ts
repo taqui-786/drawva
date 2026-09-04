@@ -127,7 +127,6 @@ export class BoardHistory {
     this.recordObjects();
   }
 
-  /** Record "before" tile state for tiles intersecting the given world rect. */
   captureRect(rect: { x: number; y: number; w: number; h: number }): void {
     const eng = this.engine;
     if (!eng) return;
@@ -167,7 +166,6 @@ export class BoardHistory {
     this.redoStack = [];
   }
 
-  /** Drop redo candidates (e.g. a rolled-back partial apply must not be redoable). */
   dropRedo(): void {
     this.redoStack = [];
   }

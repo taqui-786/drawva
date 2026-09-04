@@ -45,7 +45,6 @@ export interface ConnectDialogProps {
   roomCode: string | null;
   peerCount: number;
   peerName?: string | null;
-  /** Signed-in display name; null gates the lobby behind sign-in. */
   displayName?: string | null;
   errorMessage?: string;
   onHost: () => Promise<string>;
@@ -80,7 +79,6 @@ export function ConnectDialog({
   const [loading, setLoading] = useState(false);
   const joinToastIdRef = useRef<string | number | null>(null);
 
-  // ── Lobby state ──────────────────────────────────────────────
   const [myPeerId] = useState(() => getMyPeerId());
   const myPeerJsId = peerJsIdFor(myPeerId);
   const [lobbyOnline, setLobbyOnline] = useState(false);
@@ -122,7 +120,6 @@ export function ConnectDialog({
     }
   }, [myPeerId]);
 
-  // Heartbeat + offline withdraw while online.
   useEffect(() => {
     if (!lobbyOnline) return;
     const beat = setInterval(() => {
@@ -136,7 +133,6 @@ export function ConnectDialog({
     };
   }, [lobbyOnline, myPeerId, myPeerJsId]);
 
-  // Online-users list polling (only while the dialog is open).
   useEffect(() => {
     if (!lobbyOnline || !open || tab !== "lobby") return;
     let cancelled = false;
@@ -155,8 +151,6 @@ export function ConnectDialog({
     };
   }, [lobbyOnline, open, tab, myPeerId]);
 
-  // Incoming requests polling — runs even with the dialog closed so Y never
-  // misses X's request. Toasts once per request when closed.
   useEffect(() => {
     if (!lobbyOnline) return;
     let cancelled = false;
@@ -193,7 +187,6 @@ export function ConnectDialog({
     };
   }, [lobbyOnline, open, refreshIncoming, onOpenChange]);
 
-  // Outgoing requests polling — watches for accept/reject while waiting.
   const hasPendingOutgoing = outgoing.some((r) => r.status === "pending");
   useEffect(() => {
     if (!lobbyOnline || (!hasPendingOutgoing && !awaitingLinkRef.current)) return;
@@ -224,7 +217,6 @@ export function ConnectDialog({
     };
   }, [lobbyOnline, hasPendingOutgoing, refreshOutgoing, dismissed, onConnectToPeer]);
 
-  // Link-up result: dismiss the linking toast, close the dialog on success.
   const dismissLinkingToast = () => {
     if (linkingToastRef.current) {
       toast.dismiss(linkingToastRef.current);
@@ -245,7 +237,6 @@ export function ConnectDialog({
     }
   }, [status, errorMessage, onOpenChange]);
 
-  // ── Legacy room-code join effect ─────────────────────────────
   useEffect(() => {
     if (!joinToastIdRef.current) return;
 
@@ -328,7 +319,6 @@ export function ConnectDialog({
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // ── Lobby actions ────────────────────────────────────────────
   const handleGoOnline = async () => {
     setGoingOnline(true);
     try {
@@ -431,7 +421,6 @@ export function ConnectDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Current Active Status Banner */}
         {(isConnected || isHosting || isConnecting) && (
           <div className="flex items-center justify-between rounded-lg border bg-muted/40 p-3">
             <div className="flex items-center gap-2">
@@ -483,7 +472,6 @@ export function ConnectDialog({
           </div>
         )}
 
-        {/* Top-level Tabs: Lobby vs Room code */}
         <div className="flex rounded-lg border bg-muted p-1 text-xs">
           <button
             type="button"
@@ -509,7 +497,6 @@ export function ConnectDialog({
           </button>
         </div>
 
-        {/* ── Lobby Tab ─────────────────────────────────────── */}
         {tab === "lobby" && (
           <div className="flex flex-col gap-3 py-1">
             {!displayName ? (
@@ -549,7 +536,6 @@ export function ConnectDialog({
                   </Button>
                 </div>
 
-                {/* Incoming requests */}
                 {incoming.length > 0 && (
                   <div className="flex flex-col gap-2">
                     <p className="text-xs font-medium">Connection requests</p>
@@ -587,7 +573,6 @@ export function ConnectDialog({
                   </div>
                 )}
 
-                {/* Outgoing pending */}
                 {pendingOutgoing.length > 0 && (
                   <div className="flex flex-col gap-2">
                     <p className="text-xs font-medium">Waiting for accept</p>
@@ -613,7 +598,6 @@ export function ConnectDialog({
                   </div>
                 )}
 
-                {/* Online users */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <p className="text-xs font-medium">
@@ -672,7 +656,6 @@ export function ConnectDialog({
           </div>
         )}
 
-        {/* ── Room-code Tab (legacy fallback) ───────────────── */}
         {tab === "code" && (
           <div className="flex flex-col gap-2 py-1">
             <div className="flex rounded-lg border bg-muted p-1 text-xs">

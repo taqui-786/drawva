@@ -8,7 +8,6 @@ import { PRESENCE_TTL_MS } from "../presence/route";
 export const runtime = "nodejs";
 export const maxDuration = 15;
 
-/** Pending requests older than this are treated as expired. */
 const REQUEST_TTL_MS = 3 * 60_000;
 
 function validPeerId(value: unknown): value is string {
@@ -35,7 +34,6 @@ function serialize(row: typeof p2pRequest.$inferSelect) {
   };
 }
 
-/** Verify the caller owns this presence peerId. */
 async function ownsPeerId(peerId: string, userId: string): Promise<boolean> {
   const rows = await db
     .select({ peerId: p2pPresence.peerId })
@@ -45,10 +43,6 @@ async function ownsPeerId(peerId: string, userId: string): Promise<boolean> {
   return rows.length > 0;
 }
 
-/**
- * GET ?role=incoming&peerId=… → pending requests addressed to me.
- * GET ?role=outgoing&peerId=… → my recent sent requests (pending/accepted/rejected).
- */
 export async function GET(req: Request) {
   try {
     const session = await auth.api.getSession({ headers: req.headers });
@@ -76,7 +70,6 @@ export async function GET(req: Request) {
         .limit(10);
       return NextResponse.json({ requests: rows.map(serialize) });
     }
-    // incoming
     const rows = await db
       .select()
       .from(p2pRequest)
@@ -96,7 +89,6 @@ export async function GET(req: Request) {
   }
 }
 
-/** Send a pairing request to an online peer. */
 export async function POST(req: Request) {
   try {
     const session = await auth.api.getSession({ headers: req.headers });
@@ -119,7 +111,6 @@ export async function POST(req: Request) {
     if (!validPeerId(toPeerId) || toPeerId === fromPeerId) {
       return NextResponse.json({ success: false, error: "Invalid recipient" }, { status: 400 });
     }
-    // Recipient must be online right now.
     const target = await db
       .select()
       .from(p2pPresence)
@@ -133,7 +124,6 @@ export async function POST(req: Request) {
     if (target.length === 0) {
       return NextResponse.json({ success: false, error: "That user is no longer online" }, { status: 410 });
     }
-    // No duplicate pending request in either direction.
     const dupes = await db
       .select({ id: p2pRequest.id })
       .from(p2pRequest)
@@ -174,7 +164,6 @@ export async function POST(req: Request) {
   }
 }
 
-/** Accept / reject (recipient) or cancel (sender) a request. */
 export async function PATCH(req: Request) {
   try {
     const session = await auth.api.getSession({ headers: req.headers });

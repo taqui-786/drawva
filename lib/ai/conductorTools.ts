@@ -38,14 +38,11 @@ export interface ConductorToolDeps {
   draft: DraftManager;
   camera: Camera;
   getRevision: () => number;
-  /** Content fingerprint of the board — see lib/canvas/fingerprint.ts. */
   getFingerprint: () => string;
-  /** Fingerprint observed when `revision` was last reported to the model. */
   fingerprintAt: (revision: number) => string | undefined;
   afterBoardChange: () => void;
   registerImage: (img: ActiveImage) => void;
   getInkBox?: () => Rect | null;
-  /** Registers a plugin contract for durable system-prompt injection. */
   registerPlugin?: (pluginId: string) => "registered" | "already" | "limit";
 }
 
@@ -75,10 +72,6 @@ function dataUrlBytes(dataUrl: string): number {
   return Math.floor((b64.length * 3) / 4);
 }
 
-/**
- * Encode under a byte budget: drop webp quality first (step -0.08, floor 0.50),
- * then shrink dimensions (0.84 per step), at most 10 attempts.
- */
 function encodeWithinBudget(src: HTMLCanvasElement, policy: CapturePolicy): string {
   let canvas = src;
   let quality = policy.quality;
@@ -144,12 +137,6 @@ function revisionConflict(
     );
   }
   if (base === currentRevision) return null;
-  // The revision is a call counter, not a content version: it also advances on
-  // changes that leave the board identical (widget iframes self-fitting their
-  // content, gesture handlers ending without a gesture, autosave bookkeeping).
-  // Rejecting on those produced REVISION_CONFLICT storms where the model
-  // re-scanned and retried against a board that had never actually changed.
-  // Only conflict when the content the model observed at `base` really moved.
   const observed = deps.fingerprintAt(Math.floor(base));
   if (observed !== undefined && observed === deps.getFingerprint()) return null;
   return toolError(
@@ -177,14 +164,8 @@ async function execScan(args: Record<string, unknown>, deps: ConductorToolDeps) 
   };
 }
 
-/** Screen-px targets used by the legibility verdict (comfortable / preferred min / compact min). */
 const TYPO_TARGETS = { comfortableBodyPx: 15, preferredMinimumPx: 11, compactMinimumPx: 8 } as const;
 
-/**
- * Read-only pre-flight for a proposed widget: runs the real placement engine,
- * reports collisions, and predicts on-screen typography after the camera
- * focuses the widget — before the model spends thousands of output tokens.
- */
 function planWidget(raw: unknown, deps: ConductorToolDeps): Record<string, unknown> | null {
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
@@ -217,7 +198,6 @@ function planWidget(raw: unknown, deps: ConductorToolDeps): Record<string, unkno
     box.y + box.h < vp.y ||
     box.y > vp.y + vp.h;
 
-  // Predicted camera state when the widget is focused (same math as canvas_focus).
   const focusPad = 64;
   const focusScale = Math.max(
     MIN_SCALE,
@@ -237,8 +217,6 @@ function planWidget(raw: unknown, deps: ConductorToolDeps): Record<string, unkno
   }
   const clamped = askedW > 0 && askedH > 0 && (askedW !== w || askedH !== h);
   return {
-    // The requested size is echoed back so a clamp is visible BEFORE the model
-    // spends thousands of output tokens laying out HTML for a box it will not get.
     requested: { w: askedW || w, h: askedH || h },
     maxWidgetSize: ctx.widgetGeometry?.max,
     proposed: {
@@ -282,8 +260,6 @@ async function execSnapshot(args: Record<string, unknown>, deps: ConductorToolDe
   if (target === "viewport") {
     source = deps.engine.camera.visibleWorldRect();
   } else if (target === "canvas") {
-    // Content-bounded overview: capturing the 20000-unit world renders a
-    // blank unreadable thumbnail. Pad the real content bounds instead.
     const content = contentBounds(deps.engine, deps.widgets, deps.objects);
     coveredContent = content;
     if (!content) {
@@ -331,20 +307,14 @@ async function execSnapshot(args: Record<string, unknown>, deps: ConductorToolDe
     dataUrl,
     note: `snapshot of {x:${atlas.sourceRect.x},y:${atlas.sourceRect.y},w:${atlas.sourceRect.w},h:${atlas.sourceRect.h}} at revision ${deps.getRevision()}`,
   });
-  // A snapshot satisfies layout review only when it covers ~all current content.
   let coversContent = false;
   if (coveredContent && coveredContent.w > 0 && coveredContent.h > 0) {
     const ix = Math.max(0, Math.min(atlas.sourceRect.x + atlas.sourceRect.w, coveredContent.x + coveredContent.w) - Math.max(atlas.sourceRect.x, coveredContent.x));
     const iy = Math.max(0, Math.min(atlas.sourceRect.y + atlas.sourceRect.h, coveredContent.y + coveredContent.h) - Math.max(atlas.sourceRect.y, coveredContent.y));
     coversContent = (ix * iy) / (coveredContent.w * coveredContent.h) >= 0.95;
   } else if (target === "canvas") {
-    coversContent = true; // empty board — nothing to review
+    coversContent = true;
   }
-  // The scene list rides along with every snapshot. Previously the model had to
-  // follow each snapshot with a canvas_scan just to learn ids and boxes, and each
-  // of those is a full extra request (system prompt + whole conversation resent),
-  // so the pattern cost roughly a third of the turn's input tokens for data the
-  // host already had in hand here.
   const scene = buildScene(deps.widgets, deps.objects);
   const sceneItems = scene.items.slice(0, SCAN_MAX_ITEMS);
   return {
@@ -403,11 +373,9 @@ function commandBox(cmd: CanvasCommand): { objectId: string; kind: string; box: 
   };
 }
 
-/** Ink footprint of a draw/erase command so history can snapshot affected tiles. */
 function commandInkBox(cmd: CanvasCommand): Rect | null {
   const rec = cmd as CanvasCommand & { x?: number; y?: number; w?: number; h?: number; points?: unknown[]; size?: number };
   if (Array.isArray(rec.points) && rec.points.length > 0) {
-    // Validated draw/erase points are {x, y} objects (DrawPoint) — NOT tuples.
     const size = (Number(rec.size) || 40) / 2 + 8;
     let x0 = Infinity;
     let y0 = Infinity;
@@ -433,12 +401,6 @@ function commandInkBox(cmd: CanvasCommand): Rect | null {
   return { x, y, w, h };
 }
 
-/**
- * Geometry the model asked for on the (at most one) widget-ish command, so the
- * apply result can report a placement override instead of leaving the model to
- * guess. Without it, a clamped box reads as "the tool ignored me" and the model
- * burns the rest of the turn on move/resize calls.
- */
 function requestedWidgetBox(raw: unknown[]): Rect | null {
   for (const entry of raw) {
     if (!entry || typeof entry !== "object") continue;
@@ -474,9 +436,6 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   const currentRevision = deps.getRevision();
   const conflict = revisionConflict(currentRevision, args, deps);
   if (conflict) return conflict;
-  // Some providers stringify array arguments. Parsing beats a hard reject: the
-  // alternative is one wasted round trip per occurrence, which is exactly what
-  // the real-user trace shows (steps 1 and 12 of the same turn).
   let rawArg = args.commands;
   if (typeof rawArg === "string") {
     try {
@@ -512,9 +471,6 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
 
   const beforeW = new Set(deps.widgets.all().map((w) => w.id));
   const beforeO = new Set(deps.objects.all().map((o) => o.id));
-  // Watchlist for the async apply gap: everything that already existed and that
-  // this apply does not itself target. Comparing the raw revision here rejected
-  // valid applies whenever a content-neutral bump landed mid-flight.
   const targeted = new Set(
     commands
       .map((c) => (c as { targetId?: unknown }).targetId)
@@ -522,8 +478,6 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   );
   const watched = [...beforeW, ...beforeO].filter((id) => !targeted.has(id));
   const watchedBefore = trackedSceneSignature(deps.widgets, deps.objects, watched);
-  // Pre-record undo state so a mid-apply renderer failure rolls the board back
-  // instead of leaving a half-applied, un-bumped, un-committed mutation.
   deps.history.recordObjects();
   deps.history.recordWidgets();
   deps.draft.setPending(commands);
@@ -547,9 +501,6 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
     );
   }
   if (trackedSceneSignature(deps.widgets, deps.objects, watched) !== watchedBefore) {
-    // A pre-existing item this apply was not targeting changed or vanished
-    // during the async apply. Roll back so the mutation never lands on top of
-    // an unseen concurrent change.
     await deps.history.undo();
     deps.history.dropRedo();
     deps.afterBoardChange();
@@ -567,8 +518,6 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   for (const w of deps.widgets.all()) {
     if (beforeW.has(w.id)) continue;
     const box: Rect = { x: w.x, y: w.y, w: w.w, h: w.h };
-    // Placement/geometry limits can move or shrink a widget. Saying so once here
-    // is what stops the model re-issuing move/resize calls to "fix" it.
     applied.push({
       objectId: w.id,
       kind: w.kind,
@@ -578,9 +527,6 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   }
   for (const o of deps.objects.all()) {
     if (!beforeO.has(o.id)) {
-      // For text, box.w is the tight width of the longest wrapped line — surface
-      // the wrap boundary (maxWidth) + fontSize so the model understands the
-      // effective column vs its requested width instead of guessing.
       const row: (typeof applied)[number] = { objectId: o.id, kind: o.kind, box: { x: o.x, y: o.y, w: o.w, h: o.h } };
       if (o.kind === "text") {
         if (typeof o.maxWidth === "number") row.maxWidth = o.maxWidth;
@@ -595,10 +541,6 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   for (const oid of beforeO) {
     if (!afterO.has(oid)) applied.push({ objectId: oid, kind: "removed_object", box: { x: 0, y: 0, w: 0, h: 0 } });
   }
-  // draw/erase rasterize straight into ink tiles, so they create no item and were
-  // silently absent from `applied` — a 7-command apply reported 5 rows and the
-  // model had no confirmation its strokes landed. Report them as ink rows with
-  // the affected box so the row count always matches the command count.
   for (const c of commands) {
     if (c.tool !== "draw" && c.tool !== "erase") continue;
     const box = commandInkBox(c);
@@ -611,18 +553,12 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   if (applied.length === 0) {
     for (const c of commands) applied.push(commandBox(c));
   }
-  // Layout-review gate: arm it only when a widget's *final geometry is unknown*
-  // to the agent — a freshly created widget renders its own content and self-fits.
-  // Deletions are excluded: removing a widget only frees space, it can never
-  // produce a surprise layout, and arming the gate there forced an extra
-  // snapshot step (and a full extra request) for no information.
   const widgetMutated =
     commands.some((c) => c.tool === "html_widget" || c.tool === "diagram_source" || c.tool === "animate_scene") ||
     applied.some((a) => a.kind === "html" || a.kind === "diagram");
   return { ok: true, revision: deps.getRevision(), applied, rejected: rejectedRows, ...(widgetMutated ? { widgetMutated: true } : {}) };
 }
 
-/** Canonical edit op from whatever key the model used to name it. */
 function canonicalEditOp(rec: Record<string, unknown>): string {
   const raw = String(rec.op ?? rec.kind ?? rec.type ?? rec.operation ?? rec.action ?? "")
     .trim()
@@ -632,13 +568,11 @@ function canonicalEditOp(rec: Record<string, unknown>): string {
   if (raw === "resize_object" || raw === "resize" || raw === "resize_widget" || raw === "resize_image") return "resize_object";
   if (raw === "delete_object" || raw === "delete" || raw === "remove" || raw === "remove_object") return "delete_object";
   if (raw) return raw;
-  // Unnamed op, inferred from payload: a bare {objectId, w, h} is a resize.
   if (rec.dx !== undefined || rec.dy !== undefined) return "move_object";
   if (rec.w !== undefined || rec.h !== undefined || rec.width !== undefined || rec.height !== undefined) return "resize_object";
   return "";
 }
 
-/** Live box of a widget or object, for the edit receipt. */
 function itemBox(deps: ConductorToolDeps, id: string): Rect | undefined {
   const item = deps.widgets.get(id) ?? deps.objects.get(id);
   return item ? { x: item.x, y: item.y, w: item.w, h: item.h } : undefined;
@@ -662,12 +596,6 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
 
   const results: { op: string; objectId: string; ok: boolean; reason?: string; box?: Rect }[] = [];
   let touched = false;
-  /**
-   * Layout-review gate. Only a widget *resize* can end somewhere the agent did
-   * not ask for: the iframe reflows its content and may self-fit past the given
-   * box. Moves land exactly where told, and deletes only free space — arming the
-   * gate for those cost a mandatory snapshot round trip per edit for nothing.
-   */
   let widgetReflowed = false;
   deps.history.recordObjects();
   deps.history.recordWidgets();
@@ -683,8 +611,6 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
       continue;
     }
     if (op === "move_object") {
-      // dx/dy is the contract, but absolute x/y is the obvious other guess —
-      // convert it rather than spending a round trip teaching the difference.
       let dx = Number(rec.dx);
       let dy = Number(rec.dy);
       if (!Number.isFinite(dx) && Number.isFinite(Number(rec.x))) dx = Number(rec.x) - item.x;
@@ -700,8 +626,6 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
       results.push({ op, objectId: id, ok: true, box: itemBox(deps, id) });
       touched = true;
     } else if (op === "resize_object") {
-      // One axis is a legitimate request; keep the other as-is instead of
-      // rejecting the whole operation.
       const w = Number(rec.w ?? rec.width ?? item.w);
       const h = Number(rec.h ?? rec.height ?? item.h);
       if (!Number.isFinite(w) || !Number.isFinite(h) || w < 1 || h < 1) {
@@ -709,12 +633,6 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
         continue;
       }
       if (widget) {
-        // Reflow, don't magnify. A bare resize() runs the "corner" path, which
-        // scales the frame while the iframe keeps its old content box — so every
-        // glyph grew with the widget and the requested height was overridden to
-        // preserve aspect (3400x1150 became 3400x2267 at 3.5x type). Holding
-        // w/contentW and h/contentH constant keeps the on-screen text size and
-        // gives the content the extra room, which is what a resize means here.
         const scaleW = widget.contentW > 0 ? widget.contentW / Math.max(1, widget.w) : 1;
         const scaleH = widget.contentH > 0 ? widget.contentH / Math.max(1, widget.h) : 1;
         deps.widgets.resize(id, w, h, w * scaleW, h * scaleH, true, "corner");
@@ -753,7 +671,6 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
 async function execLoadPlugin(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const pluginId = String(args.pluginId || "").trim();
   if (!pluginId) return toolError("INVALID_ARGUMENT", "pluginId is required.");
-  // Verify the id exists before promising a system-prompt injection.
   const res = await fetch(`/api/plugins?doc=${encodeURIComponent(pluginId)}`);
   if (res.status === 404) {
     return { ok: false, code: "PLUGIN_NOT_FOUND", message: `Plugin ${pluginId} was not found.` };
@@ -871,9 +788,6 @@ async function execPatch(args: Record<string, unknown>, deps: ConductorToolDeps)
   if (next.html.length > MAX_WIDGET_HTML_LENGTH) {
     return toolError("LIMIT_EXCEEDED", `Patched HTML exceeds ${MAX_WIDGET_HTML_LENGTH} characters.`);
   }
-  // Second check after the async rebuild gap: the board content must not have
-  // moved between validation and commit. Compared by fingerprint, not revision,
-  // so a content-neutral bump during the rebuild does not discard the work.
   if (deps.getFingerprint() !== fingerprintBefore) {
     return toolError(
       "REVISION_CONFLICT",

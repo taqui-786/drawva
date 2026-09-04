@@ -1,16 +1,3 @@
-/**
- * Drawva Agent verification suite — run with `pnpm test:agent`.
- * No test framework: plain asserts, one process. Section A–F:
- *   A. widgetPatch pure unit cases
- *   B. agentTools + web tool schema/gate/limit cases
- *   C. prompt/constant contracts
- *   D. repo hygiene (anti-clone greps, mutation-path audit)
- *   E. concurrency & step economy (fingerprint conflict protocol, layout gate,
- *      context pruning — the REVISION_CONFLICT storm / token blowup regressions)
- *   F. HTTP integration against a real `next start` + a fake OpenAI-compatible
- *      model server (exercises /api/canvas/agent/step end to end with no
- *      external network and no real API key).
- */
 import assert from "node:assert";
 import http from "node:http";
 import { spawn } from "node:child_process";
@@ -35,8 +22,6 @@ import {
 import { isWikipedia, safeUrl, selectFetchTargets, WEB_READ_MAX_URLS } from "../lib/ai/webTools";
 import { AGENT_SYSTEM_PROMPT, COORDINATE_CONTRACT, webAccessStatus } from "../lib/ai/prompts";
 
-// .env.local drives the Next server too; we need DATABASE_URL + BETTER_AUTH_SECRET
-// to seed a real session for the authenticated API routes.
 for (const envFile of [".env.local", ".env"]) {
   if (fs.existsSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", envFile))) {
     (await import("dotenv")).config({ path: path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", envFile) });
@@ -64,9 +49,6 @@ async function test(name: string, fn: () => Promise<void> | void) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// A. widgetPatch
-// ---------------------------------------------------------------------------
 console.log("\nA. widgetPatch");
 
 const SRC = [
@@ -190,16 +172,12 @@ await test("A15 trailing newline state survives", () => {
 });
 
 await test("A16 multibyte UTF-8 patch byte length enforcement", () => {
-  // 4-byte emoji: 17,000 emojis = 68,000 bytes > 65,536 bytes limit, but character count is 17,000
   const padEmoji = "-🚀\n+✨\n".repeat(8500);
   const bigEmoji = `--- a/widget.html\n+++ b/widget.html\n@@ -1,2 +1,2 @@\n${padEmoji}`;
   const r = applyWidgetPatch(SRC, bigEmoji);
   assert.ok(!r.ok && r.code === "LIMIT_EXCEEDED");
 });
 
-// ---------------------------------------------------------------------------
-// B. agentTools
-// ---------------------------------------------------------------------------
 console.log("\nB. agentTools");
 
 const toolDef = (name: string): AgentToolDef => {
@@ -207,7 +185,6 @@ const toolDef = (name: string): AgentToolDef => {
   if (!def) throw new Error(`tool ${name} is not declared`);
   return def;
 };
-/** Exactly the validation the runtime runs before dispatch (dsh-tools). */
 const accepts = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args).length === 0;
 const violations = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args);
 
@@ -239,8 +216,6 @@ await test("B1 exactly 16 tools with unique names", () => {
 
 await test("B2 canvas_apply requires baseRevision and a real commands array", () => {
   assert.equal(accepts("canvas_apply", { commands: [{ tool: "write_text" }] }), false);
-  // A stringified array is a common provider quirk; the executor parses it, but
-  // the declared schema is an array so the model is told the truth.
   assert.equal(accepts("canvas_apply", { baseRevision: 1, commands: '[{"tool":"write_text"}]' }), false);
   assert.equal(accepts("canvas_apply", { baseRevision: 1, commands: [{ tool: "write_text", x: 1, y: 2, text: "hi" }] }), true);
 });
@@ -252,8 +227,6 @@ await test("B2b commands declare flat geometry; a nested box still lands, never 
     assert.ok(props?.[key], `commands[].${key} must be declared so the model sees the flat contract`);
   }
   assert.ok(!props?.box, "a nested box must not be part of the declared contract");
-  // Command items stay open on purpose: the browser validator repairs loose
-  // shapes (see D11), which is cheaper than burning a round trip on a reject.
   assert.equal(
     accepts("canvas_apply", {
       baseRevision: 1,
@@ -261,19 +234,15 @@ await test("B2b commands declare flat geometry; a nested box still lands, never 
     }),
     true
   );
-  // A bogus tool name is still caught before dispatch.
   assert.equal(accepts("canvas_apply", { baseRevision: 1, commands: [{ tool: "make_me_a_sandwich" }] }), false);
 });
 
 await test("B2c canvas_edit names its discriminator 'op' and rejects 'kind'", () => {
   assert.equal(accepts("canvas_edit", { operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }), false);
   assert.equal(accepts("canvas_edit", { baseRevision: 3, operations: [{ op: "move_object", objectId: "w1", dx: 1, dy: 1 }] }), true);
-  // `kind` was silently accepted by the old (unvalidated) schema and then
-  // rejected by the executor as `Unknown op: ` — nine wasted steps in one turn.
   const wrongKey = violations("canvas_edit", { baseRevision: 3, operations: [{ kind: "resize_object", objectId: "w1", w: 10, h: 10 }] });
   assert.ok(wrongKey.some((v) => v.includes("op")), `operations[].kind must not pass as op: ${wrongKey.join("; ")}`);
   assert.equal(accepts("canvas_edit", { baseRevision: 3, operations: [{ op: "resize_object", objectId: "w1", w: 10, h: 10 }] }), true);
-  // Absolute moves are declared, so the obvious alternative is not a round trip.
   assert.equal(accepts("canvas_edit", { baseRevision: 3, operations: [{ op: "move_object", objectId: "w1", x: 10, y: 20 }] }), true);
   assert.equal(accepts("canvas_patch_widget", { objectId: "w1", patch: "x" }), false);
   assert.equal(accepts("canvas_patch_widget", { objectId: "w1", baseRevision: 2, patch: "x" }), true);
@@ -306,8 +275,6 @@ await test("B5 limits are sane", () => {
 
 await test("B6 every declared tool compiles to a JSON schema the runtime accepts", () => {
   for (const def of AGENT_TOOL_DEFS) {
-    // validateArgs compiles the spec; a malformed spec throws here rather than
-    // at conversation-creation time in production.
     assert.doesNotThrow(() => validateArgs(def.parameters, {}), `${def.name} has an invalid parameter spec`);
     assert.ok(def.description.length > 40, `${def.name} description is too thin`);
   }
@@ -343,8 +310,7 @@ await test("B9 web tool names stay consistent and are all declared", () => {
   }
   assert.equal(isWebToolName("canvas_apply"), false);
   assert.equal(isWebToolName(""), false);
-  // /api/canvas/web re-validates with this, so bad args never reach a fetcher.
-  assert.equal(accepts("web_read", { urls: [] }), true); // shape ok…
+  assert.equal(accepts("web_read", { urls: [] }), true);
   assert.equal(violations("stock_market_data", { symbol: "AAPL", includeHistory: true }).length, 0);
 });
 
@@ -358,7 +324,6 @@ await test("B10 web tools register only behind their capability gate", () => {
   for (const n of ["web_search", "github_repository_search", "stock_symbol_search", "stock_market_data", "image_search"]) {
     assert.ok(searchOnly.includes(n), `missing ${n}`);
   }
-  // No TinyFish key → no page reading and no paper search, whatever the search flag says.
   assert.ok(!searchOnly.includes("web_read"));
   assert.ok(!searchOnly.includes("research_search"));
 
@@ -406,13 +371,9 @@ await test("B12 safeUrl blocks loopback/private/metadata/non-http targets", () =
     assert.equal(safeUrl(bad), null, `should reject ${bad || "(empty)"}`);
   }
   assert.equal(typeof safeUrl("https://en.wikipedia.org/wiki/Cat"), "string");
-  // 172.32/12 is public: the guard must not swallow all of 172.0.0.0/8.
   assert.equal(typeof safeUrl("https://172.32.0.1/"), "string");
 });
 
-// ---------------------------------------------------------------------------
-// C. prompt contracts
-// ---------------------------------------------------------------------------
 console.log("\nC. prompts");
 
 await test("C1 agent prompt carries safety + discipline rules", () => {
@@ -455,8 +416,6 @@ await test("C4 web access state never advertises a tool that is not registered",
   const searchOnly = webAccessStatus(true, false);
   assert.ok(searchOnly.includes("Internet search is ENABLED"));
   assert.ok(searchOnly.includes("web_search") && searchOnly.includes("stock_symbol_search"));
-  // research_search and web_read both need the TinyFish key; the prompt must not
-  // promise them when enabledToolNames did not register them.
   assert.ok(!searchOnly.includes("web_read"));
   assert.ok(!searchOnly.includes("research_search"));
 
@@ -473,9 +432,6 @@ await test("C4 web access state never advertises a tool that is not registered",
   }
 });
 
-// ---------------------------------------------------------------------------
-// D. repo hygiene
-// ---------------------------------------------------------------------------
 console.log("\nD. repo hygiene");
 
 const NEW_FILES = [
@@ -501,15 +457,15 @@ await test("D2 mutation paths limited to apply/patch executors + existing one-sh
   const grep = (rel: string, re: RegExp) =>
     (fs.readFileSync(path.join(ROOT, rel), "utf8").match(re) || []).length;
   const inConductorTools = grep("lib/ai/conductorTools.ts", /draft\.setPending|widgets\.add\(/g);
-  assert.equal(inConductorTools, 2); // setPending (apply) + widgets.add (patch)
+  assert.equal(inConductorTools, 2);
   const inWidgetPatch = grep("lib/canvas/widgetPatch.ts", /draft\.setPending|widgets\.add\(/g);
   assert.equal(inWidgetPatch, 0);
 });
 
 await test("D3 step route never reads client prompt text", () => {
   const src = fs.readFileSync(path.join(ROOT, "app/api/canvas/agent/step/route.ts"), "utf8");
-  assert.ok(/"systemPrompt" in body/.test(src)); // rejected explicitly
-  assert.ok(!/body\.systemPrompt/.test(src)); // never used as prompt input
+  assert.ok(/"systemPrompt" in body/.test(src));
+  assert.ok(!/body\.systemPrompt/.test(src));
 });
 
 await test("D4 new widget creation without targetId never overwrites or adopts existing scene widgets", async () => {
@@ -642,8 +598,6 @@ await test("D9 draw without origin keeps absolute points; validated points are {
   );
   assert.equal(rejected.length, 0);
   const pts = (commands[0] as { points: unknown[] }).points;
-  // Points are DrawPoint objects, NOT tuples — the apply path must read .x/.y,
-  // never array-destructure (the "not iterable" INTERNAL crash).
   for (const p of pts) {
     assert.ok(p && typeof p === "object" && !Array.isArray(p));
     assert.equal(typeof (p as { x: number }).x, "number");
@@ -685,8 +639,6 @@ await test("D11 nested box/bbox geometry is lifted instead of silently dropped",
     sceneItems: [],
     widgetGeometry: widgetGeometryForViewport(visibleRect),
   };
-  // The reported turn's shape: `kind` + nested `box`, no flat x/y/w/h. Before
-  // the fix all four numbers were lost and the engine invented a position.
   const { commands } = validateCommands(
     [{ kind: "html_widget", title: "Solar", box: { x: 6840, y: 11140, w: 3400, h: 1180 }, html: "<div>x</div>" }],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -706,7 +658,6 @@ await test("D12 canvas_edit accepts the op key under any common alias", () => {
   for (const alias of ["rec.kind", "rec.type", "rec.operation"]) {
     assert.ok(fn.includes(alias), `canonicalEditOp must accept ${alias}`);
   }
-  // And an unknown op must name the right key instead of echoing an empty string.
   const exec = src.slice(src.indexOf("async function execEdit"), src.indexOf("async function execLoadPlugin"));
   assert.ok(exec.includes('under the key "op"'), "the rejection must state the expected key");
   assert.ok(!exec.includes("Unknown op: ${op}"), "the old opaque rejection message must be gone");
@@ -750,9 +701,6 @@ await test("D15 the final answer is the closing message, not every interim progr
 });
 
 await test("D16 tool_request is emitted on dispatch, never from the raw tool/call event", () => {
-  // tool/call is recorded before the tool validates its arguments, so
-  // projecting it made the browser mutate the canvas for calls the runtime then
-  // rejected — a mutation the model was told never happened.
   const bridge = fs.readFileSync(path.join(ROOT, "lib/ai/dsh/bridge.ts"), "utf8");
   assert.ok(bridge.includes("setBridgeDispatcher"), "the bridge must own the dispatch hook");
   assert.ok(/dispatchers\.get\(conversationId\)\?\.\(/.test(bridge), "dispatch must notify the open turn stream");
@@ -774,8 +722,6 @@ await test("D17 a second create of the same widget title is refused, not cleaned
 });
 
 await test("D18 a text-only turn still lands its answer on the canvas", () => {
-  // There is no chat panel: a reply that exists only in the closing message is
-  // invisible. The reported turn answered "Hey!" with zero mutations.
   const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
   assert.ok(src.includes("private async writeAnswerToCanvas"), "a canvas fallback for text-only turns must exist");
   assert.ok(/if \(finalText\.trim\(\) && !policy\.mutated\)/.test(src), "the fallback must trigger only when nothing was mutated");
@@ -789,9 +735,6 @@ await test("D18 a text-only turn still lands its answer on the canvas", () => {
 });
 
 await test("D19 a stale harness session id can never brick a conversation", () => {
-  // ctx.agents.create throws `session "<id>" already exists` while a previous
-  // session under that id is still in the store. Reusing the conversation id
-  // verbatim made that permanent: every later turn hit the same error.
   const src = fs.readFileSync(path.join(ROOT, "lib/ai/dsh/sessions.ts"), "utf8");
   assert.ok(src.includes("function sessionIdFor"), "the session id must be derived, not the raw conversation key");
   assert.ok(src.includes("function bumpEpoch"), "a stale id must be retirable");
@@ -803,7 +746,6 @@ await test("D19 a stale harness session id can never brick a conversation", () =
   const bumpIdx = dispose.indexOf("bumpEpoch(conversationId)");
   const awaitIdx = dispose.indexOf("await conversation.handle.dispose()");
   assert.ok(bumpIdx > 0 && bumpIdx < awaitIdx, "the id must be retired before awaiting teardown");
-  // Concurrent turns must share one creation instead of racing on the same id.
   assert.ok(src.includes("const opening = new Map"), "in-flight creations must be shared");
 });
 
@@ -826,7 +768,6 @@ await test("D21 an explicit widget size is honoured up to maxWidgetSize, never s
     widgetSlots: 8,
     visibleRect,
     sceneItems: [],
-    // A small scribble used to shrink an explicitly-sized widget to the ink box.
     changedBox: { x: 7000, y: 11000, w: 300, h: 120 },
     widgetGeometry: geometry,
   };
@@ -835,16 +776,12 @@ await test("D21 an explicit widget size is honoured up to maxWidgetSize, never s
     validateCommands([{ tool: "html_widget", title: "T", placement: "below", html: "<div>x</div>", ...dims }], ctx as any)
       .commands[0] as { w: number; h: number } | undefined;
 
-  // Inside the advertised ceiling and with no x/y: must arrive verbatim. The old
-  // code discarded any w > 1600 / h > 1200 and substituted 375x240.
   const big = ask({ w: 2400, h: 1400 });
   assert.equal(big?.w, 2400, `2400 wide must survive, got ${big?.w}`);
   assert.equal(big?.h, 1400, `1400 tall must survive, got ${big?.h}`);
-  // Past the ceiling: scaled down keeping aspect, exactly as the prompt says.
   const over = ask({ w: 3400, h: 1180 })!;
   assert.equal(over.w, geometry.max.w, "an oversize width must clamp to maxWidgetSize.w");
   assert.ok(Math.abs(over.w / over.h - 3400 / 1180) < 0.05, "the clamp must preserve aspect");
-  // No size at all: a viewport-scale default, not a scribble-scale one.
   const bare = ask({})!;
   assert.ok(bare.w >= 600 && bare.h >= 400, `default must stay readable, got ${bare.w}x${bare.h}`);
 });
@@ -859,7 +796,6 @@ await test("D22 canvas_edit resize reflows a widget instead of magnifying its ty
   );
   assert.ok(edit.includes("box: itemBox(deps, id)"), "edit results must report the final box");
 
-  // The maths the executor performs: hold contentW/w and contentH/h constant.
   const start = normalizeWidgetGeometry({ x: 0, y: 0, w: 960, h: 640, contentW: 960, contentH: 640 });
   const scaleW = start.contentW / start.w;
   const scaleH = start.contentH / start.h;
@@ -891,9 +827,6 @@ await test("D23 the plannedWidget pre-flight discloses the ceiling and any clamp
   }
 });
 
-// ---------------------------------------------------------------------------
-// E. concurrency & step economy
-// ---------------------------------------------------------------------------
 console.log("\nE. concurrency & step economy");
 
 type FakeItem = { id: string; kind: string; status: string; html?: string; copyText?: string; source?: string };
@@ -922,8 +855,6 @@ await test("E1 boardFingerprint ignores geometry, tracks identity/content/ink", 
   const fp = (ink: number) => boardFingerprint(FAKE_ENGINE as any, m.widgets as any, m.objects as any, ink);
 
   const base = fp(0);
-  // A widget iframe self-fitting from 620x760 to 292x422 must NOT invalidate a
-  // pending agent mutation — this is the REVISION_CONFLICT storm's root cause.
   Object.assign(w, { x: 10, y: 20, w: 292, h: 422 });
   assert.equal(fp(0), base, "geometry must not change the fingerprint");
 
@@ -947,15 +878,12 @@ await test("E2 trackedSceneSignature sees foreign deletes/edits, ignores untrack
   const sig = () => trackedSceneSignature(m.widgets as any, m.objects as any, ["w1", "o1"]);
 
   const before = sig();
-  // The apply's own new item is not on the watchlist, so it never registers.
   widgets.push({ id: "w2", kind: "html", status: "draft", html: "new" });
   assert.equal(sig(), before, "items created by the apply must not self-conflict");
 
-  // A concurrent geometry shift on a watched item is still tolerated.
   Object.assign(widgets[0], { x: 99, y: 99 });
   assert.equal(sig(), before);
 
-  // A foreign content edit and a foreign delete both must register.
   objects[0].source = "abcd";
   assert.notEqual(sig(), before);
   objects[0].source = "abc";
@@ -969,7 +897,6 @@ await test("E3 conflict check is content-derived, never a bare revision comparis
   const fn = src.slice(src.indexOf("function revisionConflict"), src.indexOf("async function execScan"));
   assert.ok(fn.includes("deps.fingerprintAt("), "revisionConflict must consult the observed fingerprint");
   assert.ok(fn.includes("deps.getFingerprint()"), "revisionConflict must compare against the live fingerprint");
-  // The async-gap guards must not fall back to raw counter comparisons either.
   assert.ok(
     !/!==\s*currentRevision/.test(src),
     "no executor may reject a mutation on a bare revision inequality"
@@ -1030,17 +957,12 @@ await test("E8 turn logs report peak input and bump attribution, not only cumula
 
 await test("E9 gesture-end handlers only bump the revision when a gesture happened", () => {
   const app = fs.readFileSync(path.join(ROOT, "components/canvas/CanvasApp.tsx"), "utf8");
-  // pointerup/pointercancel fire on drag bars and resize handles even with no
-  // drag in flight; an unconditional bump there rejects the agent's next call.
   const guardedDrag = app.match(/if \(wasDragging\) afterBoardChangeRef\.current\(\);/g) ?? [];
   const guardedResize = app.match(/if \(wasResizing\) afterBoardChangeRef\.current\(\);/g) ?? [];
   assert.equal(guardedDrag.length, 2, "both widget and object onDragEnd must be guarded");
   assert.equal(guardedResize.length, 2, "both widget and object onResizeEnd must be guarded");
 });
 
-// ---------------------------------------------------------------------------
-// F. HTTP integration (real Next server + fake OpenAI-compatible model)
-// ---------------------------------------------------------------------------
 console.log("\nF. HTTP integration");
 
 const APP_PORT = 4123;
@@ -1061,7 +983,6 @@ interface ModelBody {
   parallel_tool_calls?: boolean;
 }
 
-/** Captured last model request + scripted reply mode. */
 const modelState: {
   lastBody: ModelBody | null;
   lastAuth: string | null;
@@ -1100,7 +1021,6 @@ function sseChunksFor(mode: typeof modelState.mode): string {
     );
   }
   if (mode === "bad-edit") {
-    // operations[].kind instead of .op — the exact shape from the reported turn.
     return (
       frame({ role: "assistant", content: null }) +
       frame({
@@ -1150,7 +1070,6 @@ const fakeModel = http.createServer((req, res) => {
     modelState.lastAuth = req.headers.authorization || null;
     const isStream = modelState.lastBody?.stream === true;
     if (!isStream) {
-      // non-streaming completion (compact route uses model.invoke)
       res.writeHead(200, { "content-type": "application/json" });
       res.end(
         JSON.stringify({
@@ -1162,8 +1081,6 @@ const fakeModel = http.createServer((req, res) => {
       );
       return;
     }
-    // Stateful: after a tool batch is answered the loop calls again; answer
-    // with final text so the turn terminates instead of ping-ponging.
     modelState.streamHits += 1;
     const followUp = modelState.streamHits % 2 === 0;
     res.writeHead(200, { "content-type": "text/event-stream" });
@@ -1171,7 +1088,6 @@ const fakeModel = http.createServer((req, res) => {
   });
 });
 
-// --- Session seeding: the agent routes require a real better-auth session. ---
 const TEST_USER_EMAIL = "drawva-agent-check@localhost";
 const SESSION_TOKEN = `test-session-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 let sessionCookie = "";
@@ -1190,7 +1106,6 @@ async function seedSession(): Promise<void> {
     VALUES (${`test-session-row-${SESSION_TOKEN}`}, now() + interval '1 hour', ${SESSION_TOKEN}, now(), now(), ${userId})`;
   const signature = createHmac("sha256", secret).update(SESSION_TOKEN).digest("base64");
   const value = encodeURIComponent(`${SESSION_TOKEN}.${signature}`);
-  // Send both plain and __Secure- prefixed names; the server matches whichever it uses.
   sessionCookie = `better-auth.session_token=${value}; __Secure-better-auth.session_token=${value}`;
 }
 
@@ -1219,7 +1134,6 @@ async function waitFor(url: string, timeoutMs: number): Promise<void> {
   for (;;) {
     try {
       const res = await fetch(url);
-      // 401 is fine: the route is up, it just demands a session.
       if (res.ok || res.status === 404 || res.status === 401) return;
     } catch {}
     if (Date.now() > deadline) throw new Error(`server not ready at ${url}`);
@@ -1349,7 +1263,6 @@ try {
   await test("E5 step rejects missing text; conversation suffix is optional (session-owned)", async () => {
     assert.equal((await post("/api/canvas/agent/step", { ...validStepBase, text: undefined })).status, 400);
     assert.equal((await post("/api/canvas/agent/step", { ...validStepBase, text: "  " })).status, 400);
-    // No conversation suffix → the user session owns a default conversation.
     const noConversation = { ...validStepBase, conversation: undefined };
     const res = await post("/api/canvas/agent/step", noConversation);
     assert.equal(res.status, 200);
@@ -1384,7 +1297,6 @@ try {
     assert.equal(final.length, 1);
     assert.equal(final[0].data.text, "Hello world.");
     assert.equal(events.filter((e) => e.event === "error").length, 0);
-    // model-side assertions
     assert.equal(modelState.lastAuth, `Bearer ${API_KEY}`);
     const body = modelState.lastBody!;
     const msgs = body.messages!;
@@ -1392,20 +1304,16 @@ try {
     assert.ok(String(msgs[0].content).includes("Drawva Agent"));
     assert.ok(String(msgs[0].content).includes("PLUGIN CATALOG"));
     assert.ok(String(msgs[0].content).includes("weather"));
-    // loadedPluginIds → durable contract section in the system prompt
     assert.ok(String(msgs[0].content).includes("PLUGIN CONTRACT (durable)"));
     const toolNames = wireToolNames(body);
     for (const name of CANVAS_TOOL_NAMES) {
       assert.ok(toolNames.includes(name), `missing ${name}`);
     }
-    // webSearch:false in the request → the whole search family stays unbound.
     for (const name of SEARCH_TOOL_NAMES) {
       assert.ok(!toolNames.includes(name), `${name} bound despite webSearch:false`);
     }
   });
 
-  // Opens a turn stream and answers every tool_request via /tool-result,
-  // like the browser conductor does. Resolves with all streamed events.
   async function runTurnAnsweringTools(
     body: Record<string, unknown>,
     answer: (name: string, args: unknown) => unknown
@@ -1454,7 +1362,6 @@ try {
           if (event === "final" || event === "error") sawFinal = true;
         }
         if (sawFinal) {
-          // Drain remaining frames, then stop reading.
           await reader.cancel().catch(() => {});
           return;
         }
@@ -1521,9 +1428,6 @@ try {
   });
 
   await test("E11 step E2E: a mis-keyed canvas_edit is rejected before it reaches the browser", async () => {
-    // The reported turn sent operations[].kind nine times and got
-    // `Unknown op: ` back from the executor. With the schema declared, the
-    // runtime rejects the call pre-dispatch and the browser never sees it.
     modelState.mode = "bad-edit";
     modelState.streamHits = 0;
     const seen: string[] = [];
@@ -1576,7 +1480,6 @@ try {
   await test("E15 step E2E: image turn admits the snapshot and streams text", async () => {
     modelState.mode = "text";
     modelState.streamHits = 0;
-    // 1x1 PNG, like the conductor's canvas atlas snapshots.
     const tinyPng =
       "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
     const res = await post("/api/canvas/agent/step", {
@@ -1593,7 +1496,6 @@ try {
       .map((e) => String(e.data.text || ""))
       .join("");
     assert.equal(joined, "Hello world.");
-    // The image must reach the model as vision content.
     const wireImages = JSON.stringify(modelState.lastBody!.messages!).includes("image");
     assert.ok(wireImages, "no image content reached the model wire request");
   });

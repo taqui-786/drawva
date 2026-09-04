@@ -15,7 +15,6 @@ export function DrawvaNavbar() {
         aria-label="Main Navigation"
         className="mx-auto flex items-center justify-between px-6 py-5 md:px-12 lg:px-20"
       >
-        {/* Left: Brand Wordmark Text Only */}
         <Link
           href="/"
           className="outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md transition-opacity hover:opacity-90"
@@ -26,7 +25,6 @@ export function DrawvaNavbar() {
           </span>
         </Link>
 
-        {/* Right: Nav Links + Auth/Launch CTA */}
         <div className="flex items-center gap-6 md:gap-8">
           <div className="hidden md:flex items-center gap-8 text-sm font-medium text-muted-foreground">
             <Link

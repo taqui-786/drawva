@@ -8,12 +8,6 @@ export interface RoseTwoLoaderProps {
   particleCount?: number;
 }
 
-/**
- * Mathematical curve loader based on Rose Two:
- * r(t) = (9.2 + 0.60s)(0.72 + 0.28s) cos(2t)
- * x(t) = 50 + cos t · r(t) · 3.25
- * y(t) = 50 + sin t · r(t) · 3.25
- */
 export function RoseTwoLoader({
   size = 24,
   className = "",

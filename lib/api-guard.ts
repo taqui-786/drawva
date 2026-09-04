@@ -1,12 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
-/**
- * Session + origin + rate-limit guard for LLM proxy routes.
- * Usage: `const guard = await requireSession(req); if (guard instanceof NextResponse) return guard;`
- */
 export async function requireSession(req: Request): Promise<{ userId: string } | NextResponse> {
-  // CSRF: same-origin POSTs only (state-changing LLM calls).
   const origin = req.headers.get("origin");
   if (origin) {
     const host = req.headers.get("host");
@@ -44,8 +39,6 @@ export async function requireSession(req: Request): Promise<{ userId: string } |
 
 const RATE_CAPACITY = 30;
 const RATE_REFILL_PER_SEC = 0.5;
-// ponytail: in-process bucket — resets on deploy and diverges across instances;
-// move to Redis when this runs multi-instance.
 const buckets = new Map<string, { tokens: number; last: number }>();
 const MAX_BUCKETS = 10_000;
 

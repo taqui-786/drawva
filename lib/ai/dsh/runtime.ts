@@ -19,16 +19,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as DrawvaCredentials from "./credentials";
 
-/**
- * Process-wide agent runtime (Next.js `nodejs` routes only — never imported
- * by client components).
- *
- * Mounts the allowlisted plugin set exactly once; per-conversation agents,
- * tools, and prompt sections live in `sessions.ts`. Tool presentation is
- * `native`: the model sees flat canvas tools, and execution bridges to the
- * browser over SSE (see `tools.ts`).
- */
-
 const PLUGIN_ALLOWLIST = new Set([
   "timer",
   "drawva-settings",
@@ -88,7 +78,6 @@ async function boot(): Promise<Context> {
   return context;
 }
 
-/** Process-wide runtime; concurrent callers share one boot. */
 export function agentRuntime(): Promise<Context> {
   if (ctx) return Promise.resolve(ctx);
   if (!ready) {

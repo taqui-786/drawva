@@ -8,16 +8,11 @@ import { ObjectManager, type ObjectItem } from "./objects";
 const MAX_ATLAS_WIDTH = 1024;
 const MAX_ATLAS_HEIGHT = 768;
 
-/** Resolution ceiling for a capture: long edge and total pixel budget. */
 export interface AtlasResolutionPolicy {
   maxLongEdge: number;
   maxPixels: number;
 }
 
-/**
- * Union of all drawn ink, widgets, and objects across the whole world.
- * null when the board has no content.
- */
 export function contentBounds(
   engine: CanvasEngine,
   widgets?: WidgetManager | WidgetItem[] | null,
@@ -55,7 +50,6 @@ export interface AtlasResult {
   latestInput: LatestInputMeta | null;
 }
 
-/** Fit a bitmap into a widget box without stretching it into an oval. */
 export function fittedImageRect(
   imageW: number,
   imageH: number,
@@ -499,7 +493,6 @@ export function latestInputMetadata(
     imageRect: { x, y, w: Math.max(1, imageRight - x), h: Math.max(1, imageBottom - y) },
   };
 }
-
 
 function visibleInkBounds(engine: CanvasEngine, visible: Rect): Rect | null {
   const maxIdx = Math.ceil(SIZE / TILE) - 1;

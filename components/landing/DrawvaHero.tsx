@@ -20,7 +20,6 @@ export function DrawvaHero() {
 
   return (
     <section className="relative flex-1 flex flex-col items-center justify-start overflow-hidden px-4 pt-2 md:pt-4">
-      {/* Vibrant Full-Opacity Background Video */}
       <video
         src={VIDEO_URL}
         autoPlay
@@ -30,9 +29,7 @@ export function DrawvaHero() {
         className="absolute inset-0 h-full w-full object-cover z-0 pointer-events-none select-none"
       />
 
-      {/* Main Foreground Content */}
       <div className="relative z-10 flex flex-col items-center w-full max-w-7xl mx-auto">
-        {/* 1. Badge (top) - clean, no emojis */}
         <motion.div
           initial={reduce ? false : { opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
@@ -48,7 +45,6 @@ export function DrawvaHero() {
           </div>
         </motion.div>
 
-        {/* 2. Headline */}
         <motion.h1
           initial={reduce ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -60,7 +56,6 @@ export function DrawvaHero() {
           Thinking
         </motion.h1>
 
-        {/* 3. Shortened Crisp Subheadline */}
         <motion.p
           initial={reduce ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
@@ -71,14 +66,12 @@ export function DrawvaHero() {
           your handwritten ink into live visuals and equations.
         </motion.p>
 
-        {/* 4. CTA Buttons */}
         <motion.div
           initial={reduce ? false : { opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
           className="mt-4 sm:mt-5 flex items-center gap-3 font-body"
         >
-          {/* Primary Action Button */}
           <Button
             size="lg"
             render={<Link href="/canvas" />}
@@ -89,7 +82,6 @@ export function DrawvaHero() {
             <HugeiconsIcon icon={ArrowRight01Icon} className="h-4 w-4 opacity-80" />
           </Button>
 
-          {/* Secondary Star on GitHub Button */}
           <Button
             size="lg"
             variant="outline"
@@ -108,7 +100,6 @@ export function DrawvaHero() {
           </Button>
         </motion.div>
 
-        {/* 5. Dashboard Preview */}
         <motion.div
           initial={reduce ? false : { opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}

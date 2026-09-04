@@ -1,12 +1,3 @@
-/**
- * Model capabilities detection for Drawva.
- * Identifies whether an AI model supports:
- *  1. Vision (canvas image perception)
- *  2. Reasoning / Thinking (chain-of-thought effort configuration)
- *
- * Uses API-provided metadata when available (e.g. OpenRouter architecture/input_modalities),
- * combined with comprehensive heuristics for all major AI providers.
- */
 
 export interface ModelCapabilities {
   vision: boolean;
@@ -14,16 +5,12 @@ export interface ModelCapabilities {
   status?: "verified_vision" | "verified_no_vision" | "unknown";
 }
 
-/**
- * Checks if a model supports visual/image inputs (canvas screenshots).
- */
 export function isVisionModel(
   modelId: string,
   metadata?: Record<string, unknown>
 ): boolean {
   if (!modelId) return false;
 
-  // 1. Check API metadata object if provided (OpenRouter, Ollama, etc.)
   if (metadata && typeof metadata === "object") {
     const arch = metadata.architecture as Record<string, unknown> | undefined;
     const inputMods = Array.isArray(arch?.input_modalities)
@@ -60,7 +47,6 @@ export function isVisionModel(
 
   const id = modelId.toLowerCase();
 
-  // 2. Explicit non-vision models (text-only models that cannot process canvas drawings)
   if (
     id.includes("gpt-3.5") ||
     id.includes("text-davinci") ||
@@ -84,7 +70,6 @@ export function isVisionModel(
     return false;
   }
 
-  // 3. Known Vision model families
   return (
     id.includes("vision") ||
     id.includes("-vl") ||
@@ -115,16 +100,12 @@ export function isVisionModel(
   );
 }
 
-/**
- * Checks if a model supports reasoning/thinking depth controls.
- */
 export function isReasoningModel(
   modelId: string,
   metadata?: Record<string, unknown>
 ): boolean {
   if (!modelId) return false;
 
-  // 1. Check API metadata object if provided (OpenRouter reasoning/supported_parameters)
   if (metadata && typeof metadata === "object") {
     if (metadata.reasoning && typeof metadata.reasoning === "object") {
       return true;
@@ -145,8 +126,6 @@ export function isReasoningModel(
 
   const id = modelId.toLowerCase();
 
-  // 2. Known Reasoning model patterns
-  // OpenAI: o1, o3, o4, gpt-5 (except gpt-5-chat)
   if (
     /^(openai\/)?o[134]([-_]|\b)/i.test(id) ||
     id.startsWith("o1") ||
@@ -159,17 +138,14 @@ export function isReasoningModel(
     return true;
   }
 
-  // Anthropic: Claude 3.7 Sonnet, Claude 4
   if (id.includes("claude-3-7") || id.includes("claude-3.7") || id.includes("claude-4")) {
     return true;
   }
 
-  // Google: Gemini Thinking models & Gemini 2.5 Pro
   if (id.includes("thinking") || id.includes("gemini-2.5-pro")) {
     return true;
   }
 
-  // Open-source: DeepSeek R1, QwQ, reasoning variants
   if (
     id.includes("deepseek-r1") ||
     id.includes("qwq") ||
@@ -182,9 +158,6 @@ export function isReasoningModel(
   return false;
 }
 
-/**
- * Returns full capability descriptor for a model.
- */
 export function getModelCapabilities(
   modelId: string,
   metadata?: Record<string, unknown>
@@ -198,8 +171,6 @@ export function getModelCapabilities(
   };
 }
 
-// ponytail: static family table, good enough for compaction triggers; swap for
-// provider `context_length` metadata if small models start over/under-compacting.
 const CONTEXT_WINDOWS: Array<[RegExp, number]> = [
   [/^gpt-5/, 400_000],
   [/^gpt-4\.1/, 1_000_000],
@@ -223,10 +194,6 @@ export function contextWindowForModel(modelId: string): number {
   return DEFAULT_CONTEXT_WINDOW;
 }
 
-/**
- * Token pressure that triggers history compaction: 62.5% of the model's
- * context window (mirrors the 100k/160k policy of comparable agent loops).
- */
 export function compactionTriggerTokens(modelId: string): number {
   return Math.max(4_000, Math.round(contextWindowForModel(modelId) * 0.625));
 }

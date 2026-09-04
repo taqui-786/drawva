@@ -1,8 +1,3 @@
-/**
- * Tiny SVG path `d` sampler. Used by animate_scene salvage so model-emitted
- * SVG paths (`d`, translate.path) become polylines the canvas renderer can draw.
- * No DOM / Path2D — must run in the Node validator too.
- */
 
 export type Polyline = [number, number][];
 

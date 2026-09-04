@@ -51,7 +51,6 @@ export async function POST(req: Request) {
 
     let text = rawContent.trim();
 
-    // Strip wrapping markdown fences if model wrapped entire document in ```markdown
     if (text.startsWith("```markdown") && text.endsWith("```")) {
       text = text.replace(/^```markdown\s*\n?/, "").replace(/\n?```$/, "").trim();
     } else if (text.startsWith("```") && text.endsWith("```")) {

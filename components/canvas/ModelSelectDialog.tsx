@@ -56,9 +56,7 @@ interface ModelItem {
   capabilities: ModelCapabilities;
 }
 
-/** Rows rendered initially; more are appended on scroll. */
 const PAGE_SIZE = 40;
-/** Delay batch capability validation until the open animation finishes. */
 const VALIDATE_DELAY_MS = 350;
 
 const ModelRow = memo(function ModelRow({
@@ -128,7 +126,6 @@ const ModelRow = memo(function ModelRow({
       </div>
 
       <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
-        {/* Vision Capability Badge */}
         {isVerifiedVision ? (
           <Badge
             variant="outline"
@@ -162,7 +159,6 @@ const ModelRow = memo(function ModelRow({
           </Badge>
         )}
 
-        {/* Reasoning Capability Badge */}
         {isReasoning && (
           <Badge
             variant="outline"
@@ -173,7 +169,6 @@ const ModelRow = memo(function ModelRow({
           </Badge>
         )}
 
-        {/* Tier Badge */}
         {item.tier === "frontier" && (
           <Badge
             variant="secondary"
@@ -232,7 +227,6 @@ export function ModelSelectDialog({
   const inFlightRef = useRef(false);
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  // Sync provider configuration on storage changes
   useEffect(() => {
     const syncState = () => {
       setProviderConfig(getProviderConfig());
@@ -242,16 +236,12 @@ export function ModelSelectDialog({
     return () => window.removeEventListener("storage", syncState);
   }, []);
 
-  // Reset transient list state each time the dialog opens (render-phase reset,
-  // the React-endorsed pattern for adjusting state when a prop changes)
   const [prevOpen, setPrevOpen] = useState(open);
   if (open !== prevOpen) {
     setPrevOpen(open);
     setVisibleCount(PAGE_SIZE);
   }
 
-  // Single-batch background capability hydration when dialog opens.
-  // Deferred past the open animation so the first paint stays smooth.
   useEffect(() => {
     if (!open || models.length === 0) return;
 
@@ -264,7 +254,6 @@ export function ModelSelectDialog({
 
     if (missing.length === 0 || inFlightRef.current) return;
 
-    // Mark as requested to guarantee 100% deduplication
     missing.forEach((m) => requestedModelsRef.current.add(m));
 
     let cancelled = false;
@@ -286,7 +275,6 @@ export function ModelSelectDialog({
           const data = (await res.json()) as { capabilities?: Record<string, ModelCapabilities> };
           if (data.capabilities && !cancelled) {
             const merged = { ...getCachedModelCapabilities(), ...data.capabilities };
-            // shouldNotify = false avoids dispatching storage event loop
             setCachedModelCapabilities(merged, false);
             setCapabilitiesMap(merged);
           }
@@ -370,7 +358,6 @@ export function ModelSelectDialog({
 
   const handleSelect = useCallback(
     async (item: ModelItem) => {
-      // 1. If already verified as Vision model -> select immediately
       if (item.capabilities.vision && item.capabilities.status === "verified_vision") {
         onSelectModel(item.id);
         if (item.capabilities.reasoning) {
@@ -386,7 +373,6 @@ export function ModelSelectDialog({
         return;
       }
 
-      // 2. If already verified as NO vision -> reject immediately
       if (item.capabilities.status === "verified_no_vision") {
         toast.error("Vision Input Not Supported", {
           description: `"${item.id}" is a text-only model and does not support image/canvas inputs. Drawva requires a vision-capable model to inspect handwriting. Please select another model.`,
@@ -394,7 +380,6 @@ export function ModelSelectDialog({
         return;
       }
 
-      // 3. Unverified or unknown model -> validate on select via API
       setValidatingModelId(item.id);
       try {
         const res = await fetch("/api/canvas/model-validate", {
@@ -437,7 +422,6 @@ export function ModelSelectDialog({
         setValidatingModelId(null);
       }
 
-      // 4. Fallback for custom / unknown endpoints: allow selection with advisory warning
       onSelectModel(item.id);
       toast.warning(`Selected ${item.id}`, {
         description:
@@ -482,7 +466,6 @@ export function ModelSelectDialog({
             </div>
           </div>
 
-          {/* Search bar */}
           <div className="relative mt-3">
             <HugeiconsIcon
               icon={AiSearch02Icon}
@@ -507,7 +490,6 @@ export function ModelSelectDialog({
             )}
           </div>
 
-          {/* Filter Pills */}
           <div className="flex items-center gap-1.5 mt-2.5 overflow-x-auto pb-1 text-xs">
             <button
               type="button"
@@ -593,7 +575,6 @@ export function ModelSelectDialog({
           </div>
         </DialogHeader>
 
-        {/* Model List */}
         <div
           ref={listRef}
           onScroll={handleListScroll}
@@ -657,7 +638,6 @@ export function ModelSelectDialog({
           )}
         </div>
 
-        {/* Footer */}
         <div className="flex items-center justify-between p-3 sm:px-4 bg-muted/30 border-t border-border/60 text-xs">
           <span className="text-muted-foreground text-[11px] hidden sm:inline">
             Need custom endpoints or new API keys?

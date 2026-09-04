@@ -51,9 +51,6 @@ export async function POST(req: Request) {
     tinyfishKey: tinyfishKey(),
     signal: req.signal,
   });
-  // Argument problems the schema cannot express (an empty urls[], an unusable
-  // URL) come back from the tool as INVALID_ARGUMENT; keep them 4xx so a bad
-  // call is a bad request rather than a successful empty answer.
   const code = (result as { code?: unknown }).code;
   return json(result, code === "INVALID_ARGUMENT" ? 400 : 200);
 }

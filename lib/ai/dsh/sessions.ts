@@ -12,14 +12,6 @@ import { credentialRefFor, stageConnectionCredential } from "./credentials";
 import { registerConversationTools } from "./tools";
 import { cancelConversationCalls, setBridgeDispatcher } from "./bridge";
 
-/**
- * Conversation-scoped agents over the shared runtime.
- *
- * One agent per canvas conversation owns the session log (the model history),
- * system sections, and the tool loop. The browser projects session events and
- * answers `tool_request` frames; it never assembles model history.
- */
-
 export interface TurnImage {
   id: string;
   dataUrl: string;
@@ -54,7 +46,6 @@ export type StreamEvent =
 
 interface Conversation {
   handle: AgentHandle;
-  /** Harness session id — the conversation key plus an epoch (see sessionIdFor). */
   sessionId: string;
   connectionId: string;
   route: string;
@@ -64,16 +55,7 @@ interface Conversation {
 }
 
 const conversations = new Map<string, Conversation>();
-/** In-flight creations, so concurrent turns share one agent instead of racing. */
 const opening = new Map<string, Promise<Conversation>>();
-/**
- * Per-conversation agent generation. The harness session store rejects a
- * duplicate id, and a disposed agent is not always gone from it (a rejected
- * `handle.dispose()`, a torn-down turn), so the conversation KEY stays stable
- * for the bridge and the routes while each agent instance gets its own session
- * id. Without this a single failed dispose bricked the conversation forever:
- * every later turn re-created the same id and got `already exists`.
- */
 const epochs = new Map<string, number>();
 
 function sessionIdFor(conversationId: string): string {
@@ -117,17 +99,12 @@ async function ensureConversation(opts: OpenTurnOptions): Promise<{ ctx: Context
   });
   await ctx.settings.update("llm-pi-ai", settingsPatch);
 
-  // Prior turns seed a FRESH server conversation only; established sessions
-  // already own their history and must never see it re-injected.
   const fresh = !conversations.has(opts.conversationId);
   const priorSeed = fresh && opts.priorTurns?.length ? priorTurnsText(opts.priorTurns) : "";
   const existing = conversations.get(opts.conversationId);
   if (existing && existing.connectionId === opts.connectionId) {
     return { ctx, conversation: existing, agent: existing.handle.agent, priorSeed };
   }
-  // Two turns can arrive before the first agent finishes creating (a retry, a
-  // second tab). Share the in-flight creation instead of creating a second
-  // agent on the same session id.
   const inFlight = opening.get(opts.conversationId);
   if (inFlight) {
     const conversation = await inFlight;
@@ -192,11 +169,6 @@ async function createConversation(
     });
   };
 
-  // Retry on a stale session id. `ctx.agents.create` throws
-  // `session "<id>" already exists` when a session under that id is still in the
-  // harness store — a previous agent whose teardown had not finished or failed.
-  // Bumping the epoch mints a new id under the same conversation key, so the
-  // user is never stuck with a permanently unusable canvas.
   for (let attempt = 0; attempt < 3; attempt++) {
     const sessionId = sessionIdFor(opts.conversationId);
     try {
@@ -237,22 +209,16 @@ async function createConversation(
   throw new Error("Could not start an agent session. Reload the canvas to start a fresh conversation.");
 }
 
-/** Server-owned conversation id: user session + optional client suffix. */
 export function conversationIdFor(userId: string, suffix: unknown): string {
   const clean =
     typeof suffix === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(suffix) ? suffix : "default";
   return `user:${userId}:${clean}`;
 }
 
-/** True while a turn stream owns this conversation's projection. */
 export function hasOpenTurn(conversationId: string): boolean {
   return conversations.get(conversationId)?.emit != null;
 }
 
-/**
- * Steer the running turn without attaching a projection: the caller returns
- * immediately while events keep flowing on the open turn stream.
- */
 export async function steerConversationTurn(opts: OpenTurnOptions): Promise<void> {
   const { ctx, agent, priorSeed } = await ensureConversation(opts);
   const refs = opts.images.length
@@ -271,7 +237,6 @@ export async function steerConversationTurn(opts: OpenTurnOptions): Promise<void
 function projectSessionEvent(conversation: Conversation, event: { type: string; data?: unknown; [key: string]: unknown }): void {
   const emit = conversation.emit;
   if (!emit) return;
-  // Session events are envelopes: { type, seq, time, data }.
   const payload = (event.data || {}) as { [key: string]: unknown };
   const type = event.type;
   if (type === "assistant/chunk") {
@@ -300,14 +265,6 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
     return;
   }
   if (type === "tool/call") {
-    // Text emitted before a tool call is a progress line, not the answer. Drop
-    // it from the final-answer accumulator, or the turn ends with every interim
-    // sentence concatenated (25 of them in the reported trace).
-    //
-    // The `tool_request` frame itself is emitted from the bridge on dispatch,
-    // not here: this event is recorded before the tool validates its arguments,
-    // so projecting it made the browser mutate the canvas for calls the runtime
-    // then rejected.
     conversation.lastText = "";
     return;
   }
@@ -328,10 +285,6 @@ export async function disposeConversation(conversationId: string): Promise<void>
   const conversation = conversations.get(conversationId);
   if (!conversation) return;
   conversations.delete(conversationId);
-  // Retire the session id BEFORE awaiting teardown. `handle.dispose()` removes
-  // the session from the harness store asynchronously, and the client fires
-  // cancel/reset without waiting — so a turn starting right after a reset used
-  // to hit `session "<id>" already exists` against the still-draining session.
   bumpEpoch(conversationId);
   cancelConversationCalls(conversationId, new Error("Conversation ended."));
   for (const dispose of conversation.disposers) {
@@ -346,11 +299,6 @@ export async function disposeConversation(conversationId: string): Promise<void>
   }
 }
 
-/**
- * Run one user turn on the conversation agent and stream session events.
- * Resolves when the turn ends; the caller's `emit` receives the SSE-mapped
- * projection, including `tool_request` frames answered via `tool-result`.
- */
 export async function runConversationTurn(
   opts: OpenTurnOptions,
   emit: (e: StreamEvent) => void
@@ -360,10 +308,6 @@ export async function runConversationTurn(
   if (!conversation) throw new Error("Conversation is not established.");
   conversation.emit = emit;
   conversation.lastText = "";
-  // Per-turn budgets live in the browser policy chain (lib/ai/conductor.ts),
-  // which answers every tool request and owns the terminal stop. A second copy
-  // here raced it: the server threw before the bridge call parked, so the
-  // client's answer landed in the early-answer buffer and was never read.
   setBridgeDispatcher(opts.conversationId, (call) => {
     emit({ event: "tool_request", data: call });
   });

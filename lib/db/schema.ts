@@ -83,7 +83,7 @@ export const canvas = pgTable(
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     title: text("title").notNull().default("Untitled Canvas"),
-    data: text("data").notNull(), // JSON-stringified ProjectSnapshot
+    data: text("data").notNull(),
     savedAt: timestamp("saved_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at")
@@ -152,24 +152,20 @@ export const aiUsageRelations = relations(aiUsage, ({ one }) => ({
   }),
 }));
 
-/** P2P lobby presence: signed-in users who are currently discoverable for direct pairing. */
 export const p2pPresence = pgTable(
   "p2p_presence",
   {
-    /** Stable client-generated identity (localStorage), not the PeerJS id. */
     peerId: text("peer_id").primaryKey(),
     userId: text("user_id")
       .notNull()
       .references(() => user.id, { onDelete: "cascade" }),
     displayName: text("display_name").notNull(),
-    /** Full PeerJS id others dial, e.g. drawva-user-<peerId>. */
     peerJsId: text("peer_js_id").notNull(),
     lastSeen: timestamp("last_seen").defaultNow().notNull(),
   },
   (table) => [index("p2p_presence_lastSeen_idx").on(table.lastSeen)],
 );
 
-/** P2P pairing requests: X asks Y to connect; Y accepts or rejects. */
 export const p2pRequest = pgTable(
   "p2p_request",
   {

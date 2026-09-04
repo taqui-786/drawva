@@ -58,7 +58,6 @@ function inView(b: Rect, view: Rect): boolean {
   return rectsIntersect(b, view);
 }
 
-/** True when `inner` covers most of `outer` — the ink bbox grew from this object. */
 function isSelfInk(item: Rect, ink: Rect): boolean {
   const ix = Math.max(0, Math.min(item.x + item.w, ink.x + ink.w) - Math.max(item.x, ink.x));
   const iy = Math.max(0, Math.min(item.y + item.h, ink.y + ink.h) - Math.max(item.y, ink.y));
@@ -153,7 +152,6 @@ export function computeTidyMoves(input: ComputeTidyInput): TidyResult | null {
   const staticBlockers = [...drafts, ...outside, ...locked];
   let cappedAt150 = false;
   if (candidates.length > MAX_CANDIDATES) {
-    // ponytail: O(n²) overlap count, spatial hash if n>>150 ever matters
     cappedAt150 = true;
     candidates.sort((a, b) => {
       const score = (c: Cand) =>

@@ -2,15 +2,6 @@ import { createHash } from "node:crypto";
 import type { CredentialRef } from "@deepseek-ai/dsh-credentials";
 import { PROVIDER_INFOS, type ProviderType, type ReasoningEffort } from "../provider";
 
-/**
- * Maps Drawva provider connections to pi-ai provider-route profiles.
- *
- * Every connection gets an isolated declared route (`drawva-<hash>`) so keys,
- * endpoints, and model metadata never leak across connections. All routes
- * speak `openai-completions` except `anthropic`, which uses the catalog
- * `anthropic` route with a baseURL override when supplied.
- */
-
 export interface ConnectionProfile {
   route: string;
   model: string;
@@ -33,10 +24,6 @@ function effectiveBaseUrl(providerType: ProviderType, baseUrl?: string): string 
 
 function piAiReasoningEffort(model: string, isAnthropicRoute: boolean, effort: ReasoningEffort | undefined): string | undefined {
   if (!effort || effort === "default") return undefined;
-  // pi-ai throws UNSUPPORTED_REASONING_EFFORT when the level is not declared
-  // for the model. Hand-declared routes carry no reasoning metadata, so only
-  // forward the level where the endpoint is known to accept it: the Anthropic
-  // catalog route and OpenAI-reasoning model ids.
   const lower = model.toLowerCase();
   const reasoningModel =
     lower.startsWith("o1") ||
@@ -64,7 +51,6 @@ export function buildConnectionProfile(options: {
   if (!baseUrl) throw new Error(`Missing baseUrl for provider ${providerType}.`);
 
   if (providerType === "anthropic" && !baseUrl.includes("/v1") && !baseUrl.includes("openrouter.ai") && !baseUrl.includes("agentrouter.org")) {
-    // Catalog route: pi-ai ships the Anthropic protocol + thinking budgets.
     return {
       settingsPatch: {
         providers: {

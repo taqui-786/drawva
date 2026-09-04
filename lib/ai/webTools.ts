@@ -71,8 +71,6 @@ interface SearchHit {
 }
 
 export function tinyfishKey(): string {
-  // .env.local values are often pasted with surrounding quotes — the API
-  // rejects those literally, so strip them instead of 401ing silently.
   return (process.env.TINYFISH_API_KEY ?? "").trim().replace(/^['"]|['"]$/g, "");
 }
 
@@ -90,8 +88,6 @@ function clip(value: unknown, max: number): string {
 }
 
 function causeOf(err: unknown): string {
-  // Node fetch throws TypeError "fetch failed" with the real reason (ENOTFOUND,
-  // ECONNREFUSED, timeout) on `cause` — surface it or every outage is a mystery.
   const cause = (err as { cause?: unknown } | null)?.cause;
   const text =
     cause instanceof Error ? cause.message || cause.name : typeof cause === "string" ? cause : "";
@@ -375,8 +371,6 @@ function dedupeHits(hits: SearchHit[], limit: number): SearchHit[] {
   return out;
 }
 async function webRead(args: Record<string, unknown>, ctx: WebToolContext): Promise<Record<string, unknown>> {
-  // Argument validation precedes the capability check: a call with no usable URL
-  // is a bad request whether or not the server has a key.
   const requested = Array.isArray(args.urls) ? args.urls.slice(0, WEB_READ_MAX_URLS) : [];
   const urls: string[] = [];
   const rejected: string[] = [];
@@ -425,8 +419,6 @@ async function webSearch(args: Record<string, unknown>, ctx: WebToolContext): Pr
   let provider = "tinyfish";
 
   if (ctx.tinyfishKey) {
-    // A TinyFish outage must degrade to the DuckDuckGo fallback below, not
-    // fail the whole tool — so a throw here becomes a note, not an error.
     try {
       const search = await tinyfishSearch(
         ctx.tinyfishKey,
@@ -784,8 +776,6 @@ async function commonsImageSearch(
     const fullUrl = safeUrl(info.url);
     const thumbUrl = safeUrl(info.thumburl) ?? fullUrl;
     if (!thumbUrl || !fullUrl) continue;
-    // Prefer hotlinkable upload.wikimedia.org files; other hosts often lack
-    // CORS headers and fail inside the sandboxed widget iframe.
     const host = hostOf(thumbUrl);
     const title = textOf(record.title, 160) ?? query;
     photos.push({
@@ -861,8 +851,6 @@ async function imageSearch(args: Record<string, unknown>, ctx: WebToolContext): 
   const commons = await commonsImageSearch(query, limit, ctx.signal);
   if (commons.note) notes.push(commons.note);
   let photos = commons.photos;
-  // Wikimedia files are CORS-safe for the sandboxed iframe; only fall back to
-  // Openverse when Commons came back empty.
   if (photos.length === 0) {
     const fallback = await openverseImageSearch(query, limit, ctx.signal);
     if (fallback.note) notes.push(fallback.note);

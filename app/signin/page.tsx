@@ -70,11 +70,9 @@ function SignInContent() {
 
   return (
     <div className="relative min-h-screen w-full flex flex-col items-center justify-center bg-background text-foreground px-4 overflow-hidden selection:bg-primary/20 selection:text-primary">
-      {/* Subtle Background Ambience */}
       <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_120%,rgba(120,119,198,0.08),rgba(255,255,255,0))]" />
       <div className="absolute inset-0 bg-[radial-gradient(#e5e7eb_1px,transparent_1px)] dark:bg-[radial-gradient(#27272a_1px,transparent_1px)] [background-size:24px_24px] opacity-40 pointer-events-none" />
 
-      {/* Top back button */}
       <div className="absolute top-6 left-6 z-20">
         <Button
           variant="ghost"
@@ -88,7 +86,6 @@ function SignInContent() {
       </div>
 
       <div className="relative z-10 w-full max-w-md">
-        {/* Brand Header */}
         <div className="flex flex-col items-center text-center mb-8">
           <h1 className="font-display text-4xl md:text-5xl tracking-tight text-foreground">
             Welcome to{" "}
@@ -107,7 +104,6 @@ function SignInContent() {
           </p>
         </div>
 
-        {/* Sign In Card */}
         <Card className="border-border/80 bg-card/80 backdrop-blur-md shadow-lg">
           <CardHeader className="text-center pb-4">
             <CardTitle className="text-lg font-heading">Single Click Sign In</CardTitle>

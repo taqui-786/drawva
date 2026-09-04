@@ -168,16 +168,13 @@ export interface CommandValidationContext {
   aiColor: string;
   scale: number;
   widgetSlots: number;
-  /** Set of allowed plugin ids; when omitted, all plugins are allowed. */
   plugins?: Set<string>;
   visibleRect?: { x: number; y: number; w: number; h: number };
   changedBox?: { x: number; y: number; w: number; h: number };
   keepPosition?: boolean;
-  /** Original widget box — used in refinement mode to snap placement back to the existing widget. */
   widgetEditBox?: { x: number; y: number; w: number; h: number };
   sceneItems?: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>;
   widgetGeometry?: { max?: { w?: number; h?: number } } | null;
-  /** Shared per-reply accumulator enforcing MAX_PLOT_PIXELS_TOTAL across plots. */
   plotBudget?: { used: number };
   spatialPlan?: string;
 }
@@ -193,7 +190,6 @@ function matchedFontSize(
   if (Number.isFinite(size) && size >= 12) {
     return Math.max(12, Math.min(650, Math.round(size)));
   }
-  // Only match ink box height if it is a reasonable handwriting stroke height (20px to 600px).
   if (changedBoxHeight && changedBoxHeight > 20 && changedBoxHeight <= 600) {
     return Math.max(20, Math.min(650, Math.round(changedBoxHeight * 0.75)));
   }
@@ -208,18 +204,13 @@ function matchedTextFontSize(
 ): number {
   const modelSize = Number(value);
   if (Number.isFinite(modelSize) && modelSize >= 12) {
-    // 100% honor the model's explicitly specified font size in world units
     return Math.max(12, Math.min(650, Math.round(modelSize)));
   }
   const longForm = Array.from(String(text).replace(/\s/g, "")).length >= 10;
-  // If handwriting was drawn, scale relative to handwriting.
   if (changedBoxHeight && changedBoxHeight > 20 && changedBoxHeight <= 600) {
     const size = Math.round(changedBoxHeight * 0.75);
-    // Ink-height matching is for short completions beside the ink; a paragraph
-    // note matched to a tall question ink box renders as a giant narrow column.
     return longForm ? Math.max(24, Math.min(64, size)) : Math.max(20, size);
   }
-  // Standard whiteboard note font size default (contract: 36..48)
   return longForm ? 40 : 42;
 }
 
@@ -229,9 +220,6 @@ function textColumnWidth(
   scale: number,
   viewportW: number
 ): number {
-  // Wrap-column ceiling. Capping at 3200 silently munged explicit model widths
-  // (w:3900 -> maxWidth:3200 -> orphan second line); text boxes are tight-shrunk
-  // to the longest wrapped line by the renderer, so a wide column is safe.
   const cap = Math.max(80, Math.min(6000, Math.round(Math.max(1, viewportW) * 0.9)));
   const modelW = Number(rawWidth);
   if (Number.isFinite(modelW) && modelW >= 80) {
@@ -261,7 +249,6 @@ function textContentBox(
   return { w: Math.round(w), h };
 }
 
-/** Model x,y is usable when it sits in/near the current work area, not a y=0 dump. */
 function coordsNearWork(x: number, y: number, ctx: CommandValidationContext): boolean {
   if (!Number.isFinite(x) || !Number.isFinite(y) || x < 0 || y < 0 || x > SIZE || y > SIZE) return false;
   const view = ctx.visibleRect || ctx.changedBox;
@@ -280,7 +267,6 @@ function clampNum(v: number, lo: number, hi: number): number {
   return Math.round(Math.max(lo, Math.min(hi, v)));
 }
 
-/** Breathing room between the user's ink and a new AI item. Tight enough to stay related, wide enough not to kiss the handwriting. */
 export const PLACE_GAP = 48;
 const SLIDE_GAP = 24;
 const TELEPORT_PX = 280;
@@ -299,7 +285,6 @@ function viewOverlapRatio(box: Box, view?: Box): number {
   return (ix * iy) / Math.max(1, box.w * box.h);
 }
 
-
 function slotFor(anchor: Box, w: number, h: number, dir: Side, gap = PLACE_GAP): { x: number; y: number } {
   if (dir === "right") return { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) };
   if (dir === "left") return { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) };
@@ -314,7 +299,6 @@ function sideOrder(preferred: string): Side[] {
   return ["below", "right", "left", "top"];
 }
 
-/** Slide along the free axis to clear blockers instead of jumping to a distant side. */
 function slideClear(box: Box, dir: Side, blockers: Box[]): Box | null {
   const next: Box = { ...box };
   const alongX = dir === "below" || dir === "top";
@@ -338,8 +322,6 @@ function slideClear(box: Box, dir: Side, blockers: Box[]): Box | null {
 }
 
 function staysOnSide(box: Box, intended: { x: number; y: number }, dir: Side): boolean {
-  // Clamping to the canvas must not drag the widget off the requested side.
-  // Sliding along the free axis (x when below/top, y when left/right) is allowed.
   if (dir === "below" || dir === "top") return Math.abs(box.y - intended.y) <= TELEPORT_PX;
   return Math.abs(box.x - intended.x) <= TELEPORT_PX;
 }
@@ -360,7 +342,6 @@ function roomOnSide(
   return viewOverlapRatio(cleared, view);
 }
 
-/** Prefer the LLM side; if none, pick the roomiest nearby empty side. */
 function pickPreferredSide(
   requested: string,
   anchor: Box,
@@ -385,10 +366,6 @@ function pickPreferredSide(
   return bestScore >= 0 ? best : fallback;
 }
 
-/**
- * Sit the widget against the user's ink. Overflowing the viewport is allowed
- * (the user can pan). Jumping across the canvas or covering the anchor is not.
- */
 export function placeAroundAnchor(
   anchor: Box,
   w: number,
@@ -415,8 +392,6 @@ export function placeAroundAnchor(
     const cleared = slideClear(raw, dir, blockers);
     if (!cleared || !staysOnSide(cleared, intended, dir)) continue;
     const visible = viewOverlapRatio(cleared, view);
-    // If the preferred primary side is valid and clears obstacles on the canvas,
-    // honor it directly without jumping to another side (infinite canvas allows panning).
     if (dir === order[0]) {
       return { x: cleared.x, y: cleared.y };
     }
@@ -444,8 +419,6 @@ function occupancy(
   visibleRect?: Box
 ): Array<{ x: number; y: number; w: number; h: number }> {
   const items = [...(sceneItems || [])];
-  // A full-viewport capture is not occupancy — treating it as a blocker
-  // makes every nearby slot look taken and dumps the widget on top of older work.
   if (changedBox && changedBox.w > 4 && changedBox.h > 4 && !isViewportDump(changedBox, visibleRect)) {
     items.push(changedBox);
   }
@@ -472,11 +445,6 @@ function inferTextPlacement(placement: string, text: string): string {
   return "";
 }
 
-/**
- * Where a box of w×h would land given the model's placement intent and the
- * live validation context — the same engine canvas_apply uses, exported for
- * read-only pre-flight (plannedWidget).
- */
 export function placeContent(
   placement: string,
   sample: string,
@@ -515,9 +483,6 @@ function placeContentImpl(
     placement === "left" ||
     placement === "top";
 
-  // x,y from the model are the spatial plan. Placement is only a fallback when
-  // coords are missing or dumped at the origin. Never throw away a point that
-  // already sits in the current work area just because placement says "right".
   if (Number.isFinite(rawX) && Number.isFinite(rawY) && (isTargetPlacement || !isRelativeSide || coordsNearWork(rawX, rawY, ctx))) {
     return rescueCollision(
       {
@@ -557,8 +522,6 @@ function placementAnchor(
   if (!changedBox || changedBox.w < 4 || changedBox.h < 4) return null;
   const vw = Math.max(visibleRect?.w ?? 2000, 1);
   const vh = Math.max(visibleRect?.h ?? 1200, 1);
-  // Full-viewport dumps are not a handwriting box — don't sit the widget
-  // thousands of pixels below the whole capture.
   if (isViewportDump(changedBox, visibleRect || { x: 0, y: 0, w: vw, h: vh })) return null;
   return changedBox;
 }
@@ -573,18 +536,6 @@ function placeInVisible(view: Box, w: number, h: number, blockers: Box[]): { x: 
   return placeAroundAnchor(hint, w, h, view, blockers, "below");
 }
 
-/**
- * Model-supplied coordinates sometimes land on top of the fresh ink or an item
- * placed earlier in the same reply. Slide the box to the nearest clear side
- * instead of rendering over the writing. Only genuine intersections trigger —
- * tight-anchor replies like writing "5" right after "3+2=" must stay put.
- *
- * `allowInsideAnchor` marks visual widget commands (html_widget, diagrams,
- * animations, plots): users legitimately target those INTO a drawn container,
- * so a placement substantially inside the fresh-ink bbox is intentional and is
- * kept. Plain text/formula never gets this exemption — text overlapping the
- * ink bbox means it sits on handwriting or an arrow and must be evicted.
- */
 function rescueCollision(
   box: Box,
   placement: string,
@@ -621,7 +572,6 @@ function findSceneWidgetMatch(
 ): { id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string } | null {
   if (sceneWidgets.length === 0) return null;
 
-  // Match ONLY by explicit targetId
   const targetId = typeof cmd.targetId === "string" ? cmd.targetId.trim() : "";
   if (targetId) {
     const byId = sceneWidgets.find((w) => w.id === targetId);
@@ -673,7 +623,6 @@ export function fitWidgetGeometry(
     placement === "match_sketch" ||
     placement === "overlay";
 
-  // Refinement mode: snap ONLY if there is an explicit matched target or widgetEditBox
   const explicitTarget = matchedTarget || widgetEditBox;
   const isTargetExplicit = Boolean(cmd.targetId) || Boolean(widgetEditBox);
 
@@ -695,7 +644,6 @@ export function fitWidgetGeometry(
   let rawW = Number(rawCmdW);
   let rawH = Number(rawCmdH);
 
-  // If explicit coordinates were supplied
   if (hasExplicitCoords) {
     if (!Number.isFinite(rawW) || rawW <= 0) rawW = DEFAULT_WIDGET_WIDTH;
     if (!Number.isFinite(rawH) || rawH <= 0) rawH = DEFAULT_WIDGET_HEIGHT;
@@ -714,7 +662,6 @@ export function fitWidgetGeometry(
 
   const anchor = placementAnchor(changedBox, visibleRect);
 
-  // If user requested targeting the drawn container/sketch
   if ((isTargetPlacement || placement === "in_place") && anchor && changedBox) {
     const pad = 12;
     const w = Math.max(160, Math.round(changedBox.w - pad * 2));
@@ -730,16 +677,6 @@ export function fitWidgetGeometry(
     );
   }
 
-  // Size when the model gave none. An explicit finite size is HONOURED at any
-  // magnitude and clamped by sanitizeWidgetGeometry below (which respects
-  // widgetGeometry.max, the ceiling the prompt advertises as maxWidgetSize).
-  // This used to discard any w > 1600 / h > 1200 and substitute an
-  // anchor-derived guess, so a model that asked for 2400x1400 without x/y —
-  // legal, and inside the advertised ceiling — silently got 375x240.
-  //
-  // The no-size default is viewport-derived rather than anchor-derived: a
-  // widget scaled to a small scribble came out at 375x240, far too small to
-  // hold readable canvas-scale type.
   if (!Number.isFinite(rawW) || rawW <= 0) {
     const viewW = visibleRect?.w ?? DEFAULT_WIDGET_WIDTH;
     rawW = Math.max(600, Math.min(1200, Math.round(viewW * 0.7)), Math.round((anchor?.w ?? 0) * 1.25));
@@ -861,11 +798,6 @@ const PLOT_MAX_H = 6000;
 const PLOT_DEFAULT_W = 1200;
 const PLOT_DEFAULT_H = 800;
 
-/**
- * Plot-specific geometry. The prompt promises min 240x180, aspect 1:6..6:1 and
- * per-reply pixel budgets; the generic widget geometry would clamp to 300x200
- * instead and never check aspect or pixels.
- */
 function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationContext): Box | null {
   const targetBox = (c.targetBox && typeof c.targetBox === "object"
     ? c.targetBox
@@ -933,9 +865,6 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
   return { x, y, w, h };
 }
 
-/**
- * Recursively extracts an HTML or SVG string from arbitrary model JSON structures.
- */
 export function extractHtmlOrSvg(input: unknown, depth = 0): string {
   if (depth > 6 || input === null || input === undefined) return "";
   if (typeof input === "string") {
@@ -1003,9 +932,6 @@ export function extractHtmlOrSvg(input: unknown, depth = 0): string {
   return "";
 }
 
-/**
- * Recursively extracts plain text / markdown from strings, arrays, or objects.
- */
 export function extractText(input: unknown, depth = 0): string {
   if (depth > 6 || input === null || input === undefined) return "";
   if (typeof input === "string") {
@@ -1082,10 +1008,6 @@ export function extractText(input: unknown, depth = 0): string {
   return "";
 }
 
-/**
- * Recursively extracts LaTeX formula strings.
- * Strips wrapping $$ or $ delimiters automatically.
- */
 export function extractLatex(input: unknown, depth = 0): string {
   if (depth > 6 || input === null || input === undefined) return "";
   if (typeof input === "number") {
@@ -1132,10 +1054,6 @@ export function extractLatex(input: unknown, depth = 0): string {
   return "";
 }
 
-/**
- * Recursively extracts a math function expression.
- * Strips leading "y =" or "f(x) =" if present.
- */
 export function extractExpression(input: unknown, depth = 0): string {
   if (depth > 6 || input === null || input === undefined) return "";
   if (typeof input === "string") {
@@ -1168,10 +1086,6 @@ export function extractExpression(input: unknown, depth = 0): string {
   return "";
 }
 
-/**
- * Recursively extracts diagram source text.
- * Strips code fences (e.g. ```mermaid) automatically.
- */
 export function extractDiagramSource(input: unknown, depth = 0): string {
   if (depth > 6 || input === null || input === undefined) return "";
   if (typeof input === "string") {
@@ -1205,13 +1119,6 @@ export function extractDiagramSource(input: unknown, depth = 0): string {
   return "";
 }
 
-/**
- * Lift geometry out of a nested wrapper (`box`, `bbox`, `rect`, `geometry`) and
- * accept `width`/`height` as `w`/`h`. The contract is flat x/y/w/h, but models
- * regularly wrap it; before this, `{box:{x,y,w,h}}` silently lost all four
- * numbers and the placement engine invented a box somewhere else — the model
- * then spent the rest of the turn trying to move a widget it never placed.
- */
 function flattenGeometry(c: Record<string, unknown>): Record<string, unknown> {
   const nested = ["box", "bbox", "rect", "geometry", "bounds", "frame"]
     .map((key) => c[key])
@@ -1249,7 +1156,6 @@ export function validateCommand(
   const c = flattenGeometry(raw as Record<string, unknown>);
   let tool = canonicalToolName(c.tool || c.command || c.type || c.name || c.kind || c.action || c.actionType || c.operation);
 
-  // If tool is unrecognized, infer from content structure
   if (!["html_widget", "write_text", "draw_formula", "plot_function", "animate_scene", "diagram_source", "draw", "erase"].includes(tool)) {
     if (Array.isArray(c.objects) && Array.isArray(c.motions)) {
       tool = "animate_scene";
@@ -1451,7 +1357,6 @@ export function validateCommand(
       const rawSource = extractDiagramSource(c.source ?? c.code ?? c.content ?? c.diagram ?? c.text ?? c.body ?? c.spec ?? c.data ?? c);
       const source = rawSource.trim();
 
-      // If the diagram source is actually raw SVG or HTML, seamlessly validate as html_widget!
       if (source.startsWith("<svg") || source.startsWith("<html") || source.startsWith("<!DOCTYPE") || source.startsWith("<div")) {
         return validateCommand({ ...c, tool: "html_widget", html: source }, ctx, onReject);
       }
@@ -1585,9 +1490,6 @@ export function validateCommand(
     }
     case "draw": {
       const pts = Array.isArray(c.points) ? (c.points as unknown[]) : [];
-      // When the command carries an origin (x,y), points are local to it —
-      // same convention expandDrawObjects uses for salvaged objects. Without
-      // an origin, points are already global.
       const originX = isFiniteNum(c.x) ? Number(c.x) : 0;
       const originY = isFiniteNum(c.y) ? Number(c.y) : 0;
       const hasOrigin = isFiniteNum(c.x) || isFiniteNum(c.y);
@@ -1623,13 +1525,6 @@ function isPointPair(v: unknown): v is [number, number] {
   return Array.isArray(v) && v.length === 2 && typeof v[0] === "number" && typeof v[1] === "number";
 }
 
-/**
- * Salvage an animate_scene-style `objects` array inside a raw draw command by
- * flattening every simple primitive into a polyline stroke. Models frequently
- * guess this shape because the schema exposes `objects` for animate_scene, and
- * rejecting the whole sketch turns the reply into a chat message. Object
- * coordinates are treated as local to the command's x/y box.
- */
 function expandDrawObjects(raw: Record<string, unknown>): Record<string, unknown>[] | null {
   const objects = Array.isArray(raw.objects) ? (raw.objects as unknown[]) : [];
   if (!objects.length || objects.length > 32) return null;
@@ -1824,7 +1719,6 @@ export function canonicalToolName(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
-/** Bounding box of a placed command, so later siblings can avoid it. */
 function commandBounds(cmd: CanvasCommand): Box | null {
   switch (cmd.tool) {
     case "write_text": {
@@ -1861,12 +1755,11 @@ export function validateCommands(
   const validated: CanvasCommand[] = [];
   if (!Array.isArray(rawCmds)) return { commands: [], rejected: ["not-array"] };
   const acceptedTools = new Set(["write_text", "draw_formula", "plot_function", "animate_scene", "draw", "erase"]);
-  acceptedTools.add("html_widget"); // General HTML is mandatory and always enabled
+  acceptedTools.add("html_widget");
   if (!ctx.plugins || ctx.plugins.has("flowchart") || ctx.plugins.size === 0) acceptedTools.add("diagram_source");
 
   let widgetSlots = ctx.widgetSlots;
   const plotBudget = { used: 0 };
-  // Placed siblings are fed back as occupancy so commands in one reply don't pile up.
   const siblingBoxes: Array<{ kind: string; x: number; y: number; w: number; h: number }> = Array.isArray(
     ctx.sceneItems
   )
@@ -1908,8 +1801,6 @@ export function validateCommands(
       );
       continue;
     }
-    // A draw command carrying an animate_scene-style objects array is a common
-    // model guess — flatten it into real polyline strokes instead of rejecting.
     let expanded: Record<string, unknown>[] | null = null;
     if ((tool === "draw" || (!c.html && !c.source && !c.text && !c.latex && !c.expression && !c.motions)) && Array.isArray(c.objects) && !Array.isArray(c.points)) {
       expanded = expandDrawObjects(c);

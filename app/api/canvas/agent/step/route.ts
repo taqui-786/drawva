@@ -56,8 +56,6 @@ export async function POST(req: Request) {
   const guard = await requireSession(req);
   if (guard instanceof NextResponse) return guard;
 
-  // The conversation belongs to the user session; the client may only add a
-  // suffix (e.g. per canvas) and can never address another user's session.
   const conversationId = conversationIdFor(guard.userId, body.conversation ?? body.conversationId);
   const providerType: ProviderType = body.providerType || "custom";
   const apiKey = typeof body.apiKey === "string" ? body.apiKey.trim() : "";
@@ -105,8 +103,6 @@ export async function POST(req: Request) {
     mode,
   };
 
-  // Steering a running turn returns immediately; events keep flowing on the
-  // open turn stream. A steer with no open turn starts a turn instead.
   if (mode === "steer" && hasOpenTurn(conversationId)) {
     try {
       await steerConversationTurn(turnOptions);

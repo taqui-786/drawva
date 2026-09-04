@@ -4,8 +4,6 @@ import type { ObjectItem, ObjectManager } from "./objects";
 import type { SceneItemJson } from "./scene";
 import { SIZE } from "./constants";
 
-// ponytail: stride-sampled pixel hash instead of full-image hash; collision odds are
-// irrelevant here since this only guards one in-flight refine request.
 function inkFingerprint(canvas: HTMLCanvasElement | null): string {
   if (!canvas || canvas.width === 0 || canvas.height === 0) return "none";
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
@@ -88,7 +86,6 @@ export function encodeCanvas(canvas: HTMLCanvasElement): string {
   }
 }
 
-/** Draw a dashed outline marking the mutation rect inside a crop image. */
 export function markSelectionOnCanvas(
   canvas: HTMLCanvasElement,
   sourceRect: Rect,

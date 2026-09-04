@@ -39,16 +39,7 @@ function hunkChanged(lines: string[]): number {
   return changed;
 }
 
-/**
- * jsdiff's parsePatch throws when hunk counts disagree with the body, and
- * models miscount `@@ -l,c +l,c @@` constantly — so recompute every hunk's
- * counts from its body lines BEFORE parsing. oldStart/newStart are kept as
- * authored; only the counts are normalized.
- */
 function recountHunkHeaders(patch: string): string {
-  // A patch ending in "\n" splits to a trailing "" element — that is the EOF
-  // newline, not a context line; drop it before counting or every hunk's
-  // recomputed counts come out one line too long and jsdiff refuses to parse.
   const lines = patch.endsWith("\n") ? patch.slice(0, -1).split("\n") : patch.split("\n");
   const out: string[] = [];
   let i = 0;
@@ -113,7 +104,6 @@ function applyExact(
     const mismatch = firstMismatch(original, hunk);
     if (mismatch) return { mismatch };
   }
-  // Declared coordinates already match, so applyPatch will not relocate.
   const next = applyPatch(source, patch, { fuzzFactor: 0, autoConvertLineEndings: false });
   if (next === false) {
     return { mismatch: { line: 1, expected: "", actual: original[0] ?? "" } };
@@ -134,7 +124,6 @@ export function applyWidgetPatch(currentContent: string, patch: string): PatchRe
   }
   const bareMatch = /^@@[ \t]*$/m.exec(patch);
   if (bareMatch) {
-    // ponytail: no relocation inference for bare @@ headers; reject-with-diagnostic, add if models struggle
     const line = patch.slice(0, bareMatch.index).split("\n").length;
     return fail("INVALID_HUNK", `Bare @@ hunk header on line ${line} has no coordinates. Use @@ -oldStart,oldCount +newStart,newCount @@, e.g. @@ -1,3 +1,3 @@. Re-read the range first so the counts match.`);
   }

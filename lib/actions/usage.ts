@@ -42,10 +42,9 @@ export async function recordAiUsage(payload: {
     });
 
     if (!session?.user?.id) {
-      return { success: false }; // Guest user
+      return { success: false };
     }
 
-    // Only store snapshotUrl if it is a valid HTTP/HTTPS URL (avoid bloating database with large base64 data URIs)
     const isHttpUrl =
       typeof payload.snapshotUrl === "string" && /^https?:\/\//i.test(payload.snapshotUrl);
     const snapshotUrl = isHttpUrl ? payload.snapshotUrl : null;

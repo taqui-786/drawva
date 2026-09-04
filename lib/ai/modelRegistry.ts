@@ -1,7 +1,3 @@
-/**
- * OpenRouter & Provider Model Registry Cache.
- * Provides accurate, live capability introspection for 400+ models.
- */
 
 export interface RegistryModelDetails {
   id: string;
@@ -29,12 +25,8 @@ export interface ModelCapabilityResult {
 
 let cachedRegistry: Map<string, RegistryModelDetails> | null = null;
 let lastFetchTime = 0;
-const REGISTRY_CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const REGISTRY_CACHE_TTL_MS = 15 * 60 * 1000;
 
-/**
- * Fetches and caches OpenRouter's public model directory (400+ models).
- * This endpoint is public and does not require an API key.
- */
 export async function getOpenRouterModelRegistry(): Promise<Map<string, RegistryModelDetails>> {
   const now = Date.now();
   if (cachedRegistry && now - lastFetchTime < REGISTRY_CACHE_TTL_MS) {
@@ -72,9 +64,6 @@ export async function getOpenRouterModelRegistry(): Promise<Map<string, Registry
   return cachedRegistry || new Map();
 }
 
-/**
- * Inspects a single model from the registry or heuristics.
- */
 export async function inspectModelCapabilities(
   modelId: string,
   rawMeta?: Record<string, unknown>
@@ -90,7 +79,6 @@ export async function inspectModelCapabilities(
 
   const normId = modelId.toLowerCase().trim();
 
-  // 1. Direct metadata passed from caller (e.g. from /api/canvas/provider)
   if (rawMeta && typeof rawMeta === "object") {
     const arch = rawMeta.architecture as Record<string, unknown> | undefined;
     const inputMods = Array.isArray(arch?.input_modalities)
@@ -117,7 +105,6 @@ export async function inspectModelCapabilities(
     }
   }
 
-  // 2. Lookup in OpenRouter registry (handles meta/muse-spark-1.2-contributor, stealth/ox-alpha, etc.)
   const registry = await getOpenRouterModelRegistry();
   const entry =
     registry.get(normId) ||
@@ -140,8 +127,6 @@ export async function inspectModelCapabilities(
     };
   }
 
-  // 3. Fallback Heuristics for standard models when not in OpenRouter directory
-  // Known reasoning patterns
   const isReasoning =
     normId.startsWith("o1") ||
     normId.startsWith("o3") ||
@@ -155,7 +140,6 @@ export async function inspectModelCapabilities(
     normId.includes("qwq") ||
     normId.includes("reasoning");
 
-  // Definite text-only models
   const isDefiniteTextOnly =
     normId.includes("gpt-3.5") ||
     normId.includes("text-davinci") ||
@@ -181,7 +165,6 @@ export async function inspectModelCapabilities(
     };
   }
 
-  // Known vision models
   const isKnownVision =
     normId.includes("vision") ||
     normId.includes("-vl") ||
@@ -205,7 +188,6 @@ export async function inspectModelCapabilities(
     };
   }
 
-  // Unknown model: cannot confirm whether vision is supported or not
   return {
     vision: false,
     reasoning: isReasoning,

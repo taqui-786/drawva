@@ -149,7 +149,6 @@
     }
   }
 
-  /* ── Brand wordmark ───────────────────────────────────── */
   .brand-wordmark {
     font-family: "MuseoModerno", sans-serif;
     color: var(--primary);
@@ -159,7 +158,6 @@
     text-stroke: 0.5px color-mix(in oklch, #000 40%, transparent);
   }
 
-  /* ── Landing page keystroke key ────────────────────────── */
   .kbd {
     display: inline-flex;
     align-items: center;
@@ -178,7 +176,6 @@
     color: var(--muted-foreground);
   }
 
-  /* ── Landing scroll-reveal (IntersectionObserver) ──────── */
   [data-reveal] {
     opacity: 0;
     transform: translateY(16px);
@@ -199,7 +196,6 @@
     }
   }
 
-  /* Ultra-subtle card lift on hover — flat, no heavy shadow */
   .card-lift {
     transition:
       border-color 200ms ease,
@@ -213,7 +209,6 @@
   }
 }
 
-/* ── Hero section animations ────────────────────────────── */
 @keyframes fade-up {
   from {
     opacity: 0;

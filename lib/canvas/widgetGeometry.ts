@@ -22,7 +22,6 @@ const finite = (value: unknown, fallback: number) =>
   typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const clamp = (value: number, min: number, max: number) => Math.round(Math.max(min, Math.min(max, value)));
 
-/** Converts old snapshots and untrusted sync input into a box that always fits the canvas. */
 export function normalizeWidgetGeometry<T extends Partial<WidgetGeometry>>(item: T): T & WidgetGeometry {
   const contentW = clamp(finite(item.contentW, finite(item.w, 400)), 80, MAX_CONTENT_W);
   const contentH = clamp(finite(item.contentH, finite(item.h, 300)), 60, MAX_CONTENT_H);
@@ -44,7 +43,6 @@ export function widgetScale(item: Pick<WidgetGeometry, "w" | "h" | "contentW" | 
   return Math.max(0.01, Math.min(item.w / Math.max(1, item.contentW), item.h / Math.max(1, item.contentH)));
 }
 
-/** Edge resizes change the inner viewport; corner resizes retain the widget's aspect ratio. */
 export function resizeWidgetGeometry(item: WidgetGeometry, mode: WidgetResizeMode, requestedW: number, requestedH: number): WidgetGeometry {
   const start = normalizeWidgetGeometry(item);
   const contentW = start.contentW || start.w;

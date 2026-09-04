@@ -1,17 +1,3 @@
-/**
- * Client-execution bridge for canvas tools.
- *
- * The agent loop runs server-side but canvas mutations must execute in the
- * browser. Each tool `execute()` registers a pending call and awaits the
- * client's `tool_result`; `app/api/canvas/agent/tool-result/route.ts` settles
- * it. `(conversationId, toolCallId)` is the idempotency key.
- *
- * The `tool_request` frame is emitted from HERE, not from the session's
- * `tool/call` event. The loop records `tool/call` before the tool's own
- * argument validation runs, so projecting that event let the browser mutate the
- * canvas for a call the runtime then rejected — a phantom mutation the model was
- * told never happened. Dispatching is the first moment the call is real.
- */
 
 export interface BridgeToolCall {
   name: string;
@@ -30,11 +16,9 @@ const TOOL_RPC_TIMEOUT_MS = 45_000;
 
 const pending = new Map<string, PendingCall>();
 
-/** Answers that arrived before their dispatch parked (event/registration race). */
 const earlyAnswers = new Map<string, { result: unknown; isError: boolean; expires: number }>();
 const EARLY_ANSWER_TTL_MS = 60_000;
 
-/** Per-conversation hook that ships a dispatched call to the open turn stream. */
 export type BridgeDispatchListener = (call: { toolCallId: string; name: string; args: unknown }) => void;
 
 const dispatchers = new Map<string, BridgeDispatchListener>();
@@ -56,7 +40,6 @@ function takeEarlyAnswer(mapKey: string): { result: unknown; isError: boolean } 
   return { result: early.result, isError: early.isError };
 }
 
-/** Called by tool `execute()`: parks until the browser answers or 45s elapse. */
 export function dispatchBridgeCall(
   conversationId: string,
   toolCallId: string,
@@ -65,7 +48,6 @@ export function dispatchBridgeCall(
   const mapKey = key(conversationId, toolCallId);
   const existing = pending.get(mapKey);
   if (existing) {
-    // Idempotent replay: a retried dispatch reuses the parked call.
     return new Promise<unknown>((resolve, reject) => {
       const prevResolve = existing.resolve;
       const prevReject = existing.reject;
@@ -123,8 +105,6 @@ export function dispatchBridgeCall(
       },
       timer,
     });
-    // Park first, then ask: a browser fast enough to answer before this returns
-    // still finds its pending entry instead of the rendezvous buffer.
     dispatchers.get(conversationId)?.({ toolCallId, name: call.name, args: call.args });
   });
 }
@@ -132,7 +112,6 @@ export function dispatchBridgeCall(
 export function resolveBridgeCall(conversationId: string, toolCallId: string, result: unknown, isError?: boolean): boolean {
   const entry = pending.get(key(conversationId, toolCallId));
   if (!entry) {
-    // The dispatch may not have parked yet; hold the answer for rendezvous.
     if (toolCallId && conversationId) {
       if (earlyAnswers.size > 1000) {
         const now = Date.now();

@@ -4,23 +4,6 @@ import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 import { AGENT_TOOL_DEFS, enabledToolNames, type AgentToolDef } from "../agentTools";
 import { dispatchBridgeCall } from "./bridge";
 
-/**
- * Canvas + web tools in the agent-tool DSL.
- *
- * Every tool is registered straight from `AGENT_TOOL_DEFS` — name, description
- * and parameter schema. A second hand-written copy of those schemas is exactly
- * how `canvas_edit` came to advertise `op` while validating nothing, so the
- * model spent a whole turn sending `kind` and reading `Unknown op: `.
- *
- * Execution bridges to the browser: canvas tools mutate live canvas state and
- * web tools proxy through the browser's `/api/canvas/web` call. `load_plugin`
- * is the one server-local tool (it edits this session's system prompt).
- *
- * Single-tool discipline: serial loop (`maxParallelToolCalls: 1`) + the persona
- * rule. A strict whole-step rejection (penecho admission) is not hooked: the
- * loop exposes no decision boundary, only per-call `tools/pre-execute`.
- */
-
 export const TOOL_TIMEOUT_MS = 45_000;
 const MAX_RESULT_CHARS = 100_000;
 
@@ -36,7 +19,6 @@ export interface ConversationToolHooks {
   registerPluginContract: (pluginId: string, document: string) => "registered" | "already" | "limit";
 }
 
-/** Structural tool shape with inference-proof `never` callbacks (see below). */
 interface LooseToolDef {
   name: string;
   description: string;
@@ -82,9 +64,6 @@ export function registerConversationTools(agentCtx: Context, hooks: Conversation
       isConcurrencySafe: () => false,
       execute: execute(def.name) as LooseToolDef["execute"],
     };
-    // `as never` skips defineTool's deep InferObject type walk, which recurses
-    // on index-signature spec maps (TS2321). Runtime validation is unaffected:
-    // the registry still enforces parameters/output schemas before dispatch.
     agentCtx.tools.register(defineTool(tool as never));
   }
 

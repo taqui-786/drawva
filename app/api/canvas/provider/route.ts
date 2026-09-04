@@ -211,7 +211,6 @@ async function isCompatibleModel(m: Record<string, unknown> | string): Promise<b
   const modelObj = typeof m === "string" ? { id: m } : m;
   const id = typeof modelObj.id === "string" ? modelObj.id : String(m);
   const caps = await inspectModelCapabilities(id, modelObj);
-  // Compatible if verified vision or unknown (never prematurely drop unverified custom models)
   return caps.vision || caps.status !== "verified_no_vision";
 }
 

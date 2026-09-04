@@ -76,8 +76,6 @@ Return ONLY a valid JSON object matching one of the schemas:
 - For widget_patch: {"kind": "widget_patch", "targetId": "...", "expectedContentHash": "...", "patch": "..."}
 - For reject: {"kind": "reject", "reason": "..."}`;
 
-// `color` is intentionally default-free: when the model omits it the client
-// falls back to the app's theme ink color instead of a hardcoded slate.
 const refinedStrokeSchema = z.object({
   points: z.array(z.object({ x: z.number().min(0).max(1), y: z.number().min(0).max(1) })).min(2).max(200),
   color: z.string().min(1).max(30).optional(),
@@ -255,14 +253,12 @@ export async function POST(req: Request) {
     const rawText = rawContent.trim();
     let parsedResult: RefineResult | null = null;
 
-    // 1. Try direct JSON.parse
     try {
       const direct = JSON.parse(rawText);
       const validated = refinementResultSchema.safeParse(direct);
       if (validated.success) parsedResult = validated.data;
     } catch {}
 
-    // 2. Try extractJsonDecision from markdown code fences or text
     if (!parsedResult) {
       const extracted = extractJsonDecision(rawText);
       if (extracted) {
@@ -271,7 +267,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3. Fallback: if the model returned raw HTML/SVG
     if (!parsedResult && (rawText.includes("<svg") || rawText.includes("<div"))) {
       const cleanHtml = rawText.replace(/^```html?/i, "").replace(/```$/i, "").trim();
       parsedResult = {

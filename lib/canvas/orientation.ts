@@ -1,6 +1,3 @@
-/**
- * Screen orientation and landscape lock utilities for mobile devices.
- */
 
 export async function attemptLandscapeLock(): Promise<boolean> {
   if (typeof window === "undefined") return false;
@@ -13,7 +10,6 @@ export async function attemptLandscapeLock(): Promise<boolean> {
       return true;
     }
   } catch {
-    // Browsers often require fullscreen mode or standalone mode to lock orientation
   }
   return false;
 }

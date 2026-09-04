@@ -101,7 +101,6 @@ function fnv1aHash(text: string): string {
   return (h >>> 0).toString(16);
 }
 
-/** Bound a live stream tail for ticker state: collapse whitespace, keep the newest ~320 chars. */
 function tickerTail(text: string, max = 320): string {
   const clean = text.replace(/\s+/g, " ").trim();
   return clean.length > max ? clean.slice(-max) : clean;
@@ -116,17 +115,14 @@ function computeOptimalTextFontSize(
   const numLines = Math.max(1, lines.length);
   const maxChars = Math.max(1, ...lines.map((l) => l.length));
 
-  // Natural font size to fit handwriting proportionally within selection bounds:
   const heightBased = (rect.h * 0.68) / (numLines * 1.35);
   const widthBased = (rect.w * 0.92) / (maxChars * 0.62);
   const naturalSize = Math.max(18, Math.min(heightBased, widthBased));
 
-  // If LLM returned a tiny generic size (< 24), use naturalSize:
   if (!requestedFontSize || requestedFontSize < 24) {
     return Math.round(naturalSize);
   }
 
-  // If LLM specified a custom size, clamp it to fit the box without overflowing:
   return Math.round(Math.min(requestedFontSize, naturalSize * 1.25));
 }
 
@@ -256,20 +252,12 @@ export function CanvasApp() {
   }, [addObject, mergeObjectToInk]);
 
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Random epoch seed: a reload must never collide with revision numbers
-  // referenced by the persisted agent conversation (stale refs then conflict
-  // loudly instead of silently passing).
   const boardRevisionRef = useRef(Math.floor(Math.random() * 1e9));
-  // Raster-mutation counter. The revision counter cannot tell "ink changed"
-  // from "a handler fired"; this one only advances on real tile writes, so the
-  // board fingerprint can detect ink edits without hashing every tile bitmap.
   const inkEpochRef = useRef(0);
-  /** caller frame → bump count, cumulative for the session. See bumpRevision(). */
   const revisionAuditRef = useRef(new Map<string, number>());
   const conductorRef = useRef<Conductor | null>(null);
   const [agentRunning, setAgentRunning] = useState(false);
 
-  // --- Refine feature state ---
   const [refineRect, setRefineRect] = useState<Rect | null>(null);
   const [refineState, setRefineState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const refineStateRef = useRef(refineState);
@@ -280,7 +268,6 @@ export function CanvasApp() {
   const inkSnapshotRef = useRef<HTMLCanvasElement | null>(null);
   const refreshRefineRectRef = useRef<() => void>(() => {});
   const inkBoxRef = useRef<Rect | null>(null);
-  /** Trigger-cause box captured at scheduleAi time — the live ref may be stale by turn start. */
   const scheduledInkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
   const lastStrokeTimeRef = useRef<number>(0);
@@ -316,8 +303,6 @@ export function CanvasApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
-  // Reload durable (redacted) agent traces from IndexedDB so debugging
-  // survives reloads; fresh turns from this session unshift on top.
   useEffect(() => {
     let cancelled = false;
     void loadAgentLogs().then((saved) => {
@@ -386,7 +371,6 @@ export function CanvasApp() {
   });
 
   const handleConductorEvent = useCallback((e: ConductorEvent) => {
-    // Pixel AI worker: mirror real agent/tool lifecycle into the character.
     const character = agentCharacterRef.current;
     if (character) {
       if (e.kind === "turn_start") {
@@ -402,8 +386,6 @@ export function CanvasApp() {
       }
     }
     if (e.kind === "turn_start") {
-      // Fold the schedule-time trigger box into the live ref (consumed once so
-      // mid-turn applies keep reading fresh unions, not a stale snapshot).
       if (scheduledInkBoxRef.current) {
         inkBoxRef.current = inkBoxRef.current
           ? unionRect(inkBoxRef.current, scheduledInkBoxRef.current)
@@ -531,8 +513,6 @@ export function CanvasApp() {
     handleConductorEventRef.current = handleConductorEvent;
   });
 
-  // Pixel AI worker thought bubble: stream the live ticker narration to the
-  // character. Empty/non-running text hides the bubble immediately.
   useEffect(() => {
     const character = agentCharacterRef.current;
     if (!character) return;
@@ -552,7 +532,6 @@ export function CanvasApp() {
       toast.error("AI Conductor is initializing, please wait a moment.");
       return;
     }
-    // Cancel and defer cloud sync so AI generation has 100% network bandwidth and 0 latency
     cloudSync.current?.cancel();
     const config = getProviderConfig();
     const model = getActiveModel();
@@ -562,7 +541,6 @@ export function CanvasApp() {
       return;
     }
 
-    // Set immediate loading state for instant visual feedback on header and footer
     setAgentRunning(true);
     setAiStatus("thinking");
     setAiRun({
@@ -641,7 +619,6 @@ export function CanvasApp() {
     }, 45000);
 
     try {
-      // 1. Capture crop with padding (context, not mutation area).
       const pad = Math.min(160, Math.max(selRect.w, selRect.h) * 0.25);
       const cropRect: Rect = {
         x: selRect.x - pad,
@@ -658,7 +635,6 @@ export function CanvasApp() {
       markSelectionOnCanvas(raw, atlas.sourceRect, selRect, atlas.imageScale);
       const cropDataUrl = encodeCanvas(raw);
 
-      // 2. Build request body.
       const targetWidget = manifest.containedWidgets[0];
       let target: Record<string, unknown> | undefined;
       if (targetWidget) {
@@ -683,7 +659,6 @@ export function CanvasApp() {
       }
       const palette = samplePalette(inkSnapshot);
 
-      // 3. Call refine API.
       const res = await fetch("/api/canvas/refine", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -716,7 +691,6 @@ export function CanvasApp() {
       if (!data.ok || !data.result) throw new Error(data.error || "Refinement returned no result.");
       const result = data.result;
 
-      // 4. Preflight & apply.
       const applied = await applyRefinement(manifest, result, opId);
       if (applied) {
         setRefineState("success");
@@ -746,7 +720,6 @@ export function CanvasApp() {
     setRefineState("idle");
   }, []);
 
-  /** Preflight all fallible work, then mutate the board in one pass. Returns true if applied. */
   const applyRefinement = useCallback(
     async (manifest: RefinementManifest, result: RefineResult, opId: string): Promise<boolean> => {
       const eng = engine;
@@ -760,7 +733,6 @@ export function CanvasApp() {
         return false;
       }
 
-      // Rebuild manifest and verify the region hasn't changed mid-request.
       const fresh = buildRefinementManifest(
         manifest.rect,
         boardRevisionRef.current,
@@ -773,7 +745,6 @@ export function CanvasApp() {
         return false;
       }
 
-      // --- Preflight per result kind (all fallible work BEFORE any mutation). ---
       let preparedHtml: string | null = null;
       let preparedCopyText: string | undefined;
       let widgetToPatch: WidgetItem | null = null;
@@ -808,20 +779,16 @@ export function CanvasApp() {
         }
       }
 
-      // Final cancellation check before mutating.
       if (refineOpRef.current?.id !== opId) return false;
 
-      // --- Apply (one history transaction via afterBoardChange). ---
       const rect = manifest.rect;
       hist.captureRect(rect);
       if (widgetToPatch) hist.recordWidgets();
       if (manifest.containedObjects.length > 0) hist.recordObjects();
 
-      // A. Erase ink in the rect (selective: preserves touching outside context/arrows).
       eraseContainedInk(eng, rect);
       syncManager.current?.broadcast({ type: "SYNC_INK_ERASE", ...rect });
 
-      // B. Remove contained items only for non-patch kinds.
       const removeWidgetIds: string[] = [];
       const removeObjectIds: string[] = [];
       if (result.kind !== "widget_patch") {
@@ -829,7 +796,6 @@ export function CanvasApp() {
         for (const w of manifest.containedWidgets) removeWidgetIds.push(w.id);
       }
 
-      // C. Add replacement content.
       try {
         if (result.kind === "widget_patch" && widgetToPatch && preparedHtml) {
           const next: WidgetItem = {
@@ -847,8 +813,6 @@ export function CanvasApp() {
           toast.error("AI returned empty refinement. Nothing was replaced.");
           return false;
         }
-        // Raster paths cannot resolve var(), so the theme ink color is resolved
-        // to a concrete value here and used whenever the model omits a color.
         const inkColor = resolveThemeColor("foreground", "#0f172a");
         for (const s of strokes) {
           const pts = s.points.map((p) => ({
@@ -947,14 +911,11 @@ export function CanvasApp() {
           syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id });
         }
 
-        // Drop the selection so the old ink snapshot stops rendering over the new content.
         tools.current?.clearSelection();
 
         afterBoardChangeRef.current();
         return true;
       } catch (err) {
-        // ponytail: best-effort undo rollback; if it fails, the committed entry stays
-        // on the undo stack so manual Ctrl+Z still recovers.
         console.error("[refine] apply failed:", err);
         try {
           await hist.undo();
@@ -1000,10 +961,6 @@ export function CanvasApp() {
 
   function bumpRevision() {
     boardRevisionRef.current += 1;
-    // Attribution for the revision counter. Static reading of this file never
-    // explained the +8/+17 bursts that appear between two agent steps with no
-    // user input, so every bump tallies its caller frame; the turn log carries
-    // the breakdown as `revisionBumps`.
     try {
       const frames = (new Error().stack ?? "").split("\n").slice(1);
       const caller = frames.find((f) => !f.includes("bumpRevision")) ?? "unknown";
@@ -1075,7 +1032,6 @@ export function CanvasApp() {
     if (!h || !h.canUndo) return;
     await h.undo();
     bumpRevision();
-    // Undo/redo restore tile bitmaps directly, bypassing the tile write hook.
     inkEpochRef.current += 1;
     syncHistoryButtons();
     if (engine && syncManager.current) {
@@ -1175,9 +1131,6 @@ export function CanvasApp() {
 
         },
         onDragEnd: (id) => {
-          // pointerup/pointercancel on the drag bar fires even when no drag was
-          // in flight; bumping the revision there rejects the agent's next
-          // mutation for a change that never happened.
           const wasDragging = widgetDrag.current?.id === id;
           widgetDrag.current = null;
           const item = wm.get(id);
@@ -1390,7 +1343,6 @@ export function CanvasApp() {
     tm.setSelectionListener((rect) => {
       if (!rect) {
         if (refineStateRef.current === "loading") {
-          // Keep active refinement frame and request intact
           return;
         }
         if (!wm.getSelectedId() && !om.getSelectedId()) {
@@ -1413,8 +1365,6 @@ export function CanvasApp() {
       const sel = tm.selection;
       inkSnapshotRef.current =
         sel && sel.rect ? captureRegionRef.current(sel.rect) : null;
-      // Show the button immediately — endMarquee only triggers the dirty-interaction
-      // render path, which never reaches postFrame listeners.
       const p = engine.camera.worldToScreen(rect.x + rect.w, rect.y);
       lastRefinePosRef.current = `${Math.round(p.x)}|${Math.round(p.y)}`;
       setRefineBtnPos({ x: p.x, y: p.y });
@@ -1527,7 +1477,6 @@ export function CanvasApp() {
       om.setSelected(null);
       wm.setSelected(item.id);
 
-      // Diagrams sync source only (html rebuilt on peer); applets chunk if large.
       syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
       setMode("select");
     });
@@ -1703,7 +1652,6 @@ export function CanvasApp() {
     });
     conductorRef.current = agent;
 
-    // Pixel AI worker character — driven by the conductor events above.
     const agentCharacter = new AgentCharacterController({
       engine,
       widgets: () => widgets.current,
@@ -1788,7 +1736,6 @@ export function CanvasApp() {
       widgets.current?.add(widget);
     }
 
-    // AI/draft rect erases bypass strokeSegment — push them onto the wire explicitly.
     draft.setInkListener((op) => {
       if (sm.isRemote) return;
       sm.broadcast({ type: "SYNC_INK_ERASE", x: op.rect.x, y: op.rect.y, w: op.rect.w, h: op.rect.h });
@@ -1809,15 +1756,12 @@ export function CanvasApp() {
         if (!engine) return null;
         return serializeSnapshot(engine, widgets.current, objects.current);
       },
-      // Snapshot restore draws tiles/images directly — do NOT hold the remote lock across awaits
-      // or local strokes/AI/widgets broadcast during the restore window will be silently dropped.
       onInitState: (snapshot) => {
         if (!engine) return;
         void restoreSnapshot(engine, widgets.current, objects.current, snapshot);
       },
       onRemoteScene: (nextWidgets, nextObjects) => {
         if (!engine) return;
-        // Empty SCENE = clear board (snapshot fan-out sends widgets as individual ADDs after).
         engine.tiles.clear();
         widgets.current?.clear();
         objects.current?.clear();
@@ -1840,7 +1784,6 @@ export function CanvasApp() {
       },
       onRemoteStroke: (seg) => {
         if (!engine) return;
-        // SyncManager.runRemote already wraps SYNC_STROKE_SEGMENT to suppress echo.
         strokeSegment(engine, seg.a, seg.b, {
           erase: seg.erase,
           size: seg.size,
@@ -1898,7 +1841,6 @@ export function CanvasApp() {
       onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
         const currentItem = widgets.current?.get(id);
         if (!currentItem || !widgets.current) return;
-        // Apply absolute geometry from the peer — do not interpret as a local resize gesture.
         currentItem.x = x;
         currentItem.y = y;
         widgets.current.resize(
@@ -2019,19 +1961,15 @@ export function CanvasApp() {
     if (!engine) return;
     let cancelled = false;
     (async () => {
-      // Joiners receive the host SCENE+TILES snapshot — applying local autosave after that
-      // (or racing it) leaves peers on divergent boards.
       const session = getStoredP2PSession();
       if (session?.role === "joiner") return;
 
-      // 1. Hot Path: Instant load from local IndexedDB cache
       const localSaved = await loadAutosave();
       if (localSaved && !cancelled) {
         await restoreSnapshot(engine, widgets.current, objects.current, localSaved);
         history.current?.reset();
       }
 
-      // 2. Cold Path: Asynchronously check and sync with Neon Cloud DB only if authenticated
       if (isAuthenticated) {
         try {
           const cloudRes = await fetchCloudCanvas();
@@ -2043,7 +1981,6 @@ export function CanvasApp() {
             const localHash = computeSnapshotHash(localSaved);
 
             if (cloudHash === localHash) {
-              // Already completely in sync! Mark clean so tab switches don't trigger saves
               cloudSync.current?.setLastSyncedHash(cloudHash);
             } else if (cloudSavedAt > localSavedAt) {
               await restoreSnapshot(engine, widgets.current, objects.current, cloudRes.data);
@@ -2066,7 +2003,6 @@ export function CanvasApp() {
       cancelled = true;
     };
   }, [engine, isAuthenticated]);
-
 
   useEffect(() => {
     tools.current?.setMode(mode);
@@ -2206,7 +2142,6 @@ export function CanvasApp() {
         return;
       }
 
-      // Single undo entry pattern: snapshot before mutations
       history.current?.recordObjects();
       history.current?.recordWidgets();
 
@@ -2376,7 +2311,6 @@ export function CanvasApp() {
       (e.target as Element).setPointerCapture?.(e.pointerId);
     } catch {}
 
-    // Pixel AI worker: pointer on the character picks him up for dragging.
     const agentChar = agentCharacterRef.current;
     if (agentChar && e.button === 0 && agentChar.beginDrag(screenToWorld(e))) {
       e.preventDefault();
@@ -2445,7 +2379,6 @@ export function CanvasApp() {
       return;
     }
 
-    // Pixel AI worker drag: carry the character under the pointer.
     const agentChar = agentCharacterRef.current;
     if (agentChar?.isDragging()) {
       agentChar.dragTo(screenToWorld(e));
@@ -2480,7 +2413,6 @@ export function CanvasApp() {
       pinchRef.current = null;
     }
 
-    // Pixel AI worker: release a carried character.
     const agentChar = agentCharacterRef.current;
     if (agentChar?.isDragging()) {
       agentChar.endDrag();
@@ -2544,7 +2476,6 @@ export function CanvasApp() {
       const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
       try {
         const placed = await placeImageAt(engine, f, c);
-        // Paste-only ink op: empty erase rect, peers apply the bitmap at (x, y).
         syncManager.current?.broadcast({
           type: "SYNC_INK_MOVE",
           from: { x: placed.x, y: placed.y, w: 0, h: 0 },
@@ -2579,7 +2510,6 @@ export function CanvasApp() {
     engine.requestRender();
   };
 
-  // Refine overlay position follows the selection rect through camera changes.
   const [refineBtnPos, setRefineBtnPos] = useState<{ x: number; y: number } | null>(null);
   const lastRefinePosRef = useRef("");
   useEffect(() => {

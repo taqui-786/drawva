@@ -9,14 +9,6 @@ import { createHash } from "node:crypto";
 
 /* eslint-disable @typescript-eslint/no-unused-vars -- record-half params intentionally unused */
 
-/**
- * Map-backed credential provider for Drawva.
- *
- * API keys arrive per request (never persisted, never logged); the connection
- * profile references them by `DRAWVA_CONN_<hash>` and pi-ai resolves the
- * reference through `ctx.credentials` at request time. The record half is
- * intentionally empty: Drawva holds no OAuth grants or stored records.
- */
 const values = new Map<string, string>();
 
 export function credentialRefFor(connectionId: string): CredentialRef {
@@ -57,7 +49,6 @@ class DrawvaCredentialProvider extends CredentialProvider {
   }
 
   async readRecord(_key: CredentialKey): Promise<CredentialRecord | undefined> {
-    // Record half intentionally empty: Drawva holds no stored records.
     return undefined;
   }
 
@@ -82,7 +73,5 @@ class DrawvaCredentialProvider extends CredentialProvider {
 export const name = "drawva-credentials";
 
 export function apply(ctx: Context) {
-  // The Service base constructor self-registers under 'credentials';
-  // a manual ctx.provide would collide with it.
   new DrawvaCredentialProvider(ctx);
 }

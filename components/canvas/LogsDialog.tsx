@@ -38,7 +38,6 @@ export interface LogsDialogProps {
   onClearLogs?: () => void;
 }
 
-/** Open a base64 data URL reliably in a new browser tab via Blob URL */
 function openImageInNewTab(dataUrl: string) {
   if (!dataUrl) return;
   try {
@@ -120,7 +119,6 @@ function CodeCard({
 }
 
 export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsDialogProps) {
-  // Normalize logs list
   const allLogs = useMemo(() => {
     if (Array.isArray(logs) && logs.length > 0) return logs;
     if (log) return [log];
@@ -154,7 +152,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[66rem] max-w-[calc(100%-2rem)] h-[88vh] p-0 flex flex-col overflow-hidden">
-        {/* Header */}
         <DialogHeader className="px-6 pt-5 pb-3 border-b shrink-0">
           <div className="flex items-center justify-between pr-8">
             <div className="flex items-center gap-2.5">
@@ -195,7 +192,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
             )}
           </div>
 
-          {/* Quick Turn Selector if multiple turns exist */}
           {allLogs.length > 1 && (
             <div className="flex items-center gap-1.5 pt-2.5 overflow-x-auto no-scrollbar">
               <span className="text-[11px] font-medium text-muted-foreground shrink-0 mr-1">
@@ -238,7 +234,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
             </div>
           )}
 
-          {/* Quick Metadata Bar for Selected Turn */}
           {currentLog && (
             <div className="flex flex-wrap items-center gap-2 pt-2.5 text-xs">
               <Badge
@@ -282,7 +277,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
           )}
         </DialogHeader>
 
-        {/* Body Content */}
         {!currentLog ? (
           <div className="flex-1 flex flex-col items-center justify-center p-8 text-center gap-3">
             <div className="size-12 rounded-full bg-muted flex items-center justify-center text-muted-foreground">
@@ -302,7 +296,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
             onValueChange={(v) => setActiveTab(v as typeof activeTab)}
             className="flex-1 flex flex-col min-h-0"
           >
-            {/* Tabs List */}
             <div className="px-6 border-b bg-muted/20 shrink-0">
               <TabsList className="bg-transparent p-0 h-10 gap-2">
                 <TabsTrigger
@@ -360,7 +353,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
               </TabsList>
             </div>
 
-            {/* Tab: Steps & Tools Timeline */}
             <TabsContent value="steps" className="flex-1 overflow-y-auto p-6 space-y-4">
               {currentLog.steps && currentLog.steps.length > 0 ? (
                 <div className="flex flex-col gap-3">
@@ -373,7 +365,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
                           isError ? "border-destructive/40 bg-destructive/5" : "border-border bg-muted/20"
                         }`}
                       >
-                        {/* Step Header */}
                         <div className="flex items-center justify-between px-4 py-2.5 border-b bg-muted/40 text-xs">
                           <div className="flex items-center gap-2.5">
                             <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0 h-4">
@@ -407,7 +398,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
                           </div>
                         </div>
 
-                        {/* Step Details */}
                         <div className="p-4 space-y-3 text-xs">
                           {step.text && (
                             <div>
@@ -453,9 +443,7 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
               )}
             </TabsContent>
 
-            {/* Tab: Overview & Snapshot */}
             <TabsContent value="overview" className="flex-1 overflow-y-auto p-6 space-y-5">
-              {/* Snapshot Image Box */}
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -503,7 +491,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
                 )}
               </div>
 
-              {/* Response Summary Cards */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <div className="rounded-lg border p-3 bg-muted/20">
                   <span className="text-[11px] text-muted-foreground font-medium uppercase tracking-wider">Status</span>
@@ -541,7 +528,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
               )}
             </TabsContent>
 
-            {/* Tab: Canvas Commands Inspector */}
             <TabsContent value="commands" className="flex-1 overflow-y-auto p-6 space-y-4">
               {currentLog.response?.commands && currentLog.response.commands.length > 0 ? (
                 <div className="flex flex-col gap-3">
@@ -590,7 +576,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
               )}
             </TabsContent>
 
-            {/* Tab: User Prompt & Scene Context */}
             <TabsContent value="prompts" className="flex-1 overflow-y-auto p-6 space-y-4">
               <CodeCard
                 title="Final User Message Text Sent to LLM"
@@ -617,7 +602,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
               )}
             </TabsContent>
 
-            {/* Tab: System Rules */}
             <TabsContent value="system" className="flex-1 overflow-y-auto p-6 space-y-4">
               <CodeCard
                 title="Complete System Prompt & Rules"
@@ -627,7 +611,6 @@ export function LogsDialog({ open, onOpenChange, logs, log, onClearLogs }: LogsD
               />
             </TabsContent>
 
-            {/* Tab: Full Raw JSON */}
             <TabsContent value="raw" className="flex-1 overflow-y-auto p-6 space-y-4">
               <CodeCard
                 title="Full Turn Log JSON"

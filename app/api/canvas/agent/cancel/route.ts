@@ -6,7 +6,6 @@ import { requireSession } from "@/lib/api-guard";
 export const runtime = "nodejs";
 export const maxDuration = 30;
 
-/** Stop the running turn (`cancel`) or drop the conversation (`dispose`). */
 export async function POST(req: Request) {
   let raw: string;
   try {

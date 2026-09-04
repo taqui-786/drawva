@@ -20,7 +20,6 @@ export class DraftManager {
     this.renderers.set(tool, fn);
   }
 
-  /** Fires for AI/draft rect erases that do not go through the stroke segment hook. */
   setInkListener(fn: DraftInkListener | null): void {
     this.inkListener = fn;
   }
@@ -49,8 +48,6 @@ export class DraftManager {
         if (ok) applied++;
       }
     } finally {
-      // Always clear pending: a throwing renderer must never wedge
-      // hasPending → isCanvasBusy → autosave. The caller rolls the board back.
       this.pending = [];
     }
     return applied;

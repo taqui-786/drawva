@@ -245,7 +245,6 @@ export async function saveProviderCredentialsToDb(
   credentials: SavedProviderCredentials
 ): Promise<void> {
   if (typeof window === "undefined") return;
-  // Mirror to localStorage
   try {
     const raw = window.localStorage.getItem(PROVIDER_CREDENTIALS_KEY);
     const all = raw ? (JSON.parse(raw) as Record<string, SavedProviderCredentials>) : {};
@@ -308,7 +307,6 @@ export async function loadSavedProviderCredentialsFromDb(
     } catch {}
   }
 
-  // Fallback to localStorage
   try {
     const raw = window.localStorage.getItem(PROVIDER_CREDENTIALS_KEY);
     if (!raw) return null;
@@ -477,7 +475,6 @@ export async function clearAgentLogs(): Promise<void> {
 
 const TRACE_MAX_STRING = 4000;
 
-/** Redact a log entry for durable storage: strip data URLs, clip long strings. */
 export function redactLogEntry(entry: AiLogEntry): AiLogEntry {
   return {
     ...entry,

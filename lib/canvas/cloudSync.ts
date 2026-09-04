@@ -11,7 +11,6 @@ export interface CloudCanvasResult {
   updatedAt: number;
 }
 
-/** Fetch cloud canvas snapshot for the authenticated user */
 export async function fetchCloudCanvas(signal?: AbortSignal): Promise<CloudCanvasResult | null> {
   try {
     const res = await fetch("/api/canvas/cloud", {
@@ -31,7 +30,6 @@ export async function fetchCloudCanvas(signal?: AbortSignal): Promise<CloudCanva
   }
 }
 
-/** Save cloud canvas snapshot for the authenticated user */
 export async function saveCloudCanvas(
   snapshot: ProjectSnapshot,
   title?: string,
@@ -149,10 +147,8 @@ export class CloudSyncEngine {
   }
 
   public scheduleCloudSync(snapshot: ProjectSnapshot, delayMs = 4000) {
-    // Only signed in users sync to cloud
     if (!this.enabled || !this.isAuthenticated) return;
 
-    // Check if snapshot is identical to what was already synced
     const hash = computeSnapshotHash(snapshot);
     if (this.lastSyncedHash && hash === this.lastSyncedHash) {
       this.pendingSnapshot = null;
@@ -168,7 +164,6 @@ export class CloudSyncEngine {
 
     this.debounceTimer = setTimeout(() => {
       this.debounceTimer = null;
-      // If user is currently drawing or AI is generating, defer until canvas is idle
       if (this.isBusyCheck?.()) {
         this.scheduleCloudSync(snapshot, 3000);
         return;
@@ -182,7 +177,6 @@ export class CloudSyncEngine {
       return false;
     }
 
-    // Defer flush if user is actively drawing or AI is generating
     if (!ignoreBusy && this.isBusyCheck?.()) {
       if (!this.debounceTimer) {
         this.debounceTimer = setTimeout(() => {
@@ -196,7 +190,6 @@ export class CloudSyncEngine {
     const snapshotToSync = this.pendingSnapshot;
     const currentHash = computeSnapshotHash(snapshotToSync);
 
-    // If identical to last synced hash, skip network push
     if (this.lastSyncedHash && currentHash === this.lastSyncedHash) {
       this.pendingSnapshot = null;
       return true;

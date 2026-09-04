@@ -55,7 +55,6 @@ export class Camera {
 
   handleWheel(e: { clientX: number; clientY: number; deltaX: number; deltaY: number; ctrlKey: boolean; metaKey: boolean; deltaMode?: number }): void {
     if (e.ctrlKey || e.metaKey) {
-      // Touchpad pinch-to-zoom (continuous smooth exponential scale centered at cursor)
       const zoomFactor = Math.pow(0.997, e.deltaY);
       const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, this.state.scale * zoomFactor));
       const px = e.clientX;
@@ -64,11 +63,9 @@ export class Camera {
       this.state.panY = py - ((py - this.state.panY) * next) / this.state.scale;
       this.state.scale = next;
     } else if (Math.abs(e.deltaX) > 0 || (e.deltaMode === 0 && Math.abs(e.deltaY) < 60)) {
-      // Touchpad 2-finger 2D panning (smooth pixel scroll)
       this.state.panX -= e.deltaX;
       this.state.panY -= e.deltaY;
     } else {
-      // Discrete mouse wheel notch zoom
       this.zoomAt(e.clientX, e.clientY, e.deltaY);
     }
   }

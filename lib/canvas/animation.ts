@@ -422,7 +422,6 @@ function normalizeMotion(
   const raw = source as Record<string, unknown>;
   const rec: Record<string, unknown> = { ...raw };
 
-  // Unwrap motion-type nested wrappers (e.g. { target: "runner", translate: { path: "..." } })
   for (const t of ["translate", "orbit", "spin", "pulse", "fade", "keyframes"]) {
     if (t in raw && raw[t] && typeof raw[t] === "object") {
       if (!rec.type) rec.type = t;
@@ -441,7 +440,6 @@ function normalizeMotion(
   if (type === "scale" || type === "grow" || type === "shrink") type = "pulse";
   if (type === "opacity" || type === "blink") type = "fade";
 
-  // Infer type if omitted based on present fields
   if (!type) {
     if (rec.path || rec.d || rec.along || rec.to || (Array.isArray(rec.points) && rec.points.length >= 2)) type = "translate";
     else if (rec.rx || rec.ry || rec.center) type = "orbit";
@@ -453,7 +451,6 @@ function normalizeMotion(
   const motionType = type as AnimationMotion["type"];
   let target = String(rec.target || rec.id || rec.targetId || "").trim();
 
-  // If target does not match directly, try case-insensitive matching
   if (!ids.has(target)) {
     const lower = target.toLowerCase();
     for (const validId of ids) {
@@ -464,12 +461,10 @@ function normalizeMotion(
     }
   }
 
-  // If target still not found and only one object exists, default to that object
   if (!ids.has(target) && ids.size === 1) {
     target = Array.from(ids)[0];
   }
 
-  // If target not found, look for common runner/mover/dot names in ids
   if (!ids.has(target)) {
     for (const validId of ids) {
       if (/runner|dot|ball|particle|mover|obj|circle/i.test(validId)) {
@@ -645,7 +640,6 @@ export function normalizeAnimationScene(
   const rawMotions = Array.isArray(rec.motions) ? rec.motions.slice(0, MAX_ANIMATION_MOTIONS) : [];
   for (const m of rawMotions) {
     const motion = normalizeMotion(m, ids, durationMs, width, height);
-    // A single malformed motion must not void the whole scene — drop it.
     if (motion) motions.push(motion);
   }
 
@@ -840,7 +834,6 @@ function drawPath(context: CanvasRenderingContext2D, object: PathAnimationObject
       }
       return;
     } catch {
-      // Fall through to sampled polylines.
     }
   }
   const polylines = object.subpaths && object.subpaths.length ? object.subpaths : [object.points];

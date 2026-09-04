@@ -89,11 +89,8 @@ import { requestFullscreenLandscape } from "@/lib/canvas/orientation";
 
 export interface AiRunState {
   phase: "idle" | "running" | "done" | "error";
-  /** Label of the model currently generating. */
   activeProvider: string | null;
-  /** Label of the model that produced the final result. */
   doneProvider: string | null;
-  /** Latency warning level: "normal" | "slow" | "critical" */
   durationStage?: "normal" | "slow" | "critical";
 }
 
@@ -302,13 +299,11 @@ export function CanvasHeader({
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-1.5 sm:px-3 w-full max-w-full overflow-hidden">
-      {/* ── Left: Brand & Combined Menu ─────────────────────────── */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         <span className="brand-wordmark pr-1 text-base sm:text-lg font-bold leading-none select-none">
           Drawva
         </span>
 
-        {/* Compact Main Menu Bar */}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -414,7 +409,6 @@ export function CanvasHeader({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Live P2P Badge */}
         {syncStatus === "connected" ? (
           <Tooltip>
             <TooltipTrigger
@@ -451,7 +445,6 @@ export function CanvasHeader({
           ""
         )}
 
-        {/* Cloud Sync Status Indicator */}
         {session?.user && (
           <Tooltip>
             <TooltipTrigger
@@ -508,14 +501,11 @@ export function CanvasHeader({
 
       <Separator orientation="vertical" className="mx-1 h-5 hidden sm:block self-center" />
 
-      {/* ── Center: Handy Drawing Tools ────────────────────────────── */}
       <div className="flex items-center gap-0.5 sm:gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5 px-0.5">
-        {/* Handy Tools (Select, Hand, Pen, Highlighter, Eraser) */}
         {PRIMARY_TOOLS.slice(0, 5).map((t) => (
           <ToolButton key={t.mode} mode={mode} tool={t} onMode={onMode} disabled={toolsLocked} />
         ))}
 
-        {/* Compact Shapes Selector */}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -549,10 +539,8 @@ export function CanvasHeader({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {/* Text Tool */}
         <ToolButton mode={mode} tool={PRIMARY_TOOLS[5]} onMode={onMode} disabled={toolsLocked} />
 
-        {/* Style Popover: Color + Stroke Width */}
         <Popover open={styleOpen} onOpenChange={setStyleOpen}>
           <PopoverTrigger
             render={
@@ -613,7 +601,6 @@ export function CanvasHeader({
           </PopoverContent>
         </Popover>
 
-        {/* Undo / Redo / Clear */}
         <div className="hidden md:flex items-center gap-0.5">
           <Separator orientation="vertical" className="mx-1 h-5 self-center" />
           <Tooltip>
@@ -693,7 +680,6 @@ export function CanvasHeader({
           </DropdownMenu>
         </div>
 
-        {/* Mobile Extra Tools Dropdown */}
         <div className="md:hidden">
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -740,7 +726,6 @@ export function CanvasHeader({
 
       <Separator orientation="vertical" className="mx-1 h-5 hidden lg:block self-center" />
 
-      {/* ── Right: AI Assistant & Settings ────────────────────────── */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">
         <AnimatePresence mode="wait">
           {agentRunning || aiStatus === "thinking" ? (
@@ -832,7 +817,6 @@ export function CanvasHeader({
                 </motion.div>
               )}
 
-              {/* Model Select Trigger Pill */}
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -852,7 +836,6 @@ export function CanvasHeader({
                 <TooltipContent>AI Model: {activeModel || "None selected"} (Click to browse & change)</TooltipContent>
               </Tooltip>
 
-              {/* Reasoning / Thinking Effort Controller - Only visible for reasoning models */}
               {supportsReasoning && (
                 <div className="hidden sm:block shrink-0">
                   <Select

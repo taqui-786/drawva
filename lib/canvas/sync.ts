@@ -15,15 +15,9 @@ export interface RemoteCursor {
   timestamp: number;
 }
 
-/**
- * Soft ceiling for a single PeerJS JSON payload.
- * Many browsers still negotiate ~16KiB RTCDataChannel messages; stay under that
- * after JSON framing or AI widget HTML never arrives while tiny eraser packets do.
- */
 export const MAX_PACKET_CHARS = 12_000;
 const HTML_CHUNK_CHARS = 8_000;
 const DATA_URL_CHUNK_CHARS = 8_000;
-/** One tile per packet keeps PNG dataURLs under PeerJS payload limits. */
 const TILE_CHUNK = 1;
 const CURSOR_MIN_MS = 50;
 const PEER_PREFIX = "drawva-room-";
@@ -189,10 +183,6 @@ function stripObject(object: ObjectItem): ObjectItem {
   return rest as ObjectItem;
 }
 
-/**
- * Diagram iframes ship a huge pre-rendered HTML document (inline SVG / CDN loaders).
- * Sync the compact source instead and re-render with diagramDocument on the peer.
- */
 export function compactWidgetForSync(widget: WidgetItem): WidgetItem {
   const base = stripWidget(widget);
   const hasSource = typeof base.copyText === "string" && base.copyText.length > 0;
@@ -246,7 +236,6 @@ export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
       objects: packet.objects.map(stripObject),
     });
   }
-  // Lightweight packets are already JSON-safe; avoid an extra clone on the hot stroke path.
   if (
     packet.type === "SYNC_STROKE_SEGMENT" ||
     packet.type === "SYNC_INK_ERASE" ||
@@ -266,12 +255,10 @@ export function sanitizePacket(packet: SyncPacket): SyncPacket | null {
   return cloneJson(packet);
 }
 
-/** Expand oversized packets into PeerJS-safe pieces (widgets / ink moves / scenes). */
 export function expandPacket(packet: SyncPacket): SyncPacket[] {
   const safe = sanitizePacket(packet);
   if (!safe) return [];
 
-  // Never ship a mega SCENE blob — clear, then fan out each widget/object.
   if (safe.type === "SYNC_SCENE") {
     const out: SyncPacket[] = [{ type: "SYNC_SCENE", widgets: [], objects: [] }];
     for (const widget of safe.widgets || []) {
@@ -286,7 +273,6 @@ export function expandPacket(packet: SyncPacket): SyncPacket[] {
   if (safe.type === "SYNC_WIDGET_ADD") {
     const widget = compactWidgetForSync(safe.widget);
     const asAdd: SyncPacket = { type: "SYNC_WIDGET_ADD", widget };
-    // Compact diagrams (empty html + source) usually fit; applets still chunk.
     if (packetChars(asAdd) <= MAX_PACKET_CHARS) return [asAdd];
     const { html = "", ...meta } = widget;
     const chunks = chunkString(html, HTML_CHUNK_CHARS);
@@ -346,7 +332,6 @@ export function expandPacket(packet: SyncPacket): SyncPacket[] {
     return out;
   }
 
-  // Full snapshots must be sent via broadcastSnapshot / sendSnapshot (SCENE + TILES).
   if (safe.type === "SYNC_INIT_STATE") {
     return [];
   }
@@ -396,7 +381,6 @@ export class SyncManager {
   private pending = new Map<string, SyncPacket[]>();
   private status: SyncStatus = "idle";
   private roomCode: string | null = null;
-  /** Depth of *synchronous* remote apply. Must never stay elevated across awaits. */
   private remoteDepth = 0;
   private handlers: SyncHandlers = {};
   private remoteCursors: Map<string, RemoteCursor> = new Map();
@@ -404,11 +388,8 @@ export class SyncManager {
   private localColor = COLORS[Math.floor(Math.random() * COLORS.length)];
   private errorMessage: string | undefined = undefined;
   private lastCursorAt = 0;
-  /** Lobby (permission) mode: only dials carrying an authorized requestId are accepted. */
   private lobbyMode = false;
-  /** requestId → requester display name, filled when the user accepts a pairing request. */
   private allowedRequests = new Map<string, string>();
-  /** Display name of the currently connected lobby peer (last one in). */
   private connectedPeerName: string | null = null;
   private pendingPeerName: string | null = null;
   private widgetParts = new Map<string, WidgetPartBuffer>();
@@ -456,7 +437,6 @@ export class SyncManager {
     this.remoteDepth = Math.max(0, this.remoteDepth - 1);
   }
 
-  /** Run a synchronous remote apply that may re-enter local stroke/ink hooks. */
   runRemote(fn: () => void): void {
     this.beginRemote();
     try {
@@ -639,7 +619,6 @@ export class SyncManager {
     }
   }
 
-  /** Fan-out a full board snapshot as SCENE + chunked TILES (never one giant INIT packet). */
   broadcastSnapshot(snapshot: ProjectSnapshot): void {
     if (this.isRemote || this.connections.size === 0) return;
     this.broadcast({
@@ -679,8 +658,6 @@ export class SyncManager {
   }
 
   private enqueueSend(conn: PeerConnection, packet: SyncPacket): void {
-    // Pace multi-part / heavy payloads so the RTCDataChannel buffer does not
-    // silently drop AI widget chunks. Lightweight strokes stay immediate.
     const heavy =
       packet.type === "SYNC_WIDGET_ADD" ||
       packet.type === "SYNC_WIDGET_PART" ||
@@ -837,7 +814,6 @@ export class SyncManager {
     const safePacket = sanitizePacket(packet);
     if (!safePacket) return;
 
-    // Relay first so mesh peers keep moving even if local apply is heavy.
     for (const [id, conn] of this.connections.entries()) {
       if (id !== senderId) this.sendTo(conn, safePacket);
     }
@@ -846,11 +822,9 @@ export class SyncManager {
   }
 
   private dispatchPacket(senderId: string, safePacket: SyncPacket): void {
-    // Only the stroke path re-enters local sync hooks; keep the remote guard strictly sync.
     const apply = () => {
       switch (safePacket.type) {
         case "SYNC_INIT_STATE":
-          // Legacy single-packet snapshots (older peers / tests). Prefer SCENE+TILES.
           this.handlers.onInitState?.(safePacket.snapshot);
           break;
         case "SYNC_SCENE":
@@ -1026,24 +1000,15 @@ export class SyncManager {
     this.handlers.onStatusChange?.(this.status, this.roomCode, this.connections.size, this.errorMessage, this.connectedPeerName);
   }
 
-  /** Display name shown on remote cursors. Defaults to a random Peer-###. */
   setLocalName(name: string): void {
     const clean = name.trim().slice(0, 48);
     if (clean) this.localName = clean;
   }
 
-  /**
-   * Authorize an accepted pairing request: the requester's dial (which carries
-   * this requestId as PeerJS connection metadata) will be let in.
-   */
   authorizeRequest(requestId: string, peerName: string): void {
     this.allowedRequests.set(requestId, peerName);
   }
 
-  /**
-   * Lobby "open connection": register my stable PeerJS id and listen for
-   * authorized dials. Resolves once the PeerJS cloud acknowledges us.
-   */
   async goOnline(fullPeerJsId: string): Promise<void> {
     this.disconnect(false);
     this.lobbyMode = true;
@@ -1100,7 +1065,6 @@ export class SyncManager {
         this.allowedRequests.delete(requestId);
         this.setupConnection(typed, true);
       } else {
-        // Lobby mode never accepts unsolicited dials.
         try {
           typed.close();
         } catch {}
@@ -1108,10 +1072,6 @@ export class SyncManager {
     });
   }
 
-  /**
-   * Dial a specific online user after they accepted the pairing request.
-   * The requestId travels as connection metadata so the other side lets us in.
-   */
   async connectToPeer(
     targetPeerJsId: string,
     opts?: { requestId?: string; peerName?: string }
