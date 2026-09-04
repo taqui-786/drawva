@@ -55,6 +55,10 @@ import {
   getWebSearchEnabled,
   setWebSearchEnabled,
   PROVIDER_INFOS,
+  deriveCustomProviderName,
+  customStorageKey,
+  isCustomProviderKey,
+  getCustomNameFromKey,
   type ProviderType,
   type ProviderConfig,
   type CustomModel,
@@ -62,6 +66,7 @@ import {
 import {
   saveProviderCredentialsToDb,
   loadSavedProviderCredentialsFromDb,
+  loadAllSavedProviderCredentialsFromDb,
   getAutosaveEnabled,
   setAutosaveEnabled,
 } from "@/lib/canvas/persistence";
@@ -185,7 +190,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             <DialogTitle>AI Settings</DialogTitle>
             {currentConfig?.apiKey ? (
               <Badge variant="secondary" className="font-mono text-xs capitalize">
-                {currentConfig.type}: {activeModelName || "connected"}
+                {currentConfig.type === "custom" && currentConfig.customName
+                  ? `${currentConfig.customName} (custom)`
+                  : currentConfig.type}
+                : {activeModelName || "connected"}
               </Badge>
             ) : (
               <Badge variant="outline" className="text-xs">
@@ -224,6 +232,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 setCurrentConfig(cfg);
                 setActiveModelName(model);
               }}
+              onClose={() => onOpenChange(false)}
             />
           </TabsContent>
 
@@ -248,36 +257,108 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 
 function ProviderTabContent({
   onConfigSaved,
+  onClose,
 }: {
   onConfigSaved: (cfg: ProviderConfig, activeModel: string | null) => void;
+  onClose: () => void;
 }) {
   const initial = getProviderConfig();
-  const [providerType, setProviderType] = useState<ProviderType>(initial?.type || "openai");
+  const initialKey =
+    initial?.type === "custom" && initial.customName
+      ? customStorageKey(initial.customName)
+      : initial?.type || "openai";
+  const [selectedKey, setSelectedKey] = useState<string>(initialKey);
+  const providerType: ProviderType = isCustomProviderKey(selectedKey)
+    ? "custom"
+    : (selectedKey as ProviderType);
   const [apiKey, setApiKey] = useState(initial?.apiKey || "");
-  const [baseUrl, setBaseUrl] = useState(initial?.baseUrl || PROVIDER_INFOS[initial?.type || "openai"].defaultBaseUrl || "");
+  const [baseUrl, setBaseUrl] = useState(
+    initial?.baseUrl || PROVIDER_INFOS[initial?.type || "openai"].defaultBaseUrl || ""
+  );
   const [showApiKey, setShowApiKey] = useState(false);
   const [customModels] = useState<CustomModel[]>(initial?.customModels || []);
+  const [customEntries, setCustomEntries] = useState<{ name: string; baseUrl: string; apiKey: string }[]>([]);
 
   const [saving, setSaving] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verifiedCount, setVerifiedCount] = useState<number | null>(() => getCachedModels().length || null);
   const meta = PROVIDER_METADATA[providerType];
+  const isCustom = providerType === "custom";
+  const activeCustomName = isCustomProviderKey(selectedKey) ? getCustomNameFromKey(selectedKey) : null;
 
-  const handleSelectProvider = async (type: ProviderType) => {
-    setProviderType(type);
+  const refreshCustomEntries = async () => {
+    try {
+      const all = await loadAllSavedProviderCredentialsFromDb();
+      const entries = Object.entries(all)
+        .filter(([k]) => isCustomProviderKey(k))
+        .map(([k, v]) => ({
+          name: getCustomNameFromKey(k),
+          baseUrl: v.baseUrl || "",
+          apiKey: v.apiKey || "",
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setCustomEntries(entries);
+      return entries;
+    } catch {
+      return [];
+    }
+  };
+
+  useEffect(() => {
+    void (async () => {
+      const entries = await refreshCustomEntries();
+      // If active config is custom with a baseUrl matching a saved entry, select it.
+      if (initial?.type === "custom" && initial.baseUrl && !initial.customName) {
+        const match = entries.find(
+          (e) => e.baseUrl.trim().toLowerCase() === initial.baseUrl?.trim().toLowerCase()
+        );
+        if (match) {
+          setSelectedKey(customStorageKey(match.name));
+          setApiKey(initial.apiKey || match.apiKey || "");
+          setBaseUrl(match.baseUrl);
+        }
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleSelectKey = async (key: string) => {
+    setSelectedKey(key);
+    if (isCustomProviderKey(key)) {
+      const name = getCustomNameFromKey(key);
+      const entry = customEntries.find((e) => e.name === name);
+      if (entry) {
+        setApiKey(entry.apiKey || "");
+        setBaseUrl(entry.baseUrl || "");
+        return;
+      }
+      try {
+        const saved = await loadSavedProviderCredentialsFromDb(key);
+        if (saved) {
+          setApiKey(saved.apiKey || "");
+          setBaseUrl(saved.baseUrl || "");
+          return;
+        }
+      } catch {}
+      setApiKey("");
+      setBaseUrl("");
+      return;
+    }
+    const type = key as ProviderType;
     const info = PROVIDER_INFOS[type];
     try {
       const saved = await loadSavedProviderCredentialsFromDb(type);
       if (saved) {
         setApiKey(saved.apiKey || "");
-        setBaseUrl(saved.baseUrl || info.defaultBaseUrl || "");
+        // Built-ins use their fixed endpoint; ignore any stored custom URL.
+        setBaseUrl(info.defaultBaseUrl || "");
         return;
       }
     } catch {}
 
     if (initial?.type === type) {
       setApiKey(initial.apiKey || "");
-      setBaseUrl(initial.baseUrl || info.defaultBaseUrl || "");
+      setBaseUrl(type === "custom" ? initial.baseUrl || "" : info.defaultBaseUrl || "");
     } else {
       setApiKey("");
       setBaseUrl(info.defaultBaseUrl || "");
@@ -288,28 +369,75 @@ function ProviderTabContent({
     let active = true;
     void (async () => {
       try {
+        if (isCustomProviderKey(selectedKey)) return;
         const saved = await loadSavedProviderCredentialsFromDb(providerType);
-        if (active && saved) {
-          if (saved.apiKey) setApiKey((prev) => prev || saved.apiKey);
-          if (saved.baseUrl) setBaseUrl((prev) => prev || saved.baseUrl || "");
+        if (active && saved?.apiKey) {
+          setApiKey((prev) => prev || saved.apiKey);
         }
       } catch {}
     })();
     return () => {
       active = false;
     };
-  }, [providerType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedKey]);
+
+  /** Persist a custom endpoint to IndexedDB (+localStorage mirror) and return its name. */
+  const persistCustomEndpoint = async (url: string, key: string) => {
+    const baseName = deriveCustomProviderName(url);
+    // Ensure uniqueness when the same name points at a different URL.
+    const existing = await loadAllSavedProviderCredentialsFromDb();
+    let name = baseName;
+    let suffix = 2;
+    while (
+      existing[customStorageKey(name)] &&
+      existing[customStorageKey(name)].baseUrl?.trim().toLowerCase() !== url.trim().toLowerCase() &&
+      name !== activeCustomName
+    ) {
+      name = `${baseName}-${suffix++}`;
+    }
+    const creds = { apiKey: key, baseUrl: url };
+    await saveProviderCredentialsToDb("custom", creds);
+    await saveProviderCredentialsToDb(customStorageKey(name), creds);
+    const entries = await refreshCustomEntries();
+    if (!entries.some((e) => e.name === name)) {
+      setCustomEntries((prev) => [...prev, { name, baseUrl: url, apiKey: key }].sort((a, b) => a.name.localeCompare(b.name)));
+    }
+    setSelectedKey(customStorageKey(name));
+    return name;
+  };
 
   const handleSaveCredentials = async () => {
     if (!apiKey.trim() && providerType !== "ollama" && providerType !== "lmstudio") {
       toast.error("Please enter an API key to save.");
       return;
     }
+    if (isCustom && !baseUrl.trim() && customModels.length === 0) {
+      toast.error("Custom provider requires a Base URL.");
+      return;
+    }
     setSaving(true);
     try {
+      if (isCustom) {
+        const url = baseUrl.trim();
+        const name = await persistCustomEndpoint(url, apiKey.trim());
+        const config: ProviderConfig = {
+          type: "custom",
+          apiKey: apiKey.trim(),
+          baseUrl: url,
+          customModels,
+          customName: name,
+        };
+        setProviderConfig(config);
+        onConfigSaved(config, getActiveModel());
+        toast.success("Custom provider saved", {
+          description: `${name} (custom) added to the provider list.`,
+        });
+        return;
+      }
       const creds = {
         apiKey: apiKey.trim(),
-        baseUrl: baseUrl.trim() || PROVIDER_INFOS[providerType].defaultBaseUrl,
+        baseUrl: PROVIDER_INFOS[providerType].defaultBaseUrl,
       };
       await saveProviderCredentialsToDb(providerType, creds);
 
@@ -317,7 +445,6 @@ function ProviderTabContent({
         type: providerType,
         apiKey: creds.apiKey,
         baseUrl: creds.baseUrl,
-        customModels: providerType === "custom" ? customModels : undefined,
       };
 
       setProviderConfig(config);
@@ -337,7 +464,7 @@ function ProviderTabContent({
       toast.error("Please enter an API key.");
       return;
     }
-    if (providerType === "custom" && !baseUrl.trim() && customModels.length === 0) {
+    if (isCustom && !baseUrl.trim() && customModels.length === 0) {
       toast.error("Custom provider requires a Base URL or at least one model ID.");
       return;
     }
@@ -350,7 +477,7 @@ function ProviderTabContent({
         body: JSON.stringify({
           providerType,
           apiKey: apiKey.trim(),
-          baseUrl: baseUrl.trim() || undefined,
+          baseUrl: isCustom ? baseUrl.trim() || undefined : undefined,
           customModels,
         }),
       });
@@ -367,17 +494,24 @@ function ProviderTabContent({
         return;
       }
 
+      let customName: string | undefined;
+      if (isCustom) {
+        const url = baseUrl.trim();
+        customName = await persistCustomEndpoint(url, apiKey.trim());
+      } else {
+        await saveProviderCredentialsToDb(providerType, {
+          apiKey: apiKey.trim(),
+          baseUrl: PROVIDER_INFOS[providerType].defaultBaseUrl,
+        });
+      }
+
       const config: ProviderConfig = {
         type: providerType,
         apiKey: apiKey.trim(),
-        baseUrl: baseUrl.trim() || undefined,
-        customModels: providerType === "custom" ? customModels : undefined,
+        baseUrl: isCustom ? baseUrl.trim() : PROVIDER_INFOS[providerType].defaultBaseUrl,
+        customModels: isCustom ? customModels : undefined,
+        ...(customName ? { customName } : {}),
       };
-
-      await saveProviderCredentialsToDb(providerType, {
-        apiKey: apiKey.trim(),
-        baseUrl: baseUrl.trim() || PROVIDER_INFOS[providerType].defaultBaseUrl,
-      });
 
       setProviderConfig(config);
       setCachedModels(data.models);
@@ -397,6 +531,7 @@ function ProviderTabContent({
       toast.success("Connected", {
         description: `Found ${data.models.length} vision models.`,
       });
+      onClose();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Connection failed.");
     } finally {
@@ -404,8 +539,7 @@ function ProviderTabContent({
     }
   };
 
-  const defaultUrl = PROVIDER_INFOS[providerType].defaultBaseUrl;
-  const isCustomUrl = Boolean(defaultUrl) && baseUrl.trim() !== defaultUrl;
+  const cardTitle = isCustom && activeCustomName ? `${activeCustomName} (custom)` : PROVIDER_INFOS[providerType].name;
 
   return (
     <div className="flex flex-col gap-4">
@@ -413,9 +547,9 @@ function ProviderTabContent({
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="provider-select" className="text-xs font-medium">Provider</Label>
         <Select
-          value={providerType}
+          value={selectedKey}
           onValueChange={(val) => {
-            if (val) void handleSelectProvider(val as ProviderType);
+            if (val) void handleSelectKey(val);
           }}
         >
           <SelectTrigger id="provider-select" className="w-full">
@@ -436,6 +570,14 @@ function ProviderTabContent({
                 </SelectItem>
               );
             })}
+            {customEntries.map((entry) => (
+              <SelectItem key={customStorageKey(entry.name)} value={customStorageKey(entry.name)}>
+                <span className="font-medium text-sm">{entry.name} (custom)</span>
+                <span className="text-xs text-muted-foreground ml-2 hidden sm:inline truncate max-w-[160px]">
+                  {entry.baseUrl}
+                </span>
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -445,7 +587,7 @@ function ProviderTabContent({
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle>{PROVIDER_INFOS[providerType].name} Credentials</CardTitle>
+              <CardTitle>{cardTitle} Credentials</CardTitle>
               <CardDescription>
                 Enter your API credentials to connect.
               </CardDescription>
@@ -489,31 +631,25 @@ function ProviderTabContent({
             </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center justify-between">
-              <Label htmlFor="base-url">Base URL</Label>
-              {isCustomUrl && (
-                <Button
-                  type="button"
-                  variant="link"
-                  size="sm"
-                  className="h-auto p-0 text-xs text-muted-foreground"
-                  onClick={() => setBaseUrl(defaultUrl || "")}
-                >
-                  Reset to default
-                </Button>
-              )}
+          {isCustom && (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor="base-url">Base URL</Label>
+              </div>
+              <Input
+                id="base-url"
+                value={baseUrl}
+                onChange={(e) => setBaseUrl(e.target.value)}
+                placeholder="https://router.bynara.id/v1"
+                autoComplete="off"
+                spellCheck={false}
+                className="font-mono text-xs"
+              />
+              <span className="text-[11px] text-muted-foreground">
+                Saving names this endpoint from its URL (e.g. router) and lists it as “name (custom)”.
+              </span>
             </div>
-            <Input
-              id="base-url"
-              value={baseUrl}
-              onChange={(e) => setBaseUrl(e.target.value)}
-              placeholder={defaultUrl || "https://api.openai.com/v1"}
-              autoComplete="off"
-              spellCheck={false}
-              className="font-mono text-xs"
-            />
-          </div>
+          )}
 
           <div className="flex items-center justify-between pt-2">
             <span className="text-xs text-muted-foreground">
@@ -590,7 +726,9 @@ function ModelsTabContent({
             </div>
             {config?.type && (
               <Badge variant="secondary" className="font-mono text-xs capitalize">
-                {PROVIDER_INFOS[config.type]?.name || config.type}
+                {config.type === "custom" && config.customName
+                  ? `${config.customName} (custom)`
+                  : PROVIDER_INFOS[config.type]?.name || config.type}
               </Badge>
             )}
           </div>

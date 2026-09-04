@@ -26,7 +26,6 @@ import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
 import { UserManualDialog } from "./UserManualDialog";
 import { CanvasFooter, type GenerationTickerState } from "./CanvasFooter";
-import { AiGenerationFloat } from "./AiGenerationFloat";
 import { WidgetManager, type WidgetItem } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
 import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
@@ -42,6 +41,7 @@ import {
 import { useSession } from "@/lib/auth-client";
 import { BoardHistory } from "@/lib/canvas/history";
 import { boardFingerprint } from "@/lib/canvas/fingerprint";
+import { AgentCharacterController } from "@/lib/canvas/agentCharacter";
 import { computeTidyMoves } from "@/lib/canvas/tidy";
 import { resizeWidgetGeometry } from "@/lib/canvas/widgetGeometry";
 import type { AiLogEntry } from "@/lib/ai/types";
@@ -180,6 +180,9 @@ export function CanvasApp() {
     last: { x: number; y: number };
   } | null>(null);
   const syncManager = useRef<SyncManager | null>(null);
+  const agentCharacterRef = useRef<AgentCharacterController | null>(null);
+  const [agentCharCursor, setAgentCharCursor] = useState<"grab" | "grabbing" | null>(null);
+  const agentCharHoverRef = useRef(false);
   const [syncState, setSyncState] = useState<{
     status: SyncStatus;
     roomCode: string | null;
@@ -383,6 +386,21 @@ export function CanvasApp() {
   });
 
   const handleConductorEvent = useCallback((e: ConductorEvent) => {
+    // Pixel AI worker: mirror real agent/tool lifecycle into the character.
+    const character = agentCharacterRef.current;
+    if (character) {
+      if (e.kind === "turn_start") {
+        character.onEvent({ kind: "turn_start" });
+      } else if (e.kind === "tool_start") {
+        character.onEvent({ kind: "tool_start", tool: e.name, target: e.target });
+      } else if (e.kind === "tool_end") {
+        character.onEvent({ kind: "tool_end", tool: e.name, ok: e.ok, target: e.target });
+      } else if (e.kind === "text_delta" || e.kind === "reasoning_delta") {
+        character.onEvent({ kind: e.kind });
+      } else if (e.kind === "turn_end") {
+        character.onEvent({ kind: "turn_end", reason: e.reason });
+      }
+    }
     if (e.kind === "turn_start") {
       // Fold the schedule-time trigger box into the live ref (consumed once so
       // mid-turn applies keep reading fresh unions, not a stale snapshot).
@@ -402,7 +420,7 @@ export function CanvasApp() {
       });
       setTickerState((prev) => ({
         status: "running",
-        currentMessage: "Observing canvas & handwriting…",
+        currentMessage: "Taking a look at your board…",
         messageId: prev.messageId + 1,
         detail: undefined,
       }));
@@ -410,7 +428,7 @@ export function CanvasApp() {
       setAiStatus("thinking");
       setTickerState((prev) => ({
         status: "running",
-        currentMessage: `Reasoning step ${e.stepNumber}/${AGENT_MAX_STEPS_PER_TURN}…`,
+        currentMessage: `Thinking it through · step ${e.stepNumber}/${AGENT_MAX_STEPS_PER_TURN}`,
         messageId: prev.messageId + 1,
         detail: undefined,
       }));
@@ -418,17 +436,17 @@ export function CanvasApp() {
       setAiStatus("thinking");
       let label = `Executing ${e.name}…`;
       if (e.name === "canvas_apply") {
-        label = e.argsSummary ? `Applying: ${e.argsSummary}` : "Applying canvas items…";
+        label = e.argsSummary ? `Placing on canvas: ${e.argsSummary}` : "Drawing it onto the board…";
       } else if (e.name === "canvas_snapshot") {
-        label = "Capturing canvas snapshot…";
+        label = "Zooming in to inspect the board…";
       } else if (e.name === "canvas_read") {
-        label = e.argsSummary ? `Reading: ${e.argsSummary}` : "Reading widget source…";
+        label = e.argsSummary ? `Reading closely: ${e.argsSummary}` : "Reading the fine print…";
       } else if (e.name === "canvas_patch_widget") {
-        label = "Patching widget diff…";
+        label = "Fine-tuning the details…";
       } else if (e.name === "canvas_scan") {
-        label = "Scanning canvas items…";
+        label = "Surveying the whole canvas…";
       } else if (e.name === "load_plugin") {
-        label = e.argsSummary ? `Loading plugin: ${e.argsSummary}` : "Loading plugin…";
+        label = e.argsSummary ? `Picking up a tool: ${e.argsSummary}` : "Grabbing a new tool…";
       }
       setTickerState((prev) => ({
         status: "running",
@@ -437,7 +455,7 @@ export function CanvasApp() {
         detail: e.argsSummary ? tickerTail(e.argsSummary) : undefined,
       }));
     } else if (e.kind === "tool_end") {
-      const summaryText = e.ok ? `Done: ${e.summary || e.name}` : `Failed: ${e.name}`;
+      const summaryText = e.ok ? `Done: ${e.summary || e.name}` : `Hit a snag: ${e.name}`;
       setTickerState((prev) => ({
         status: "running",
         currentMessage: summaryText,
@@ -445,7 +463,7 @@ export function CanvasApp() {
         detail: undefined,
       }));
     } else if (e.kind === "text_delta" || e.kind === "reasoning_delta") {
-      const label = e.kind === "text_delta" ? "Composing response…" : "Reasoning…";
+      const label = e.kind === "text_delta" ? "Writing the answer…" : "Deep in thought…";
       setTickerState((prev) => ({
         status: "running",
         currentMessage: label,
@@ -466,7 +484,7 @@ export function CanvasApp() {
         });
         setTickerState((prev) => ({
           status: "done",
-          currentMessage: "AI generation complete",
+          currentMessage: "All done — take a look!",
           messageId: prev.messageId + 1,
           detail: e.message ? tickerTail(e.message) : undefined,
         }));
@@ -485,7 +503,7 @@ export function CanvasApp() {
         });
         setTickerState((prev) => ({
           status: "error",
-          currentMessage: e.error ? `Error: ${e.error}` : "Generation failed",
+          currentMessage: e.error ? `Hit a wall: ${tickerTail(e.error, 80)}` : "Something went wrong — try again",
           messageId: prev.messageId + 1,
           detail: undefined,
         }));
@@ -512,6 +530,21 @@ export function CanvasApp() {
   useEffect(() => {
     handleConductorEventRef.current = handleConductorEvent;
   });
+
+  // Pixel AI worker thought bubble: stream the live ticker narration to the
+  // character. Empty/non-running text hides the bubble immediately.
+  useEffect(() => {
+    const character = agentCharacterRef.current;
+    if (!character) return;
+    if (tickerState.status === "running") {
+      const text = tickerState.detail
+        ? `${tickerState.currentMessage} · ${tickerState.detail}`
+        : tickerState.currentMessage;
+      character.setNarration(text);
+    } else {
+      character.setNarration(null);
+    }
+  }, [tickerState]);
 
   const handleAskAi = useCallback(() => {
     const agent = conductorRef.current;
@@ -540,7 +573,7 @@ export function CanvasApp() {
     });
     setTickerState((prev) => ({
       status: "running",
-      currentMessage: "Observing canvas & handwriting…",
+      currentMessage: "Taking a look at your board…",
       messageId: prev.messageId + 1,
       detail: undefined,
     }));
@@ -1670,6 +1703,25 @@ export function CanvasApp() {
     });
     conductorRef.current = agent;
 
+    // Pixel AI worker character — driven by the conductor events above.
+    const agentCharacter = new AgentCharacterController({
+      engine,
+      widgets: () => widgets.current,
+      objects: () => objects.current,
+      getInkBox: () => scheduledInkBoxRef.current ?? inkBoxRef.current,
+      getSelectionBoxes: () => {
+        const boxes: Rect[] = [];
+        const wg = widgets.current?.getSelectedGeometry();
+        if (wg) boxes.push({ x: wg.x, y: wg.y, w: wg.w, h: wg.h });
+        const og = objects.current?.getSelectedGeometry();
+        if (og) boxes.push({ x: og.x, y: og.y, w: og.w, h: og.h });
+        const inkRect = tools.current?.selection.rect;
+        if (inkRect) boxes.push(inkRect);
+        return boxes;
+      },
+    });
+    agentCharacterRef.current = agentCharacter;
+
     let lastCamKey = "";
     let lastZoom = -1;
     let lastCx = -1;
@@ -1957,6 +2009,8 @@ export function CanvasApp() {
       history.current = null;
       agent.cancel();
       conductorRef.current = null;
+      agentCharacter.destroy();
+      agentCharacterRef.current = null;
       setAgentRunning(false);
     };
   }, [engine]);
@@ -2049,93 +2103,6 @@ export function CanvasApp() {
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [engine]);
-
-  const addDemoWidget = () => {
-    const wm = widgets.current;
-    if (!wm || !engine) return;
-    const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
-    const demoW = 480;
-    const demoH = 320;
-    const demoHtml = `<!doctype html><html><head><style>body{font-family:system-ui;padding:24px;background:#f3f4f6;margin:0}button{font-size:28px;padding:12px 20px;border-radius:8px;border:0;background:#2679b8;color:#fff;cursor:pointer}</style></head><body><h2>Mini Counter</h2><button id="b">0</button><script>let n=0;document.getElementById('b').onclick=()=>{document.getElementById('b').textContent=++n};<\/script></body></html>`;
-    const item: WidgetItem = {
-      id: `demo-${Date.now()}`,
-      kind: "html",
-      pluginId: "general",
-      x: Math.max(0, c.x),
-      y: Math.max(0, c.y),
-      w: demoW,
-      h: demoH,
-      contentW: demoW,
-      contentH: demoH,
-      title: "Counter",
-      html: demoHtml,
-      status: "draft",
-    };
-    wm.add(item);
-    syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
-    setMode("select");
-  };
-
-  const addDemoDiagram = () => {
-    const draft = drafts.current;
-    const wm = widgets.current;
-    if (!draft || !wm || !engine) return;
-    const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
-    history.current?.recordWidgets();
-    draft.setPending([
-      {
-        tool: "diagram_source",
-        widgetType: "diagram_source",
-        pluginId: "flowchart",
-        x: Math.max(0, c.x),
-        y: Math.max(0, c.y),
-        w: 1000,
-        h: 560,
-        title: "Login flow",
-        refreshSeconds: 0,
-        sourceFormat: "mermaid",
-        source: "flowchart LR\n  A[Start] --> B{Valid login?}\n  B -- No --> C[Show error]\n  B -- Yes --> D[Dashboard]\n  C --> A\n  D --> E[End]",
-      },
-    ]);
-    draft.accept(engine).then(afterBoardChange).catch(console.error);
-  };
-
-  const addDemoFormula = () => {
-    const draft = drafts.current;
-    if (!draft || !engine) return;
-    const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
-    history.current?.recordObjects();
-    draft.setPending([
-      {
-        tool: "draw_formula",
-        x: Math.max(0, c.x),
-        y: Math.max(0, c.y),
-        latex: "\\sum_{n=1}^{\\infty} \\frac{1}{n^2} = \\frac{\\pi^2}{6}",
-        fontSize: 180,
-        color: "#2563eb",
-      },
-    ]);
-    draft.accept(engine).then(afterBoardChange).catch(console.error);
-  };
-
-  const addDemoPlot = () => {
-    const draft = drafts.current;
-    if (!draft || !engine) return;
-    const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
-    history.current?.recordObjects();
-    draft.setPending([
-      {
-        tool: "plot_function",
-        x: Math.max(0, c.x),
-        y: Math.max(0, c.y),
-        w: 700,
-        h: 480,
-        expression: "sin(x)",
-        color: "#2563eb",
-      },
-    ]);
-    draft.accept(engine).then(afterBoardChange).catch(console.error);
-  };
 
   const [textOpen, setTextOpen] = useState(false);
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
@@ -2408,6 +2375,15 @@ export function CanvasApp() {
     try {
       (e.target as Element).setPointerCapture?.(e.pointerId);
     } catch {}
+
+    // Pixel AI worker: pointer on the character picks him up for dragging.
+    const agentChar = agentCharacterRef.current;
+    if (agentChar && e.button === 0 && agentChar.beginDrag(screenToWorld(e))) {
+      e.preventDefault();
+      setAgentCharCursor("grabbing");
+      return;
+    }
+
     const tm = tools.current;
     if (!tm) return;
     const middle = e.button === 1;
@@ -2469,9 +2445,23 @@ export function CanvasApp() {
       return;
     }
 
+    // Pixel AI worker drag: carry the character under the pointer.
+    const agentChar = agentCharacterRef.current;
+    if (agentChar?.isDragging()) {
+      agentChar.dragTo(screenToWorld(e));
+      return;
+    }
+
     const tm = tools.current;
     if (!tm) return;
     const world = screenToWorld(e);
+    if (agentChar) {
+      const hovering = agentChar.hitTest(world);
+      if (hovering !== agentCharHoverRef.current) {
+        agentCharHoverRef.current = hovering;
+        setAgentCharCursor(hovering ? "grab" : null);
+      }
+    }
     syncManager.current?.sendCursor(world.x, world.y, mode);
     tm.move(gestureEvent(e));
     if (drawingRef.current) {
@@ -2488,6 +2478,14 @@ export function CanvasApp() {
     activePointersRef.current.delete(e.pointerId);
     if (activePointersRef.current.size < 2) {
       pinchRef.current = null;
+    }
+
+    // Pixel AI worker: release a carried character.
+    const agentChar = agentCharacterRef.current;
+    if (agentChar?.isDragging()) {
+      agentChar.endDrag();
+      setAgentCharCursor(agentCharHoverRef.current ? "grab" : null);
+      return;
     }
 
     const tm = tools.current;
@@ -2638,10 +2636,6 @@ export function CanvasApp() {
         onExportPng={doExportPng}
         onExportJson={doExportJson}
         onImportJson={() => jsonFileRef.current?.click()}
-        onInsertWidget={addDemoWidget}
-        onInsertDiagram={addDemoDiagram}
-        onInsertFormula={addDemoFormula}
-        onInsertPlot={addDemoPlot}
         aiStatus={aiStatus}
         aiRun={aiRun}
         autoOn={autoOn}
@@ -2693,13 +2687,14 @@ export function CanvasApp() {
             userSelect: "none",
             touchAction: "none",
             cursor:
-              mode === "select"
+              agentCharCursor ??
+              (mode === "select"
                 ? "default"
                 : mode === "hand"
                 ? "grab"
                 : mode === "text"
                 ? "text"
-                : "crosshair",
+                : "crosshair"),
           }}
         />
 
@@ -2775,8 +2770,6 @@ export function CanvasApp() {
             }}
           />
         )}
-
-        <AiGenerationFloat tickerState={tickerState} />
       </div>
 
       <CanvasFooter

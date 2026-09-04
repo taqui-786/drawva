@@ -47,13 +47,10 @@ import {
   Download01Icon,
   EllipseIcon,
   EraserIcon,
-  FunctionIcon,
-  GitGraphIcon,
   HandIcon,
   HighlighterIcon,
   ImageAdd01Icon,
   Image01Icon,
-  MathIcon,
   Maximize01Icon,
   MagicWand01Icon,
   Menu01Icon,
@@ -203,10 +200,6 @@ export function CanvasHeader({
   onExportPng,
   onExportJson,
   onImportJson,
-  onInsertWidget,
-  onInsertDiagram,
-  onInsertFormula,
-  onInsertPlot,
   aiStatus,
   aiRun,
   autoOn,
@@ -246,10 +239,6 @@ export function CanvasHeader({
   onExportPng: () => void;
   onExportJson: () => void;
   onImportJson: () => void;
-  onInsertWidget: () => void;
-  onInsertDiagram: () => void;
-  onInsertFormula: () => void;
-  onInsertPlot: () => void;
   aiStatus: "idle" | "thinking" | "done" | "error";
   aiRun: AiRunState;
   autoOn: boolean;
@@ -347,30 +336,6 @@ export function CanvasHeader({
               <DropdownMenuItem onClick={onImportJson}>
                 <HugeiconsIcon icon={Upload01Icon} />
                 Open JSON Project…
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Insert</DropdownMenuLabel>
-              <DropdownMenuItem onClick={onInsertWidget}>
-                <HugeiconsIcon icon={Settings01Icon} />
-                Interactive Applet
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onInsertDiagram}>
-                <HugeiconsIcon icon={GitGraphIcon} />
-                Diagram
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onInsertFormula}>
-                <HugeiconsIcon icon={MathIcon} />
-                LaTeX Formula
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onInsertPlot}>
-                <HugeiconsIcon icon={FunctionIcon} />
-                Math Function Plot
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onImportImage}>
-                <HugeiconsIcon icon={ImageAdd01Icon} />
-                Image File
               </DropdownMenuItem>
             </DropdownMenuGroup>
             <DropdownMenuSeparator />

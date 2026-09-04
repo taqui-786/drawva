@@ -27,6 +27,8 @@ export interface ProviderConfig {
   apiKey: string;
   baseUrl?: string;
   customModels?: CustomModel[];
+  /** Friendly name for a saved custom endpoint (e.g. "router" from https://router.bynara.id/v1). */
+  customName?: string;
 }
 
 export interface TokenUsageRecord {
@@ -393,4 +395,53 @@ export function getModelCapabilitiesCached(modelId: string): ModelCapabilities {
     return cached[modelId];
   }
   return getModelCapabilities(modelId);
+}
+
+/** Storage key prefix for named custom endpoints inside the saved-credentials map. */
+export const CUSTOM_PROVIDER_KEY_PREFIX = "custom:";
+
+export function customStorageKey(name: string): string {
+  return `${CUSTOM_PROVIDER_KEY_PREFIX}${name.toLowerCase()}`;
+}
+
+export function isCustomProviderKey(key: string): boolean {
+  return key.startsWith(CUSTOM_PROVIDER_KEY_PREFIX);
+}
+
+export function getCustomNameFromKey(key: string): string {
+  return key.slice(CUSTOM_PROVIDER_KEY_PREFIX.length);
+}
+
+/**
+ * Derive a short friendly name from an OpenAI-compatible base URL.
+ * e.g. https://router.bynara.id/v1 -> "router", https://api.example.com/v1 -> "example".
+ */
+export function deriveCustomProviderName(baseUrl: string): string {
+  try {
+    const hostname = new URL(baseUrl.trim()).hostname.toLowerCase();
+    const parts = hostname.split(".").filter(Boolean);
+    if (parts.length === 0) return "custom";
+    // Skip leading www.
+    const meaningful = parts[0] === "www" ? parts.slice(1) : parts;
+    if (meaningful.length === 0) return "custom";
+    // router.bynara.id -> router, api.example.com -> example (skip generic api?)
+    const GENERIC = new Set(["api", "openai", "v1", "gateway", "proxy"]);
+    if (meaningful.length >= 3) {
+      const first = meaningful[0];
+      if (!GENERIC.has(first)) return sanitizeCustomName(first);
+      return sanitizeCustomName(meaningful[1] || first);
+    }
+    const candidate = meaningful[0];
+    if (GENERIC.has(candidate) && meaningful.length > 1) {
+      return sanitizeCustomName(meaningful[1] || candidate);
+    }
+    return sanitizeCustomName(candidate);
+  } catch {
+    return "custom";
+  }
+}
+
+function sanitizeCustomName(raw: string): string {
+  const cleaned = raw.toLowerCase().replace(/[^a-z0-9-]+/g, "").slice(0, 32);
+  return cleaned || "custom";
 }

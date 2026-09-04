@@ -41,6 +41,7 @@ import {
   REVISION_FINGERPRINT_ENTRIES,
 } from "./agentTools";
 import { executeTool, fnv1a, type ActiveImage, type ConductorToolDeps } from "./conductorTools";
+import type { ToolTargetHint } from "@/lib/canvas/agentCharacter";
 
 export type StepMessage =
   | { role: "user"; text: string; images?: { id: string; dataUrl: string }[] }
@@ -58,8 +59,8 @@ export type StepMessage =
 export type ConductorEvent =
   | { kind: "turn_start" }
   | { kind: "step_start"; stepNumber?: number }
-  | { kind: "tool_start"; name: string; argsSummary: string }
-  | { kind: "tool_end"; name: string; ok: boolean; summary: string }
+  | { kind: "tool_start"; name: string; argsSummary: string; target?: ToolTargetHint }
+  | { kind: "tool_end"; name: string; ok: boolean; summary: string; target?: ToolTargetHint }
   | { kind: "text_delta"; text: string }
   | { kind: "reasoning_delta"; text: string }
   | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string; message?: string }
@@ -105,6 +106,105 @@ interface TurnPolicy {
   mutated: boolean;
   /** Widget title → id created this turn, so a retry cannot duplicate it. */
   createdWidgets: Map<string, string>;
+}
+
+/** Finite number guard for target-hint extraction. */
+function finiteNum(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+function hintBoxOf(rec: unknown): { x: number; y: number; w: number; h: number } | null {
+  if (!rec || typeof rec !== "object") return null;
+  const r = rec as Record<string, unknown>;
+  const x = finiteNum(r.x);
+  const y = finiteNum(r.y);
+  if (x === undefined || y === undefined) return null;
+  return { x, y, w: finiteNum(r.w) ?? 0, h: finiteNum(r.h) ?? 0 };
+}
+
+/**
+ * Spatial hint for the agent character: which element/region a tool is about
+ * to touch, lifted from the tool args. Point-only boxes (w=h=0) are valid —
+ * commands like write_text know x/y before the renderer sizes the content.
+ */
+export function extractToolTarget(name: string, args: unknown): ToolTargetHint | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const a = args as Record<string, unknown>;
+  const hint: ToolTargetHint = {};
+  const idOf = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+
+  const objectId = idOf(a.objectId) ?? idOf(a.targetId);
+  if (objectId) hint.objectId = objectId;
+
+  const region = hintBoxOf(a.region);
+  if (region) hint.region = region;
+
+  const objectIds: string[] = [];
+  const boxes: { x: number; y: number; w: number; h: number }[] = [];
+  const rows: unknown[] = [
+    ...(Array.isArray(a.commands) ? a.commands : []),
+    ...(Array.isArray(a.operations) ? a.operations : []),
+  ];
+  for (const row of rows) {
+    if (!row || typeof row !== "object") continue;
+    const rec = row as Record<string, unknown>;
+    const tid = idOf(rec.targetId) ?? idOf(rec.objectId);
+    if (tid) objectIds.push(tid);
+    const box = hintBoxOf(rec);
+    if (box) boxes.push(box);
+  }
+  const planned = hintBoxOf(a.plannedWidget);
+  if (planned) boxes.push(planned);
+
+  if (objectIds.length) hint.objectIds = objectIds;
+  if (boxes.length) hint.boxes = boxes;
+  if (hint.objectId === undefined && !hint.objectIds?.length && !hint.region && !hint.boxes?.length) {
+    return undefined;
+  }
+  void name;
+  return hint;
+}
+
+/**
+ * Post-execution spatial hint: authoritative boxes/ids from tool results
+ * (applied[].box is where content actually landed after clamping).
+ */
+export function extractToolResultTarget(result: unknown): ToolTargetHint | undefined {
+  if (!result || typeof result !== "object") return undefined;
+  const r = result as Record<string, unknown>;
+  const hint: ToolTargetHint = {};
+  const objectIds: string[] = [];
+  const boxes: { x: number; y: number; w: number; h: number }[] = [];
+  const pushBox = (v: unknown) => {
+    const b = hintBoxOf(v);
+    if (b) boxes.push(b);
+  };
+
+  if (Array.isArray(r.applied)) {
+    for (const row of r.applied as unknown[]) {
+      if (!row || typeof row !== "object") continue;
+      const rec = row as Record<string, unknown>;
+      if (typeof rec.objectId === "string" && rec.objectId) objectIds.push(rec.objectId);
+      pushBox(rec.box);
+    }
+  }
+  if (Array.isArray(r.operations)) {
+    for (const row of r.operations as unknown[]) {
+      if (row && typeof row === "object") {
+        const oid = (row as Record<string, unknown>).objectId;
+        if (typeof oid === "string" && oid) objectIds.push(oid);
+      }
+    }
+  }
+  if (typeof r.objectId === "string" && r.objectId) hint.objectId = r.objectId;
+  pushBox(r.sourceRect);
+
+  if (objectIds.length) hint.objectIds = objectIds;
+  if (boxes.length) hint.boxes = boxes;
+  if (hint.objectId === undefined && !hint.objectIds?.length && !hint.boxes?.length) {
+    return undefined;
+  }
+  return hint;
 }
 
 /** Normalized widget title of a create command, or "" when this apply makes none. */
@@ -806,7 +906,13 @@ export class Conductor {
         isError: !ok,
         summary: ok ? "wrote the reply to the canvas" : summarizeResult(result),
       });
-      this.emit({ kind: "tool_end", name: "canvas_apply", ok, summary: summarizeResult(result) });
+      this.emit({
+        kind: "tool_end",
+        name: "canvas_apply",
+        ok,
+        summary: summarizeResult(result),
+        target: extractToolResultTarget(result),
+      });
     } catch (err) {
       // Best-effort: a failure here must not turn a completed turn into an error.
       console.warn("[Conductor] canvas-only reply failed:", err);
@@ -837,7 +943,7 @@ export class Conductor {
       policy.stopped = `Step limit reached (${AGENT_MAX_STEPS_PER_TURN}). Tool use is closed for this turn: keep the best valid result and reply with a final answer now.`;
       return { result: { ok: true, code: "STEP_LIMIT_REACHED", message: policy.stopped }, isError: false };
     }
-    this.emit({ kind: "tool_start", name, argsSummary: summarizeArgs(args) });
+    this.emit({ kind: "tool_start", name, argsSummary: summarizeArgs(args), target: extractToolTarget(name, args) });
 
     let result: unknown;
     let isError = false;
@@ -1018,6 +1124,7 @@ export class Conductor {
           name,
           ok: !isError,
           summary: summarizeResult(result),
+          target: extractToolResultTarget(result),
         });
     return { result, isError };
   }

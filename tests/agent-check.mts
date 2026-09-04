@@ -211,10 +211,10 @@ const toolDef = (name: string): AgentToolDef => {
 const accepts = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args).length === 0;
 const violations = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args);
 
-await test("B1 exactly 15 tools with unique names", () => {
-  assert.equal(AGENT_TOOL_DEFS.length, 15);
+await test("B1 exactly 16 tools with unique names", () => {
+  assert.equal(AGENT_TOOL_DEFS.length, 16);
   const names = AGENT_TOOL_DEFS.map((t) => t.name);
-  assert.equal(new Set(names).size, 15);
+  assert.equal(new Set(names).size, 16);
   for (const expected of [
     "canvas_scan",
     "canvas_snapshot",
@@ -231,6 +231,7 @@ await test("B1 exactly 15 tools with unique names", () => {
     "github_repository_search",
     "stock_symbol_search",
     "stock_market_data",
+    "image_search",
   ]) {
     assert.ok(names.includes(expected), `missing ${expected}`);
   }
@@ -335,7 +336,7 @@ await test("B8 web/stock schemas reject out-of-contract enums", () => {
 });
 
 await test("B9 web tool names stay consistent and are all declared", () => {
-  assert.equal(WEB_TOOL_NAMES.length, 6);
+  assert.equal(WEB_TOOL_NAMES.length, 7);
   for (const name of WEB_TOOL_NAMES) {
     assert.ok(isWebToolName(name));
     assert.ok(AGENT_TOOL_DEFS.some((t) => t.name === name), `${name} missing from AGENT_TOOL_DEFS`);
@@ -354,7 +355,7 @@ await test("B10 web tools register only behind their capability gate", () => {
   assert.ok(!canvasOnly.some((n) => isWebToolName(n)), `canvas-only set leaked: ${canvasOnly.join(", ")}`);
 
   const searchOnly = names({ search: true });
-  for (const n of ["web_search", "github_repository_search", "stock_symbol_search", "stock_market_data"]) {
+  for (const n of ["web_search", "github_repository_search", "stock_symbol_search", "stock_market_data", "image_search"]) {
     assert.ok(searchOnly.includes(n), `missing ${n}`);
   }
   // No TinyFish key → no page reading and no paper search, whatever the search flag says.
@@ -366,7 +367,7 @@ await test("B10 web tools register only behind their capability gate", () => {
   assert.ok(!readOnly.includes("web_search"));
   assert.ok(!readOnly.includes("research_search"));
 
-  assert.equal(names({ tinyfish: true, search: true }).length, 15);
+  assert.equal(names({ tinyfish: true, search: true }).length, 16);
 });
 
 await test("B11 fetch selection takes the Wikipedia hit, otherwise the top 2", () => {

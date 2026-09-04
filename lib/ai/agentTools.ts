@@ -184,6 +184,7 @@ export const WEB_TOOL_NAMES = [
   "github_repository_search",
   "stock_symbol_search",
   "stock_market_data",
+  "image_search",
 ] as const;
 
 export type WebToolName = (typeof WEB_TOOL_NAMES)[number];
@@ -412,6 +413,15 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
       },
       includeHistory: { type: "boolean", description: "Return OHLCV bars for charting (up to 400 points)" },
       includeEvents: { type: "boolean", description: "Return dividends and splits" },
+    },
+  },
+  {
+    name: "image_search",
+    description:
+      "Search openly-licensed photos (Wikimedia Commons primary, Openverse fallback). Returns thumbUrl, fullUrl, title, artist, license per photo. Call this BEFORE canvas_apply whenever the user asks for a real photo or online illustration, then embed the returned thumbUrl/fullUrl directly in an html_widget <img> — never fetch a photo API from inside widget HTML.",
+    parameters: {
+      query: { type: "string", required: true, description: "What the photo should show, e.g. 'city bus'" },
+      count: { type: "number", description: "Photos to return, 1..5 (default 3)" },
     },
   },
 ];

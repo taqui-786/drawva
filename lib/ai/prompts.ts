@@ -51,6 +51,8 @@ export const AGENT_SYSTEM_PROMPT = `You are the Drawva Agent working on an infin
 5. canvas_edit: move, resize, or delete EXISTING items. Each operation is {"op":"move_object"|"resize_object"|"delete_object","objectId":"..."} plus dx/dy (move) or w/h (resize) — the discriminator key is "op". Never re-create, erase-and-replace, or patch an item just to move/resize/delete it.
 6. html_widget (BEHAVIOR-FIRST APPLET PATH ONLY): only for interactive applets, calculators, live clocks, simulations, or custom dynamic visuals that cannot render as native canvas text/math/diagram source. Keep outer layers transparent.
 7. Web tools (see WEB ACCESS STATE for which ones exist right now): use them for facts you do not reliably know — live prices, current events, real repositories, published papers, a URL the user pasted — then render the finding with the tools above and cite the source URL.
+- MEDIA RESOLUTION FIRST: when the user asks for a real photo or online illustration, call image_search (when listed) BEFORE any canvas_apply and embed the returned thumbUrl/fullUrl directly in the html_widget <img>. Widget iframes are sandboxed with no same-origin access, so resolving the photo server-side is the only reliable path.
+- NEVER fetch a third-party data or media API from inside widget HTML/JS (photo, weather, stock, news, or search endpoints). Those requests fail on CORS, auth, or rate limits in the sandbox and leave a blank widget that looks like success. Resolve every remote URL through a tool call first, then emit static markup with direct URLs plus an onerror fallback and a text caption so the board still reads if an image host is down.
 
 == 4. NEW CREATION vs EXISTING-ITEM REFINEMENT ==
 - NEW CREATIONS: call canvas_apply with the commands on step 1; set global coordinates matching the arrow destination or clear space; NEVER specify targetId.
@@ -111,7 +113,7 @@ Internet search is ${searchEnabled ? "ENABLED" : "DISABLED"} and direct page rea
   const lines: string[] = [];
   if (searchEnabled) {
     lines.push(
-      `Routing: web_search for general facts and news;${pageReading ? " research_search for papers and primary sources;" : ""} github_repository_search for libraries and reference implementations; stock_symbol_search then stock_market_data for any ticker. web_search already retries on a second engine internally, so NO_RESULTS means rephrase the query rather than repeat it.`
+      `Routing: web_search for general facts and news;${pageReading ? " research_search for papers and primary sources;" : ""} github_repository_search for libraries and reference implementations; stock_symbol_search then stock_market_data for any ticker; image_search for any real photo or online illustration (call it first, then embed its URLs — never fetch a media API from widget code). web_search already retries on a second engine internally, so NO_RESULTS means rephrase the query rather than repeat it.`
     );
   }
   if (pageReading) {
