@@ -78,6 +78,8 @@ interface Character {
   narration: string | null;
   /** User is hand-carrying the character — freeze autonomous behavior. */
   dragging: boolean;
+  /** Turn ended while the user was dragging; wrap up (celebrate/fade) on drop. */
+  pendingEnd: "done" | "cancelled" | "error" | null;
 }
 
 const READ_TOOLS = new Set(["canvas_scan", "canvas_snapshot", "canvas_read", "canvas_focus"]);
@@ -316,6 +318,15 @@ export class AgentCharacterController {
     if (ch) {
       ch.dragging = false;
       ch.narration = this.dragNarration;
+      // If the turn ended while the user was carrying him, wrap up now.
+      if (ch.pendingEnd) {
+        const reason = ch.pendingEnd;
+        ch.pendingEnd = null;
+        this.dragNarration = null;
+        ch.narration = null;
+        ch.landing = null;
+        this.setState(ch, reason === "done" ? "celebrating" : "sad");
+      }
     }
     this.dragNarration = null;
     if (ch) this.ensureLoop();
@@ -340,9 +351,17 @@ export class AgentCharacterController {
     }
     const ch = this.chars.get(id);
     if (!ch) return;
-    // While the user is carrying him, his body is theirs — skip autonomous
-    // retargeting/poses until he is dropped.
-    if (ch.dragging) return;
+    // While the user is carrying him, his body is theirs — defer autonomous
+    // behavior until he is dropped. A turn_end is remembered so the drop
+    // still triggers the wrap-up (celebrate/sad → fade out); otherwise a
+    // generation finishing mid-drag left the character on the board forever.
+    if (ch.dragging) {
+      if (e.kind === "turn_end") {
+        ch.pendingEnd = e.reason;
+        ch.narration = null;
+      }
+      return;
+    }
     switch (e.kind) {
       case "tool_start": {
         this.retarget(ch, this.resolveTarget(e.target), animForTool(e.tool));
@@ -588,6 +607,7 @@ export class AgentCharacterController {
       fadingOut: false,
       narration: null,
       dragging: false,
+      pendingEnd: null,
     };
     if (target && target.source !== "viewport" && !this.isWholeViewport(target.box)) {
       ch.landing = this.landingFor(target.box, ch);

@@ -730,14 +730,23 @@ export function fitWidgetGeometry(
     );
   }
 
-  // Calculate adaptive size if not explicitly provided or if default huge
-  if (!Number.isFinite(rawW) || rawW <= 0 || rawW > 1600) {
-    const baseW = anchor && anchor.w > 60 ? anchor.w * 1.25 : DEFAULT_WIDGET_WIDTH;
-    rawW = Math.max(360, Math.min(960, Math.round(baseW)));
+  // Size when the model gave none. An explicit finite size is HONOURED at any
+  // magnitude and clamped by sanitizeWidgetGeometry below (which respects
+  // widgetGeometry.max, the ceiling the prompt advertises as maxWidgetSize).
+  // This used to discard any w > 1600 / h > 1200 and substitute an
+  // anchor-derived guess, so a model that asked for 2400x1400 without x/y —
+  // legal, and inside the advertised ceiling — silently got 375x240.
+  //
+  // The no-size default is viewport-derived rather than anchor-derived: a
+  // widget scaled to a small scribble came out at 375x240, far too small to
+  // hold readable canvas-scale type.
+  if (!Number.isFinite(rawW) || rawW <= 0) {
+    const viewW = visibleRect?.w ?? DEFAULT_WIDGET_WIDTH;
+    rawW = Math.max(600, Math.min(1200, Math.round(viewW * 0.7)), Math.round((anchor?.w ?? 0) * 1.25));
   }
-  if (!Number.isFinite(rawH) || rawH <= 0 || rawH > 1200) {
-    const baseH = anchor && anchor.h > 60 ? anchor.h * 1.25 : DEFAULT_WIDGET_HEIGHT;
-    rawH = Math.max(240, Math.min(640, Math.round(baseH)));
+  if (!Number.isFinite(rawH) || rawH <= 0) {
+    const viewH = visibleRect?.h ?? DEFAULT_WIDGET_HEIGHT;
+    rawH = Math.max(400, Math.min(800, Math.round(viewH * 0.7)), Math.round((anchor?.h ?? 0) * 1.25));
   }
 
   const w = rawW;

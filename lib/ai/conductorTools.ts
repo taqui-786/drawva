@@ -189,6 +189,8 @@ function planWidget(raw: unknown, deps: ConductorToolDeps): Record<string, unkno
   if (!raw || typeof raw !== "object") return null;
   const rec = raw as Record<string, unknown>;
   const ctx = applyContext(deps);
+  const askedW = Math.round(Number(rec.width) || 0);
+  const askedH = Math.round(Number(rec.height) || 0);
   const fitted = fitWidgetGeometry(
     { x: rec.x, y: rec.y, w: rec.width, h: rec.height },
     ctx.widgetGeometry
@@ -233,10 +235,18 @@ function planWidget(raw: unknown, deps: ConductorToolDeps): Record<string, unkno
       sourceTargets[key] = Math.ceil(target / focusScale);
     }
   }
+  const clamped = askedW > 0 && askedH > 0 && (askedW !== w || askedH !== h);
   return {
+    // The requested size is echoed back so a clamp is visible BEFORE the model
+    // spends thousands of output tokens laying out HTML for a box it will not get.
+    requested: { w: askedW || w, h: askedH || h },
+    maxWidgetSize: ctx.widgetGeometry?.max,
     proposed: {
       createPlacement: { mode: "absolute", x: box.x, y: box.y, w, h },
       placement: fitted ? "engine-adjusted to widget geometry limits" : "as requested",
+      ...(clamped
+        ? { clamped: true, note: `Requested ${askedW}x${askedH} exceeds maxWidgetSize; use ${w}x${h} on the apply.` }
+        : {}),
       crowded: overlappingObjectIds.length >= 2,
       offViewport,
       overlappingObjectIds,
@@ -628,6 +638,12 @@ function canonicalEditOp(rec: Record<string, unknown>): string {
   return "";
 }
 
+/** Live box of a widget or object, for the edit receipt. */
+function itemBox(deps: ConductorToolDeps, id: string): Rect | undefined {
+  const item = deps.widgets.get(id) ?? deps.objects.get(id);
+  return item ? { x: item.x, y: item.y, w: item.w, h: item.h } : undefined;
+}
+
 async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) {
   const currentRevision = deps.getRevision();
   const conflict = revisionConflict(currentRevision, args, deps);
@@ -644,7 +660,7 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
   if (ops.length === 0) return toolError("INVALID_ARGUMENT", "operations[] is required (move_object, resize_object, delete_object).");
   if (ops.length > 16) return toolError("INVALID_ARGUMENT", "At most 16 operations per canvas_edit.");
 
-  const results: { op: string; objectId: string; ok: boolean; reason?: string }[] = [];
+  const results: { op: string; objectId: string; ok: boolean; reason?: string; box?: Rect }[] = [];
   let touched = false;
   /**
    * Layout-review gate. Only a widget *resize* can end somewhere the agent did
@@ -681,7 +697,7 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
       }
       if (widget) deps.widgets.move(id, dx, dy);
       else deps.objects.move(id, dx, dy);
-      results.push({ op, objectId: id, ok: true });
+      results.push({ op, objectId: id, ok: true, box: itemBox(deps, id) });
       touched = true;
     } else if (op === "resize_object") {
       // One axis is a legitimate request; keep the other as-is instead of
@@ -692,10 +708,21 @@ async function execEdit(args: Record<string, unknown>, deps: ConductorToolDeps) 
         results.push({ op, objectId: id, ok: false, reason: "resize_object needs w and/or h as numbers > 0" });
         continue;
       }
-      if (widget) deps.widgets.resize(id, w, h);
-      else deps.objects.resize(id, w, h);
+      if (widget) {
+        // Reflow, don't magnify. A bare resize() runs the "corner" path, which
+        // scales the frame while the iframe keeps its old content box — so every
+        // glyph grew with the widget and the requested height was overridden to
+        // preserve aspect (3400x1150 became 3400x2267 at 3.5x type). Holding
+        // w/contentW and h/contentH constant keeps the on-screen text size and
+        // gives the content the extra room, which is what a resize means here.
+        const scaleW = widget.contentW > 0 ? widget.contentW / Math.max(1, widget.w) : 1;
+        const scaleH = widget.contentH > 0 ? widget.contentH / Math.max(1, widget.h) : 1;
+        deps.widgets.resize(id, w, h, w * scaleW, h * scaleH, true, "corner");
+      } else {
+        deps.objects.resize(id, w, h);
+      }
       if (widget) widgetReflowed = true;
-      results.push({ op, objectId: id, ok: true });
+      results.push({ op, objectId: id, ok: true, box: itemBox(deps, id) });
       touched = true;
     } else if (op === "delete_object") {
       if (widget) deps.widgets.remove(id);

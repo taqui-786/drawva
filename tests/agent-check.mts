@@ -815,6 +815,82 @@ await test("D20 clearing the canvas drops the server conversation too", () => {
   assert.ok(app.includes("conductorRef.current?.clearHistory()"), "the board reset paths must call clearHistory");
 });
 
+await test("D21 an explicit widget size is honoured up to maxWidgetSize, never silently downgraded", async () => {
+  const { validateCommands } = await import("../lib/canvas/commands");
+  const { widgetGeometryForViewport } = await import("../lib/ai/geometry");
+  const visibleRect = { x: 6538, y: 10756, w: 4884, h: 2237 };
+  const geometry = widgetGeometryForViewport(visibleRect);
+  const ctx = {
+    aiColor: "#2679b8",
+    scale: 0.23,
+    widgetSlots: 8,
+    visibleRect,
+    sceneItems: [],
+    // A small scribble used to shrink an explicitly-sized widget to the ink box.
+    changedBox: { x: 7000, y: 11000, w: 300, h: 120 },
+    widgetGeometry: geometry,
+  };
+  const ask = (dims: Record<string, number>) =>
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    validateCommands([{ tool: "html_widget", title: "T", placement: "below", html: "<div>x</div>", ...dims }], ctx as any)
+      .commands[0] as { w: number; h: number } | undefined;
+
+  // Inside the advertised ceiling and with no x/y: must arrive verbatim. The old
+  // code discarded any w > 1600 / h > 1200 and substituted 375x240.
+  const big = ask({ w: 2400, h: 1400 });
+  assert.equal(big?.w, 2400, `2400 wide must survive, got ${big?.w}`);
+  assert.equal(big?.h, 1400, `1400 tall must survive, got ${big?.h}`);
+  // Past the ceiling: scaled down keeping aspect, exactly as the prompt says.
+  const over = ask({ w: 3400, h: 1180 })!;
+  assert.equal(over.w, geometry.max.w, "an oversize width must clamp to maxWidgetSize.w");
+  assert.ok(Math.abs(over.w / over.h - 3400 / 1180) < 0.05, "the clamp must preserve aspect");
+  // No size at all: a viewport-scale default, not a scribble-scale one.
+  const bare = ask({})!;
+  assert.ok(bare.w >= 600 && bare.h >= 400, `default must stay readable, got ${bare.w}x${bare.h}`);
+});
+
+await test("D22 canvas_edit resize reflows a widget instead of magnifying its type", async () => {
+  const { normalizeWidgetGeometry, widgetScale } = await import("../lib/canvas/widgetGeometry");
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  const edit = src.slice(src.indexOf("async function execEdit"), src.indexOf("async function execLoadPlugin"));
+  assert.ok(
+    /deps\.widgets\.resize\(id, w, h, w \* scaleW, h \* scaleH, true, "corner"\)/.test(edit),
+    "resize_object must carry the content box so the display scale is preserved"
+  );
+  assert.ok(edit.includes("box: itemBox(deps, id)"), "edit results must report the final box");
+
+  // The maths the executor performs: hold contentW/w and contentH/h constant.
+  const start = normalizeWidgetGeometry({ x: 0, y: 0, w: 960, h: 640, contentW: 960, contentH: 640 });
+  const scaleW = start.contentW / start.w;
+  const scaleH = start.contentH / start.h;
+  const after = normalizeWidgetGeometry({
+    ...start,
+    w: 3400,
+    h: 1150,
+    contentW: 3400 * scaleW,
+    contentH: 1150 * scaleH,
+    userResized: true,
+  });
+  assert.equal(after.w, 3400, "the requested width must land");
+  assert.equal(after.h, 1150, "the requested height must land — the old corner path forced 2267 to keep aspect");
+  assert.ok(
+    Math.abs(widgetScale(after) - widgetScale(start)) < 0.01,
+    `type scale must not change: ${widgetScale(start)} -> ${widgetScale(after)}`
+  );
+});
+
+await test("D23 the plannedWidget pre-flight discloses the ceiling and any clamp", () => {
+  const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductorTools.ts"), "utf8");
+  const plan = src.slice(src.indexOf("function planWidget"), src.indexOf("async function execSnapshot"));
+  assert.ok(plan.includes("requested:"), "the pre-flight must echo the requested size");
+  assert.ok(plan.includes("maxWidgetSize:"), "the pre-flight must state the ceiling");
+  assert.ok(plan.includes("clamped: true"), "the pre-flight must flag a clamp before HTML is generated");
+  assert.ok(plan.includes("readableAtFocusedView"), "the legibility verdict must remain");
+  for (const needle of ["proposed.createPlacement", "WIDGET GEOMETRY, EXACTLY", "resize_object REFLOWS"]) {
+    assert.ok(AGENT_SYSTEM_PROMPT.includes(needle), `prompt missing: ${needle}`);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // E. concurrency & step economy
 // ---------------------------------------------------------------------------

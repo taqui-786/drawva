@@ -208,7 +208,7 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
   {
     name: "canvas_scan",
     description:
-      "List canvas items (id, kind, box, title). Cheap, no image. Use before mutating. scope=viewport limits to the visible rect. plannedWidget={width,height,bodyPx} is a read-only pre-flight: returns the exact placement the engine would choose, overlaps/crowding, and predicted on-screen font px at the focused view — check it before generating large widget HTML.",
+      "List canvas items (id, kind, box, title). Cheap, no image. Use before mutating. scope=viewport limits to the visible rect. plannedWidget={width,height,bodyPx} is a read-only pre-flight: returns maxWidgetSize, the exact placement the engine would choose (proposed.createPlacement — copy its x/y/w/h onto the apply to get that box verbatim), whether your size was clamped, overlaps/crowding, and predicted on-screen font px at the focused view — check it before generating large widget HTML.",
     parameters: {
       scope: { type: "string", enum: ["all", "viewport"], description: "Scan scope" },
       plannedWidget: {
@@ -248,7 +248,7 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
   {
     name: "canvas_apply",
     description:
-      "Apply 1..16 canvas commands in one undo step: write_text, draw_formula, plot_function, animate_scene, html_widget, diagram_source, draw, erase. Geometry is flat x/y/w/h on each command — a nested box/bbox object is not the contract. baseRevision (from the latest scan/snapshot) is REQUIRED. The result's applied[].box is the authoritative placement and may differ from what you asked for; applied[].requested appears whenever it does. Partial rejects come back in rejected[] as feedback. Apply is atomic: a renderer failure rolls the board back.",
+      "Apply 1..16 canvas commands in one undo step: write_text, draw_formula, plot_function, animate_scene, html_widget, diagram_source, draw, erase. Geometry is flat x/y/w/h on each command — a nested box/bbox object is not the contract. A widget w/h within maxWidgetSize is honoured verbatim; a larger box is scaled down keeping its aspect. baseRevision (from the latest scan/snapshot) is REQUIRED. The result's applied[].box is the authoritative placement and may differ from what you asked for; applied[].requested appears whenever it does. Partial rejects come back in rejected[] as feedback. Apply is atomic: a renderer failure rolls the board back.",
     parameters: {
       baseRevision: baseRevisionSpec,
       commands: {
@@ -263,7 +263,7 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
   {
     name: "canvas_edit",
     description:
-      "Lightweight typed edits on existing items: move_object (dx,dy), resize_object (w,h), delete_object. The discriminator key is 'op'. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes — never re-create or replace an item just to move/resize/delete it. baseRevision is required.",
+      "Lightweight typed edits on existing items: move_object (dx,dy offsets, or absolute x,y), resize_object (w and/or h), delete_object. The discriminator key is 'op'. resize_object REFLOWS a widget — the frame grows and its content gets the extra room, so on-screen text keeps its size; it never magnifies type. Each operation returns the item's final box. Cheaper and safer than canvas_apply or canvas_patch_widget for simple changes — never re-create or replace an item just to move/resize/delete it. baseRevision is required.",
     parameters: {
       baseRevision: baseRevisionSpec,
       operations: {
