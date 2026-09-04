@@ -64,7 +64,6 @@ import {
   compactWidgetForSync,
 } from "@/lib/canvas/sync";
 import { ConnectDialog } from "./ConnectDialog";
-import { GeometryInspectorDialog, type ElementGeometryData } from "./GeometryInspectorDialog";
 import { MobileOrientationPrompt } from "./MobileOrientationPrompt";
 import { strokeSegment } from "@/lib/canvas/strokes";
 import { eraseRegion, eraseContainedInk, pasteDataUrl, captureRegion, pasteRegion } from "@/lib/canvas/selection";
@@ -241,70 +240,12 @@ export function CanvasApp() {
     afterBoardChangeRef.current();
   }, [engine]);
 
-  const buildElementData = useCallback((id: string, sourceType?: "widget" | "object"): ElementGeometryData | null => {
-    if (!sourceType || sourceType === "widget") {
-      const w = widgets.current?.get(id);
-      if (w) {
-        return {
-          id: w.id,
-          sourceType: "widget",
-          tool: w.kind === "diagram" ? "diagram_source" : "html_widget",
-          x: Math.round(w.x),
-          y: Math.round(w.y),
-          w: Math.round(w.w),
-          h: Math.round(w.h),
-          contentW: Math.round(w.contentW || w.w),
-          contentH: Math.round(w.contentH || w.h),
-          title: w.title,
-          pluginId: w.pluginId,
-          sourceFormat: w.sourceFormat,
-          status: w.status,
-          payload: w.html || w.copyText || "",
-          timestamp: w.createdAt || Date.now(),
-        };
-      }
-    }
-    if (!sourceType || sourceType === "object") {
-      const o = objects.current?.get(id);
-      if (o) {
-        const toolMap: Record<string, string> = {
-          text: "write_text",
-          formula: "draw_formula",
-          plot: "plot_function",
-          animation: "animate_scene",
-        };
-        return {
-          id: o.id,
-          sourceType: "object",
-          tool: toolMap[o.kind] || o.kind,
-          x: Math.round(o.x),
-          y: Math.round(o.y),
-          w: Math.round(o.w),
-          h: Math.round(o.h),
-          contentW: Math.round(o.contentW || o.w),
-          contentH: Math.round(o.contentH || o.h),
-          fontSize: o.fontSize,
-          maxWidth: o.maxWidth,
-          color: o.color,
-          status: o.status,
-          payload: o.source,
-          timestamp: Date.now(),
-        };
-      }
-    }
-    return null;
-  }, []);
-
   const addObjectRef = useRef(addObject);
   const mergeObjectToInkRef = useRef(mergeObjectToInk);
-  const buildElementDataRef = useRef<(id: string, sourceType?: "widget" | "object") => ElementGeometryData | null>(() => null);
-  const setSelectedElementRef = useRef<React.Dispatch<React.SetStateAction<ElementGeometryData | null>>>(() => {});
   useEffect(() => {
     addObjectRef.current = addObject;
     mergeObjectToInkRef.current = mergeObjectToInk;
-    buildElementDataRef.current = buildElementData;
-    setSelectedElementRef.current = setSelectedElement;
-  }, [addObject, mergeObjectToInk, buildElementData]);
+  }, [addObject, mergeObjectToInk]);
 
   const aiTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Random epoch seed: a reload must never collide with revision numbers
@@ -380,8 +321,6 @@ export function CanvasApp() {
       cancelled = true;
     };
   }, []);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [selectedElement, setSelectedElement] = useState<ElementGeometryData | null>(null);
   const [tickerState, setTickerState] = useState<GenerationTickerState>({
     status: "idle",
     currentMessage: "",
@@ -431,93 +370,6 @@ export function CanvasApp() {
     setReasoningEffort(effort);
     setReasoningEffortState(effort);
   };
-
-  const getAllElements = useCallback((): ElementGeometryData[] => {
-    const list: ElementGeometryData[] = [];
-    if (widgets.current) {
-      for (const w of widgets.current.getAll()) {
-        list.push({
-          id: w.id,
-          sourceType: "widget",
-          tool: w.kind === "diagram" ? "diagram_source" : "html_widget",
-          x: Math.round(w.x),
-          y: Math.round(w.y),
-          w: Math.round(w.w),
-          h: Math.round(w.h),
-          contentW: Math.round(w.contentW || w.w),
-          contentH: Math.round(w.contentH || w.h),
-          title: w.title,
-          pluginId: w.pluginId,
-          sourceFormat: w.sourceFormat,
-          status: w.status,
-          payload: w.html || w.copyText || "",
-          timestamp: w.createdAt || Date.now(),
-        });
-      }
-    }
-    if (objects.current) {
-      const toolMap: Record<string, string> = {
-        text: "write_text",
-        formula: "draw_formula",
-        plot: "plot_function",
-        animation: "animate_scene",
-      };
-      for (const o of objects.current.getAll()) {
-        list.push({
-          id: o.id,
-          sourceType: "object",
-          tool: toolMap[o.kind] || o.kind,
-          x: Math.round(o.x),
-          y: Math.round(o.y),
-          w: Math.round(o.w),
-          h: Math.round(o.h),
-          contentW: Math.round(o.contentW || o.w),
-          contentH: Math.round(o.contentH || o.h),
-          fontSize: o.fontSize,
-          maxWidth: o.maxWidth,
-          color: o.color,
-          status: o.status,
-          payload: o.source,
-          timestamp: Date.now(),
-        });
-      }
-    }
-    if (selectedElement && selectedElement.sourceType === "selection") {
-      list.push(selectedElement);
-    }
-    return list;
-  }, [selectedElement]);
-
-  const handleSelectElement = useCallback((id: string, sourceType?: "widget" | "object" | "selection") => {
-    setMode("select");
-    const effSourceType = sourceType ?? (widgets.current?.get(id) ? "widget" : objects.current?.get(id) ? "object" : "selection");
-    if (effSourceType === "widget") {
-      widgets.current?.setMode("select");
-      objects.current?.setSelected(null);
-      widgets.current?.setSelected(id);
-      const data = buildElementData(id, "widget");
-      if (data) setSelectedElement(data);
-    } else if (effSourceType === "object") {
-      objects.current?.setMode("select");
-      widgets.current?.setSelected(null);
-      objects.current?.setSelected(id);
-      const data = buildElementData(id, "object");
-      if (data) setSelectedElement(data);
-    } else {
-      widgets.current?.setSelected(null);
-      objects.current?.setSelected(null);
-      const all = getAllElements();
-      const found = all.find((e) => e.id === id);
-      if (found) setSelectedElement(found);
-    }
-  }, [buildElementData, getAllElements]);
-
-  const handleFocusElement = useCallback((el: ElementGeometryData) => {
-    if (!engine) return;
-    engine.camera.centerOnBox({ x: el.x, y: el.y, w: el.w, h: el.h }, 100);
-    engine.requestRender();
-    handleSelectElement(el.id, el.sourceType);
-  }, [engine, handleSelectElement]);
 
   const [aiRun, setAiRun] = useState<AiRunState>({
     phase: "idle",
@@ -1266,9 +1118,8 @@ export function CanvasApp() {
       engineContainer: engine.rootElement,
       camera: engine.camera,
       callbacks: {
-        onSelect: (id) => {
+        onSelect: () => {
           om.setSelected(null);
-          setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
         },
         onDragStart: (id, e) => {
           history.current?.recordWidgets();
@@ -1283,7 +1134,7 @@ export function CanvasApp() {
           g.last = { x: e.clientX, y: e.clientY };
           const item = wm.get(id);
           if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
+
         },
         onDragEnd: (id) => {
           // pointerup/pointercancel on the drag bar fires even when no drag was
@@ -1293,7 +1144,7 @@ export function CanvasApp() {
           widgetDrag.current = null;
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
+
           if (wasDragging) afterBoardChangeRef.current();
         },
         onResizeStart: (id, mode, e) => {
@@ -1318,21 +1169,21 @@ export function CanvasApp() {
           wm.resize(id, next.w, next.h, next.contentW, next.contentH, true, g.mode);
           const resized = wm.get(id);
           if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h, contentW: resized.contentW, contentH: resized.contentH, userResized: resized.userResized, resizeMode: resized.resizeMode });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
+
         },
         onResizeEnd: (id) => {
           const wasResizing = widgetResize.current?.id === id;
           widgetResize.current = null;
           const item = wm.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
+
           if (wasResizing) afterBoardChangeRef.current();
         },
         onRemove: (id) => {
           history.current?.recordWidgets();
           wm.remove(id);
           syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id });
-          setSelectedElementRef.current((prev) => (prev?.id === id ? null : prev));
+
           afterBoardChangeRef.current();
         },
         onAccept: (id) => {
@@ -1345,7 +1196,7 @@ export function CanvasApp() {
               widget: compactWidgetForSync(item),
             });
           }
-          setSelectedElementRef.current(buildElementDataRef.current(id, "widget"));
+
           afterBoardChangeRef.current();
         },
         onAiRefine: (id) => {
@@ -1363,9 +1214,8 @@ export function CanvasApp() {
       engineContainer: engine.rootElement,
       camera: engine.camera,
       callbacks: {
-        onSelect: (id) => {
+        onSelect: () => {
           wm.setSelected(null);
-          setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
         },
         onDragStart: (id, e) => {
           objectDrag.current = { id, last: { x: e.clientX, y: e.clientY } };
@@ -1380,14 +1230,14 @@ export function CanvasApp() {
           g.last = { x: e.clientX, y: e.clientY };
           const item = om.get(id);
           if (item) broadcastMove("object", { type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
+
         },
         onDragEnd: (id) => {
           const wasDragging = objectDrag.current?.id === id;
           objectDrag.current = null;
           const item = om.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
+
           if (wasDragging) afterBoardChangeRef.current();
         },
         onResizeStart: (id, mode, e) => {
@@ -1408,21 +1258,21 @@ export function CanvasApp() {
           g.last = { x: e.clientX, y: e.clientY };
           const resized = om.get(id);
           if (resized) broadcastMove("object", { type: "SYNC_OBJECT_RESIZE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
+
         },
         onResizeEnd: (id) => {
           const wasResizing = objectResize.current?.id === id;
           objectResize.current = null;
           const item = om.get(id);
           if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_RESIZE", id, x: item.x, y: item.y, w: item.w, h: item.h });
-          setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
+
           if (wasResizing) afterBoardChangeRef.current();
         },
         onRemove: (id) => {
           history.current?.recordObjects();
           om.remove(id);
           syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id });
-          setSelectedElementRef.current((prev) => (prev?.id === id ? null : prev));
+
           afterBoardChangeRef.current();
         },
         onAccept: (id) => {
@@ -1434,7 +1284,7 @@ export function CanvasApp() {
             void image;
             syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: cleanObject });
           }
-          setSelectedElementRef.current(buildElementDataRef.current(id, "object"));
+
           afterBoardChangeRef.current();
         },
         onMerge: (id) => mergeObjectToInkRef.current(id),
@@ -1462,17 +1312,17 @@ export function CanvasApp() {
         if (!node) {
           wm.setSelected(null);
           om.setSelected(null);
-          setSelectedElementRef.current(null);
+
           return;
         }
         if (node.kind === "widget") {
           om.setSelected(null);
           wm.setSelected(node.id);
-          setSelectedElementRef.current(buildElementDataRef.current(node.id, "widget"));
+
         } else {
           wm.setSelected(null);
           om.setSelected(node.id);
-          setSelectedElementRef.current(buildElementDataRef.current(node.id, "object"));
+
         }
       },
       translate: (node, dx, dy) => {
@@ -1506,7 +1356,7 @@ export function CanvasApp() {
           return;
         }
         if (!wm.getSelectedId() && !om.getSelectedId()) {
-          setSelectedElementRef.current(null);
+
         }
         setRefineRect(null);
         inkSnapshotRef.current = null;
@@ -1532,25 +1382,6 @@ export function CanvasApp() {
       setRefineBtnPos({ x: p.x, y: p.y });
       wm.setSelected(null);
       om.setSelected(null);
-      const roundedX = Math.round(rect.x);
-      const roundedY = Math.round(rect.y);
-      const roundedW = Math.round(rect.w);
-      const roundedH = Math.round(rect.h);
-      setSelectedElementRef.current({
-        id: `ink-${roundedX}-${roundedY}`,
-        sourceType: "selection",
-        tool: "draw",
-        x: roundedX,
-        y: roundedY,
-        w: roundedW,
-        h: roundedH,
-        contentW: roundedW,
-        contentH: roundedH,
-        title: `Ink Selection (${roundedW}×${roundedH})`,
-        status: "selected",
-        payload: `Handwritten stroke cluster at (${roundedX}, ${roundedY}) with box dimensions ${roundedW}×${roundedH} px`,
-        timestamp: Date.now(),
-      });
     });
 
     const draft = new DraftManager();
@@ -1657,7 +1488,7 @@ export function CanvasApp() {
       wm.add(item);
       om.setSelected(null);
       wm.setSelected(item.id);
-      setSelectedElementRef.current(buildElementDataRef.current(item.id, "widget"));
+
       // Diagrams sync source only (html rebuilt on peer); applets chunk if large.
       syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
       setMode("select");
@@ -1684,7 +1515,7 @@ export function CanvasApp() {
       });
       wm.setSelected(null);
       om.setSelected(textId);
-      setSelectedElementRef.current(buildElementDataRef.current(textId, "object"));
+
       setMode("select");
     });
     draft.setRenderer("draw_formula", async (_eng, cmd) => {
@@ -1709,7 +1540,7 @@ export function CanvasApp() {
         });
         wm.setSelected(null);
         om.setSelected(formulaId);
-        setSelectedElementRef.current(buildElementDataRef.current(formulaId, "object"));
+  
         setMode("select");
       }
     });
@@ -1735,7 +1566,7 @@ export function CanvasApp() {
         });
         wm.setSelected(null);
         om.setSelected(plotId);
-        setSelectedElementRef.current(buildElementDataRef.current(plotId, "object"));
+  
         setMode("select");
       }
     });
@@ -1763,7 +1594,7 @@ export function CanvasApp() {
       });
       wm.setSelected(null);
       om.setSelected(animId);
-      setSelectedElementRef.current(buildElementDataRef.current(animId, "object"));
+
       setMode("select");
     });
     draft.setRenderer("diagram_source", async (_eng, cmd) => {
@@ -1810,7 +1641,7 @@ export function CanvasApp() {
       wm.add(item);
       om.setSelected(null);
       wm.setSelected(item.id);
-      setSelectedElementRef.current(buildElementDataRef.current(item.id, "widget"));
+
       syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
       setMode("select");
     });
@@ -2184,7 +2015,6 @@ export function CanvasApp() {
     if (mode !== "select") {
       widgets.current?.setSelected(null);
       objects.current?.setSelected(null);
-      setSelectedElement(null);
     }
   }, [mode, engine]);
 
@@ -2509,7 +2339,7 @@ export function CanvasApp() {
         tools.current?.clearSelection();
         widgets.current?.setSelected(null);
         objects.current?.setSelected(null);
-        setSelectedElementRef.current(null);
+
         setTextOpen(false);
       }
     };
@@ -2825,8 +2655,6 @@ export function CanvasApp() {
         onOpenConnect={() => setConnectOpen(true)}
         onOpenLogs={() => setLogsOpen(true)}
         onOpenManual={() => setManualOpen(true)}
-        onOpenInspector={() => setInspectorOpen(true)}
-        selectedElement={mode === "select" ? selectedElement : null}
         onTidy={handleTidy}
         cloudStatus={cloudStatus}
          onTriggerCloudSync={() => {
@@ -3007,14 +2835,6 @@ export function CanvasApp() {
       <UserManualDialog
         open={manualOpen}
         onOpenChange={setManualOpen}
-      />
-      <GeometryInspectorDialog
-        open={inspectorOpen}
-        onOpenChange={setInspectorOpen}
-        selectedElement={selectedElement}
-        allElements={getAllElements()}
-        onSelectElement={handleSelectElement}
-        onFocusElement={handleFocusElement}
       />
     </div>
   );
