@@ -224,6 +224,7 @@ export class Conductor {
   private turnPeakInput = 0;
   private turnSteps = 0;
   private revisionFingerprints = new Map<number, string>();
+  private turnRevisions = new Set<number>();
   private auditAtTurnStart: Record<string, number> = {};
   private revisionAtTurnStart = 0;
   private loadedPluginIds = new Set<string>();
@@ -352,7 +353,23 @@ export class Conductor {
       getRevision: this.deps.getRevision,
       getFingerprint: this.deps.getFingerprint,
       fingerprintAt: (revision) => this.revisionFingerprints.get(revision),
-      afterBoardChange: this.deps.afterBoardChange,
+      isTurnRevision: (revision) => {
+        if (!this.running) return false;
+        if (!this.turnRevisions.has(revision)) return false;
+        const current = this.deps.getRevision();
+        for (let r = revision; r <= current; r++) {
+          if (!this.turnRevisions.has(r)) return false;
+        }
+        return true;
+      },
+      afterBoardChange: () => {
+        const prevRev = this.deps.getRevision();
+        this.deps.afterBoardChange();
+        const nextRev = this.deps.getRevision();
+        for (let r = prevRev; r <= nextRev; r++) {
+          this.turnRevisions.add(r);
+        }
+      },
       registerImage: (img) => {
         this.images.set(img.id, img);
         this.latestSnapshotId = img.id;
@@ -386,6 +403,7 @@ export class Conductor {
     this.turnErrorMessage = "";
     this.toolCache = new Map();
     this.toolCacheRevision = this.deps.getRevision();
+    this.turnRevisions = new Set<number>([this.toolCacheRevision]);
     this.revisionFingerprints = new Map([[this.toolCacheRevision, this.deps.getFingerprint()]]);
     this.auditAtTurnStart = { ...(this.deps.getRevisionAudit?.() ?? {}) };
     this.revisionAtTurnStart = this.toolCacheRevision;

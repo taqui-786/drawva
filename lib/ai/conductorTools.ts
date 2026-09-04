@@ -40,6 +40,7 @@ export interface ConductorToolDeps {
   getRevision: () => number;
   getFingerprint: () => string;
   fingerprintAt: (revision: number) => string | undefined;
+  isTurnRevision?: (revision: number) => boolean;
   afterBoardChange: () => void;
   registerImage: (img: ActiveImage) => void;
   getInkBox?: () => Rect | null;
@@ -139,6 +140,10 @@ function revisionConflict(
   if (base === currentRevision) return null;
   const observed = deps.fingerprintAt(Math.floor(base));
   if (observed !== undefined && observed === deps.getFingerprint()) return null;
+  if (deps.isTurnRevision?.(Math.floor(base))) {
+    args.baseRevision = currentRevision;
+    return null;
+  }
   return toolError(
     "REVISION_CONFLICT",
     `Canvas content changed: you acted on revision ${Math.floor(base)}, current revision is ${currentRevision}. Re-scan only if you need the new ids or boxes; otherwise retry this same call with baseRevision: ${currentRevision}.`,
