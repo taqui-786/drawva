@@ -551,6 +551,10 @@ export function CanvasApp() {
       toast.error("AI Conductor is initializing, please wait a moment.");
       return;
     }
+    if (agent.isRunning()) {
+      toast.info("AI is already working on your canvas…");
+      return;
+    }
     cloudSync.current?.cancel();
     const config = getProviderConfig();
     const model = getActiveModel();
@@ -577,7 +581,10 @@ export function CanvasApp() {
 
     const prompt =
       "Observe the canvas handwriting, formulas, diagrams, questions, and drawings. Provide the appropriate continuation, solution, calculation, diagram, or interactive widget.";
-    void agent.send(prompt);
+    agent.send(prompt).catch((err) => {
+      console.error("[Ask AI] Error starting turn:", err);
+      toast.error(err instanceof Error ? err.message : "Failed to start AI turn.");
+    });
   }, []);
 
   const captureRegionForRefine = useCallback(

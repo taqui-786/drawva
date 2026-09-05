@@ -494,11 +494,48 @@ export class Conductor {
         return;
       }
       finalText = turnResult.text || "";
-      finished = true;
       if (finalText.trim() && !policy.mutated) {
         await this.writeAnswerToCanvas(finalText, gen, policy, stepsLog);
         if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
       }
+
+      if (!policy.mutated && !finalText.trim()) {
+        const errorMsg = "The AI model returned an empty response with no output. Please try again or switch model in Settings.";
+        this.emit({ kind: "turn_end", reason: "error", error: errorMsg });
+
+        const config = this.deps.provider() ?? getProviderConfig();
+        const logEntry: AiLogEntry = {
+          timestamp: Date.now(),
+          requestId: `turn-${Date.now()}`,
+          model: getActiveModel() || "unknown",
+          providerType: config?.type,
+          attempts: Math.max(1, policy.steps),
+          status: "error",
+          errorMessage: errorMsg,
+          atlasImage: this.images.get(this.latestSnapshotId || "")?.dataUrl || "",
+          systemPrompt: AGENT_SYSTEM_PROMPT,
+          userPromptText: userText,
+          injectedPlugins: [...this.loadedPluginIds],
+          steps: stepsLog,
+          revisionBumps: this.turnRevisionBumps(),
+          tokenUsage: {
+            inputTokens: this.turnUsage.inputTokens,
+            outputTokens: this.turnUsage.outputTokens,
+            totalTokens: this.turnUsage.inputTokens + this.turnUsage.outputTokens,
+            peakInputTokens: this.turnPeakInput,
+            billedSteps: this.turnSteps,
+          },
+          response: {
+            message: "",
+            commands: [],
+          },
+        };
+        this.emit({ kind: "log", entry: logEntry });
+        void saveAgentLog(redactLogEntry(logEntry));
+        return;
+      }
+
+      finished = true;
       this.messages.push({ role: "assistant", text: finalText });
       stepsLog.push({
         stepNumber: policy.steps + 1,

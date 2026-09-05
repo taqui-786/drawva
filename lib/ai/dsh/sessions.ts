@@ -216,6 +216,20 @@ async function createConversation(
           projectSessionEvent(conversation, event as { type: string; [key: string]: unknown });
         })
       );
+      conversation.disposers.push(
+        ctx.on("agent/error", (event: { error?: unknown; [key: string]: unknown }) => {
+          const err = event?.error;
+          const msg =
+            err instanceof Error
+              ? err.message
+              : typeof err === "object" && err && "message" in err
+                ? String((err as { message: unknown }).message)
+                : String(err || "Agent execution failed.");
+          if (conversation.emit) {
+            conversation.emit({ event: "error", data: { message: msg } });
+          }
+        })
+      );
       return conversation;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
@@ -294,6 +308,24 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
     return;
   }
   if (type === "turn/end") {
+    const reason = payload.reason as {
+      kind?: string;
+      error?: { message?: string; code?: string };
+      reason?: string;
+    } | undefined;
+    if (reason?.kind === "error") {
+      const msg = reason.error?.message || reason.error?.code || "Agent turn failed.";
+      emit({ event: "error", data: { message: msg } });
+      return;
+    }
+    if (reason?.kind === "aborted") {
+      emit({ event: "error", data: { message: reason.reason ? String(reason.reason) : "Agent turn was cancelled." } });
+      return;
+    }
+    if (reason?.kind === "blocked") {
+      emit({ event: "error", data: { message: "Agent turn was blocked by safety policy." } });
+      return;
+    }
     emit({ event: "final", data: { text: conversation.lastText } });
     return;
   }
