@@ -13,7 +13,8 @@
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
     "test:agent": "tsx tests/agent-check.mts",
-    "test:placement": "tsx tests/placement-check.mts"
+    "test:placement": "tsx tests/placement-check.mts",
+    "test:turn": "npx dotenvx run -f .env.local -- tsx tests/turn-check.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

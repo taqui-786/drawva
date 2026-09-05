@@ -502,7 +502,15 @@ export class Conductor {
       }
 
       if (!policy.mutated && !finalText.trim()) {
-        const errorMsg = "The AI model returned an empty response with no output. Please try again or switch model in Settings.";
+        // Name the actual cause. "Empty response" used to be reported for every
+        // no-answer path, including turns where the model emitted thousands of
+        // reasoning tokens — which sends users looking for a provider fault that
+        // is not there.
+        const errorMsg = turnResult.reasoningOnly
+          ? "The model finished thinking but never wrote an answer or called a tool. Retry, or pick a model with stronger tool-calling support in Settings."
+          : policy.steps > 0
+            ? "The model ran tools but never produced a final answer. Retry — the canvas is unchanged."
+            : "The AI model returned an empty response with no output. Please try again or switch model in Settings.";
         this.emit({ kind: "turn_end", reason: "error", error: errorMsg });
 
         const config = this.deps.provider() ?? getProviderConfig();
@@ -615,7 +623,7 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[]
-  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string }> {
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean }> {
     const config = this.deps.provider() ?? getProviderConfig();
     const model = getActiveModel();
     if (!config || !model) {
@@ -637,7 +645,7 @@ export class Conductor {
       webSearch: getWebSearchEnabled(),
     };
 
-    const attempt = async (): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string }> => {
+    const attempt = async (): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean }> => {
       const res = await fetch("/api/canvas/agent/step", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -683,11 +691,11 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[]
-  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string }> {
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean }> {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    const sink = { text: "" };
+    const sink = { text: "", sawFinal: false, reasoningOnly: false };
     const checkLive = () => {
       if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
     };
@@ -702,7 +710,7 @@ export class Conductor {
           const block = buffer.slice(0, sep);
           buffer = buffer.slice(sep + 2);
           const outcome = await this.handleTurnFrame(block, gen, policy, stepsLog, sink);
-          if (outcome === "final") return { kind: "final", text: sink.text };
+          if (outcome === "final") return { kind: "final", text: sink.text, reasoningOnly: sink.reasoningOnly };
           if (outcome === "error") return { kind: "error", message: this.turnErrorMessage || "Agent turn failed." };
           sep = buffer.indexOf("\n\n");
         }
@@ -715,7 +723,22 @@ export class Conductor {
         reader.releaseLock();
       } catch {}
     }
-    return { kind: "final", text: sink.text };
+    // The stream ended without a `final` or `error` frame. That is a TRUNCATED
+    // turn (serverless timeout, proxy cutting an idle SSE connection, crashed
+    // route), not a successful empty answer. Reporting it as `final` was the
+    // root cause of "The AI model returned an empty response": the sink is reset
+    // on every tool_request, so a cut after the last tool call always produced a
+    // successful-looking empty string.
+    if (!sink.sawFinal) {
+      if (sink.text.trim()) return { kind: "final", text: sink.text };
+      return {
+        kind: "error",
+        message:
+          this.turnErrorMessage ||
+          "The connection to the agent closed before it finished. Nothing was lost on the canvas — ask again to continue.",
+      };
+    }
+    return { kind: "final", text: sink.text, reasoningOnly: sink.reasoningOnly };
   }
 
   private async handleTurnFrame(
@@ -723,7 +746,7 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[],
-    sink: { text: string }
+    sink: { text: string; sawFinal: boolean; reasoningOnly: boolean }
   ): Promise<"continue" | "final" | "error"> {
     const eventName = /^event: (.+)$/m.exec(block)?.[1] ?? "message";
     const dataLine = /^data: (.+)$/m.exec(block)?.[1] ?? "";
@@ -742,6 +765,8 @@ export class Conductor {
     } else if (eventName === "reasoning" && typeof rec.text === "string") {
       this.emit({ kind: "reasoning_delta", text: rec.text });
     } else if (eventName === "tool_request" && typeof rec.name === "string") {
+      // Text streamed before a tool call is a preamble ("let me check the board"),
+      // never the answer, so it is dropped rather than concatenated onto the reply.
       sink.text = "";
       const toolCallId = String(rec.toolCallId || `call-${Date.now()}`);
       const answer = await this.answerToolRequest(String(rec.name), rec.args, toolCallId, gen, policy, stepsLog);
@@ -750,7 +775,9 @@ export class Conductor {
     } else if (eventName === "tool_end") {
     } else if (eventName === "agent_status") {
     } else if (eventName === "final") {
+      sink.sawFinal = true;
       if (typeof rec.text === "string" && rec.text) sink.text = rec.text;
+      if (rec.reasoningOnly === true) sink.reasoningOnly = true;
       return "final";
     } else if (eventName === "usage") {
       const inputTokens = Number(rec.inputTokens || 0);

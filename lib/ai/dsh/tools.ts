@@ -9,6 +9,9 @@ import { isVisualSkillId, validateVisualSkillMarkup } from "../visualSkills";
 export const TOOL_TIMEOUT_MS = 45_000;
 const MAX_RESULT_CHARS = 100_000;
 
+/** Monotonic fallback for tool-call ids a provider failed to supply. */
+let bridgeCallSeq = 0;
+
 function boundedJson(value: unknown): string {
   const text = JSON.stringify(value);
   return text.length > MAX_RESULT_CHARS ? `${text.slice(0, MAX_RESULT_CHARS)}\n…[truncated]` : text;
@@ -68,7 +71,13 @@ export function registerConversationTools(agentCtx: Context, hooks: Conversation
               const check = validateVisualSkillMarkup(html, hooks.loadedVisualSkills());
               if (!check.ok) throw new Error(check.message);
             }
-            const result = await dispatchBridgeCall(hooks.conversationId, String(exec.callId), {
+            // The bridge is keyed by this id and the browser must echo it back
+            // verbatim. Some OpenAI-compatible proxies omit tool_calls[].id, and
+            // an empty key makes the browser mint its own — which never matches,
+            // so the call stalls for the full 45s RPC timeout. Synthesising a
+            // stable id here keeps both sides on the same key.
+            const callId = String(exec.callId || "") || `srv-${name}-${bridgeCallSeq++}`;
+            const result = await dispatchBridgeCall(hooks.conversationId, callId, {
               name,
               args,
               signal: exec.signal,

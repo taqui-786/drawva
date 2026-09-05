@@ -43,9 +43,16 @@ export type StreamEvent =
   | { event: "tool_request"; data: { toolCallId: string; name: string; args: unknown } }
   | { event: "tool_end"; data: { toolCallId: string; ok: boolean } }
   | { event: "usage"; data: { inputTokens: number; outputTokens: number } }
-  | { event: "final"; data: { text: string } }
+  | { event: "final"; data: { text: string; outcome?: TurnOutcome; reasoningOnly?: boolean } }
   | { event: "agent_status"; data: { status: string } }
   | { event: "error"; data: { message: string } };
+
+/**
+ * Why the agent loop stopped. Carried on `final` so the client can tell a real
+ * answer apart from a turn that ended without producing one — the two used to be
+ * indistinguishable, and every non-answer surfaced as "empty response".
+ */
+export type TurnOutcome = "completed" | "max-tokens" | "unknown";
 
 interface Conversation {
   handle: AgentHandle;
@@ -58,6 +65,12 @@ interface Conversation {
   route: string;
   emit: ((e: StreamEvent) => void) | null;
   lastText: string;
+  /**
+   * Reasoning emitted since the last tool call. Never used as the answer, but it
+   * separates "the model thought and then said nothing" (retryable, and common
+   * on R1-style models) from "the model returned nothing at all".
+   */
+  lastReasoning: string;
   disposers: (() => void)[];
 }
 
@@ -235,6 +248,7 @@ async function createConversation(
         route: profile.route,
         emit: null,
         lastText: "",
+        lastReasoning: "",
         disposers: [],
       };
       conversations.set(opts.conversationId, conversation);
@@ -305,6 +319,7 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
       conversation.lastText += chunk.text;
       emit({ event: "text_delta", data: { text: chunk.text } });
     } else if (chunk?.type === "reasoning-delta" && chunk.text) {
+      conversation.lastReasoning += chunk.text;
       emit({ event: "reasoning", data: { text: String(chunk.text).slice(0, 2000) } });
     }
     return;
@@ -317,6 +332,8 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
       if (block?.type === "text" && block.text && !conversation.lastText.endsWith(block.text)) {
         conversation.lastText += block.text;
         emit({ event: "text_delta", data: { text: block.text } });
+      } else if (block?.type === "reasoning" && block.text) {
+        conversation.lastReasoning += block.text;
       }
     }
     if (usage && (usage.inputTokens || usage.outputTokens)) {
@@ -326,6 +343,7 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
   }
   if (type === "tool/call") {
     conversation.lastText = "";
+    conversation.lastReasoning = "";
     return;
   }
   if (type === "tool/result") {
@@ -354,7 +372,30 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
       emit({ event: "error", data: { message: "Agent turn was blocked by safety policy." } });
       return;
     }
-    emit({ event: "final", data: { text: conversation.lastText } });
+    // `max-tokens` means the output cap cut the reply off. When it cut a TOOL CALL
+    // the assembler drops that call (it cannot be dispatched safely), so the turn
+    // ends with neither text nor an action — indistinguishable from success unless
+    // the outcome is carried through. See dsh-llm BlockAssembler.assembled().
+    if (reason?.kind === "max-tokens" && !conversation.lastText.trim()) {
+      emit({
+        event: "error",
+        data: {
+          message:
+            "The model hit its output token limit before finishing. Nothing could be applied. Retry, or reduce the requested scope.",
+        },
+      });
+      return;
+    }
+    const outcome: TurnOutcome =
+      reason?.kind === "completed" ? "completed" : reason?.kind === "max-tokens" ? "max-tokens" : "unknown";
+    emit({
+      event: "final",
+      data: {
+        text: conversation.lastText,
+        outcome,
+        ...(conversation.lastText.trim() ? {} : { reasoningOnly: conversation.lastReasoning.trim().length > 0 }),
+      },
+    });
     return;
   }
 }
@@ -386,6 +427,7 @@ export async function runConversationTurn(
   if (!conversation) throw new Error("Conversation is not established.");
   conversation.emit = emit;
   conversation.lastText = "";
+  conversation.lastReasoning = "";
   setBridgeDispatcher(opts.conversationId, (call) => {
     emit({ event: "tool_request", data: call });
   });
