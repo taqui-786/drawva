@@ -38,6 +38,8 @@ export function buildScene(
       };
       if (w.kind === "diagram") {
         item.sourceFormat = w.sourceFormat || detectDiagramFormat(w.pluginId, w.copyText, w.title);
+      } else if (w.sourceFormat) {
+        item.sourceFormat = w.sourceFormat;
       }
       if (w.copyText && w.copyText.length < 300) item.text = w.copyText.slice(0, 300);
       items.push(item);

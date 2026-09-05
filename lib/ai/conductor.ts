@@ -97,6 +97,7 @@ interface TurnPolicy {
   stopped: string;
   mutated: boolean;
   createdWidgets: Map<string, string>;
+  visualExplainerCreated: boolean;
 }
 
 function finiteNum(v: unknown): number | undefined {
@@ -140,6 +141,8 @@ export function extractToolTarget(name: string, args: unknown): ToolTargetHint |
   }
   const planned = hintBoxOf(a.plannedWidget);
   if (planned) boxes.push(planned);
+  const selfBox = hintBoxOf(a);
+  if (selfBox && (selfBox.w > 0 || selfBox.h > 0)) boxes.push(selfBox);
 
   if (objectIds.length) hint.objectIds = objectIds;
   if (boxes.length) hint.boxes = boxes;
@@ -189,14 +192,18 @@ export function extractToolResultTarget(result: unknown): ToolTargetHint | undef
 }
 
 function widgetTitleOf(args: unknown): string {
-  const commands = (args as { commands?: unknown })?.commands;
+  if (!args || typeof args !== "object") return "";
+  const rec = args as Record<string, unknown>;
+  const direct = typeof rec.title === "string" ? rec.title.trim().toLowerCase() : "";
+  if (direct && rec.html !== undefined && !rec.commands) return direct;
+  const commands = rec.commands;
   const list = Array.isArray(commands) ? commands : [];
   for (const entry of list) {
     if (!entry || typeof entry !== "object") continue;
-    const rec = entry as Record<string, unknown>;
-    if (rec.targetId) return "";
-    const makesWidget = rec.html !== undefined || rec.source !== undefined;
-    const title = typeof rec.title === "string" ? rec.title.trim().toLowerCase() : "";
+    const row = entry as Record<string, unknown>;
+    if (row.targetId) return "";
+    const makesWidget = row.html !== undefined || row.source !== undefined;
+    const title = typeof row.title === "string" ? row.title.trim().toLowerCase() : "";
     if (makesWidget && title) return title;
   }
   return "";
@@ -476,6 +483,7 @@ export class Conductor {
         stopped: "",
         mutated: false,
         createdWidgets: new Map(),
+        visualExplainerCreated: false,
       };
       const stepsLog: AiLogStep[] = [];
 
@@ -510,6 +518,9 @@ export class Conductor {
           if (Array.isArray(a.commands)) {
             commandsList.push(...a.commands);
           }
+        }
+        if (s.tool === "visual_explainer" && s.args && typeof s.args === "object") {
+          commandsList.push({ tool: "visual_explainer", ...(s.args as object) });
         }
       }
 
@@ -864,14 +875,22 @@ export class Conductor {
     let isError = false;
     const budget: Record<string, { used: number; cap: number }> = {
       canvas_apply: { used: policy.applies, cap: AGENT_MAX_APPLIES_PER_TURN },
+      visual_explainer: { used: policy.applies, cap: AGENT_MAX_APPLIES_PER_TURN },
       canvas_patch_widget: { used: policy.patches, cap: AGENT_MAX_PATCHES_PER_TURN },
       canvas_edit: { used: policy.edits, cap: AGENT_MAX_EDITS_PER_TURN },
       canvas_snapshot: { used: policy.snapshots, cap: AGENT_MAX_SNAPSHOTS_PER_TURN },
     };
     const spent = budget[name];
-    const duplicateTitle = name === "canvas_apply" ? widgetTitleOf(args) : "";
+    const duplicateTitle = name === "canvas_apply" || name === "visual_explainer" ? widgetTitleOf(args) : "";
     const alreadyMade = duplicateTitle ? policy.createdWidgets.get(duplicateTitle) : undefined;
-    if ((name === "canvas_patch_widget" || name === "canvas_edit") && policy.layoutReviewNeeded) {
+    if (name === "visual_explainer" && policy.visualExplainerCreated) {
+          isError = true;
+          result = {
+            code: "VISUAL_EXPLAINER_SINGLE_WIDGET_LIMIT",
+            message:
+              "This turn already created a Visual Explainer. Review or canvas_patch_widget that widget — do not create another.",
+          };
+        } else if ((name === "canvas_patch_widget" || name === "canvas_edit") && policy.layoutReviewNeeded) {
           isError = true;
           result = {
             code: "LAYOUT_REVIEW_REQUIRED",
@@ -920,11 +939,12 @@ export class Conductor {
               }
               if (result && typeof result === "object") {
                 const rec = result as Record<string, unknown>;
-                if (rec.ok === true && (name === "canvas_apply" || name === "canvas_patch_widget" || name === "canvas_edit" || name === "canvas_undo")) {
+                if (rec.ok === true && (name === "canvas_apply" || name === "visual_explainer" || name === "canvas_patch_widget" || name === "canvas_edit" || name === "canvas_undo")) {
                   policy.mutated = true;
                 }
-                if (name === "canvas_apply" && rec.ok === true) {
+                if ((name === "canvas_apply" || name === "visual_explainer") && rec.ok === true) {
                   policy.applies += 1;
+                  if (name === "visual_explainer") policy.visualExplainerCreated = true;
                   if (duplicateTitle) {
                     const made = Array.isArray(rec.applied)
                       ? (rec.applied as { objectId?: unknown; kind?: unknown }[]).find(

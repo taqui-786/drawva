@@ -242,6 +242,29 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
     },
   },
   {
+    name: "visual_explainer",
+    description:
+      "Create one explanation-first infographic widget (understand/explain/learn/analyze/organize/plan). Pass complete HTML; Drawva stamps the visual-explainer markers. One per user turn. Refine later with canvas_patch_widget on widget.html. Not for applets, simulations, live data, or professional notation — those stay html_widget / diagram_source.",
+    parameters: {
+      baseRevision: baseRevisionSpec,
+      title: { type: "string", required: true, description: "Short widget title, separate from the HTML <title>" },
+      html: { type: "string", required: true, description: "Complete standalone HTML/SVG document" },
+      x: { type: "number", description: "World X" },
+      y: { type: "number", description: "World Y" },
+      w: { type: "number", description: "Width in world units" },
+      h: { type: "number", description: "Height in world units" },
+      placement: { type: "string", enum: [...PLACEMENTS], description: "Placement hint relative to handwriting" },
+    },
+  },
+  {
+    name: "load_visual_skill",
+    description:
+      "Load one scientific visualization contract (math-2d, physics-2d, or math-3d) into the durable system prompt before authoring a matching Visual Explainer. Required before a manim-web Visual Explainer. Do not load for unrelated subjects.",
+    parameters: {
+      skill: { type: "string", enum: ["math-2d", "physics-2d", "math-3d"], required: true, description: "Skill to load" },
+    },
+  },
+  {
     name: "load_plugin",
     description:
       "Load a capability contract from the catalog. The full document is injected into the system prompt for the rest of the session (durable — it survives context compaction); the tool returns only a short receipt. Call before using a plugin's APIs.",

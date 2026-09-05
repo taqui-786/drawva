@@ -3,6 +3,8 @@ import { defineTool } from "@deepseek-ai/dsh-tools";
 import type { ContentBlock } from "@deepseek-ai/dsh-llm";
 import { AGENT_TOOL_DEFS, enabledToolNames, type AgentToolDef } from "../agentTools";
 import { dispatchBridgeCall } from "./bridge";
+import { loadVisualSkillDocument } from "../visualSkills.server";
+import { isVisualSkillId, validateVisualSkillMarkup } from "../visualSkills";
 
 export const TOOL_TIMEOUT_MS = 45_000;
 const MAX_RESULT_CHARS = 100_000;
@@ -17,6 +19,8 @@ export interface ConversationToolHooks {
   webEnabled: { tinyfish: boolean; search: boolean };
   loadPluginDocument: (pluginId: string) => string | null;
   registerPluginContract: (pluginId: string, document: string) => "registered" | "already" | "limit";
+  registerVisualSkill: (skill: string, document: string) => "registered" | "already";
+  loadedVisualSkills: () => Set<string>;
 }
 
 interface LooseToolDef {
@@ -44,14 +48,33 @@ export function registerConversationTools(agentCtx: Context, hooks: Conversation
           if (!document) throw new Error(`Unknown plugin: ${pluginId || "(empty)"}.`);
           return { pluginId, state: hooks.registerPluginContract(pluginId, document) } as never;
         }
-      : async (args: Record<string, unknown>, exec: { callId: unknown; signal: AbortSignal }) => {
-          const result = await dispatchBridgeCall(hooks.conversationId, String(exec.callId), {
-            name,
-            args,
-            signal: exec.signal,
-          });
-          return (result ?? {}) as never;
-        };
+      : name === "load_visual_skill"
+        ? async (args: Record<string, unknown>) => {
+            const skill = String(args.skill || "");
+            if (!isVisualSkillId(skill)) throw new Error(`Unknown visual skill: ${skill || "(empty)"}.`);
+            const document = loadVisualSkillDocument(skill);
+            if (!document) throw new Error(`Visual skill ${skill} is unavailable.`);
+            const state = hooks.registerVisualSkill(skill, document);
+            return {
+              skill,
+              loaded: true,
+              alreadyLoaded: state === "already",
+              loadedSkills: [...hooks.loadedVisualSkills()].sort(),
+            } as never;
+          }
+        : async (args: Record<string, unknown>, exec: { callId: unknown; signal: AbortSignal }) => {
+            if (name === "visual_explainer") {
+              const html = typeof args.html === "string" ? args.html : "";
+              const check = validateVisualSkillMarkup(html, hooks.loadedVisualSkills());
+              if (!check.ok) throw new Error(check.message);
+            }
+            const result = await dispatchBridgeCall(hooks.conversationId, String(exec.callId), {
+              name,
+              args,
+              signal: exec.signal,
+            });
+            return (result ?? {}) as never;
+          };
 
   for (const def of AGENT_TOOL_DEFS) {
     if (!names.has(def.name)) continue;

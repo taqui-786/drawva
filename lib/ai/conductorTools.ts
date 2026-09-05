@@ -23,6 +23,10 @@ import {
   isWebToolName,
   type CapturePolicy,
 } from "./agentTools";
+import {
+  VISUAL_EXPLAINER_FRAMEWORK_VERSION,
+  VISUAL_EXPLAINER_SOURCE_FORMAT,
+} from "./visualExplainer";
 
 export interface ActiveImage {
   id: string;
@@ -564,6 +568,38 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   return { ok: true, revision: deps.getRevision(), applied, rejected: rejectedRows, ...(widgetMutated ? { widgetMutated: true } : {}) };
 }
 
+async function execVisualExplainer(args: Record<string, unknown>, deps: ConductorToolDeps) {
+  const html = typeof args.html === "string" ? args.html.trim() : "";
+  const title = typeof args.title === "string" ? args.title.trim() : "";
+  if (!html) return toolError("INVALID_ARGUMENT", "visual_explainer.html is required.");
+  if (!title) return toolError("INVALID_ARGUMENT", "visual_explainer.title is required.");
+  if (html.length > MAX_WIDGET_HTML_LENGTH) {
+    return toolError("INVALID_ARGUMENT", `visual_explainer.html exceeds ${MAX_WIDGET_HTML_LENGTH} characters.`);
+  }
+  return execApply(
+    {
+      baseRevision: args.baseRevision,
+      commands: [
+        {
+          tool: "html_widget",
+          pluginId: "general",
+          title,
+          html,
+          x: args.x,
+          y: args.y,
+          w: args.w,
+          h: args.h,
+          placement: args.placement,
+          refreshSeconds: 0,
+          sourceFormat: VISUAL_EXPLAINER_SOURCE_FORMAT,
+          frameworkVersion: VISUAL_EXPLAINER_FRAMEWORK_VERSION,
+        },
+      ],
+    },
+    deps
+  );
+}
+
 function canonicalEditOp(rec: Record<string, unknown>): string {
   const raw = String(rec.op ?? rec.kind ?? rec.type ?? rec.operation ?? rec.action ?? "")
     .trim()
@@ -927,6 +963,8 @@ export async function executeTool(
       return execSnapshot(rec, deps);
     case "canvas_apply":
       return execApply(rec, deps);
+    case "visual_explainer":
+      return execVisualExplainer(rec, deps);
     case "canvas_edit":
       return execEdit(rec, deps);
     case "load_plugin":

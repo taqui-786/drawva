@@ -1,5 +1,4 @@
 import { DIAGRAM_SOURCE_FORMATS } from "./commands";
-import { widgetThemeStyleTag } from "./theme";
 
 export type DiagramFormat = (typeof DIAGRAM_SOURCE_FORMATS extends Set<infer T> ? T : never);
 
@@ -158,21 +157,19 @@ type SmilesDrawerGlobal = {
 
 async function renderMermaid(source: string): Promise<string> {
   const mermaid = (await import("mermaid")).default;
-  const isDark = typeof document !== "undefined" && document.documentElement.classList.contains("dark");
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "loose",
-    theme: isDark ? "dark" : "default",
+    theme: "default",
     themeVariables: {
-      fontFamily: "var(--font-sans, system-ui, -apple-system, sans-serif)",
+      fontFamily: "system-ui, -apple-system, sans-serif",
       fontSize: "15px",
-      darkMode: isDark,
       background: "transparent",
-      mainBkg: isDark ? "#1e293b" : "#f8fafc",
-      nodeBorder: isDark ? "#475569" : "#cbd5e1",
-      nodeTextColor: isDark ? "#f1f5f9" : "#0f172a",
-      lineColor: isDark ? "#94a3b8" : "#475569",
-      textColor: isDark ? "#f1f5f9" : "#0f172a",
+      mainBkg: "#f8fafc",
+      nodeBorder: "#cbd5e1",
+      nodeTextColor: "#0f172a",
+      lineColor: "#475569",
+      textColor: "#0f172a",
     },
     flowchart: { htmlLabels: false, curve: "basis" },
   });
@@ -249,12 +246,10 @@ function cropSvgElement(svg: SVGSVGElement, pad = 12): { width: number; height: 
 }
 
 function wrapStaticSvg(svg: string): string {
-  return `<!doctype html><html><head><meta charset="utf-8">${widgetThemeStyleTag()}<style>
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
 html,body{margin:0;padding:0;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;background:transparent!important;box-sizing:border-box}
 #stage{width:max-content;max-width:100%;height:max-content;max-height:100%;display:flex;align-items:center;justify-content:center;padding:8px;box-sizing:border-box}
 #stage svg{width:auto;height:auto;max-width:100%;max-height:100%;display:block;margin:auto}
-.node rect, .node circle, .node ellipse, .node polygon, .node path { fill: var(--card, #ffffff); stroke: var(--border, #cbd5e1); }
-.node .label, text { fill: var(--foreground, #0f172a); }
 </style></head><body><div id="stage">${svg}</div><script>
 function fitServerSvg(){
   try{
@@ -626,21 +621,19 @@ function clientDiagramRuntimeHtml(opts: {
     await loadScriptFallback("mermaid@10.9.1/dist/mermaid.min.js");
     var mermaid = window.mermaid;
     if (!mermaid || !mermaid.render) throw new Error("Mermaid did not initialize");
-    var isDark = document.documentElement.classList.contains("dark") || (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
     mermaid.initialize({
       startOnLoad: false,
       securityLevel: "loose",
-      theme: isDark ? "dark" : "default",
+      theme: "default",
       themeVariables: {
         fontFamily: "system-ui, -apple-system, sans-serif",
         fontSize: "15px",
-        darkMode: isDark,
         background: "transparent",
-        mainBkg: isDark ? "#1e293b" : "#f8fafc",
-        nodeBorder: isDark ? "#475569" : "#cbd5e1",
-        nodeTextColor: isDark ? "#f1f5f9" : "#0f172a",
-        lineColor: isDark ? "#94a3b8" : "#475569",
-        textColor: isDark ? "#f1f5f9" : "#0f172a"
+        mainBkg: "#f8fafc",
+        nodeBorder: "#cbd5e1",
+        nodeTextColor: "#0f172a",
+        lineColor: "#475569",
+        textColor: "#0f172a"
       },
       flowchart: { htmlLabels: false, curve: "basis" }
     });

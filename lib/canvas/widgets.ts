@@ -18,6 +18,7 @@ export interface WidgetItem {
   kind: WidgetKind;
   pluginId: string;
   sourceFormat?: string;
+  frameworkVersion?: string;
   diagramKind?: string;
   x: number;
   y: number;

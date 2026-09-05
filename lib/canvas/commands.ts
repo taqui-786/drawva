@@ -1310,7 +1310,10 @@ export function validateCommand(
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim().slice(0, 120) : "";
       const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
       const rawTitle = typeof c.title === "string" ? (c.title as string).trim().slice(0, 120) : "";
-      const title = rawTitle || diagramKind || (sourceFormat ? `${sourceFormat} Diagram` : "Visual Widget");
+      const title =
+        rawTitle ||
+        diagramKind ||
+        (sourceFormat === "drawva-visual-explainer+html" ? "Visual explainer" : sourceFormat ? `${sourceFormat} Diagram` : "Visual Widget");
       const refreshSeconds = Number.isFinite(Number(c.refreshSeconds)) ? Math.max(0, Math.min(86400, Math.round(Number(c.refreshSeconds)))) : 0;
 
       const rawHtml = extractHtmlOrSvg(c.html ?? c.content ?? c.code ?? c.body ?? c.source ?? c.svg ?? c.template ?? c.markup ?? c.data ?? c.value ?? c);
@@ -1342,7 +1345,7 @@ export function validateCommand(
       if (diagramKind) out.diagramKind = diagramKind;
       if (sourceFormat) out.sourceFormat = sourceFormat;
       if (frameworkVersion) out.frameworkVersion = frameworkVersion;
-      if (allowCopy && rawCopyText.trim()) {
+      if (allowCopy && sourceFormat !== "drawva-visual-explainer+html" && rawCopyText.trim()) {
         out.copyText = rawCopyText.trim().slice(0, MAX_WIDGET_COPY_TEXT_LENGTH);
         out.copyLabel = String(c.copyLabel || (sourceFormat ? `Copy ${sourceFormat}` : "Copy source")).trim().slice(0, 80);
       }

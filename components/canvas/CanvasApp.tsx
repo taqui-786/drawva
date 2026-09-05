@@ -1459,6 +1459,7 @@ export function CanvasApp() {
         kind: "html",
         pluginId: cmd.pluginId,
         sourceFormat: cmd.sourceFormat,
+        frameworkVersion: cmd.frameworkVersion,
         diagramKind: cmd.diagramKind,
         x: oldWidget ? oldWidget.x : cmd.x,
         y: oldWidget ? oldWidget.y : cmd.y,

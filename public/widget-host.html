@@ -14,6 +14,15 @@
 "use strict";
 (() => {
   const MAX_HTML_LENGTH = 200000;
+  const MANIM_CDN = "https://cdn.jsdelivr.net/npm/manim-web@0.3.24/dist/manim-web.browser.js";
+  const MANIM_LOCAL = new URL("/vendor/manim-web-0.3.24/manim-web.browser.js", location.href).href;
+
+  function prepareScienceHtml(html) {
+    if (!/<meta\b[^>]*\bname\s*=\s*["']drawva-visual-skill["']/i.test(html)) return html;
+    const rewritten = html.split(MANIM_CDN).join(MANIM_LOCAL);
+    const bootstrap = "<script>(function(){try{var orig=HTMLCanvasElement.prototype.getContext;if(typeof orig===\"function\"){HTMLCanvasElement.prototype.getContext=function(type,attrs){if(type===\"webgl\"||type===\"webgl2\")attrs=Object.assign({},attrs||{},{preserveDrawingBuffer:true});return orig.call(this,type,attrs);}}}catch(e){}window.drawvaWidgetReady=function(){window.parent.postMessage({type:\"drawva-widget-updated\"},\"*\");};})();<\/script>";
+    return /<\/head>/i.test(rewritten) ? rewritten.replace(/<\/head>/i, bootstrap + "</head>") : bootstrap + rewritten;
+  }
 
   const requestedParentOrigin = new URL(location.href).searchParams.get("parent-origin");
   let parentOrigin = null;
@@ -377,9 +386,10 @@
     <\/script>`;
 
     const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%!important;height:100%!important;container-type:size;}body{background:transparent!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}.drawva-widget-paused *,.drawva-widget-paused *::before,.drawva-widget-paused *::after{animation-play-state:paused!important;transition:none!important;}</style>' + autoResizeScript;
-    const source = /<\/head>/i.test(html)
-      ? html.replace(/<\/head>/i, transparentBase + '</head>')
-      : transparentBase + html;
+    const prepared = prepareScienceHtml(html);
+    const source = /<\/head>/i.test(prepared)
+      ? prepared.replace(/<\/head>/i, transparentBase + '</head>')
+      : transparentBase + prepared;
     inner.srcdoc = source;
   }
 

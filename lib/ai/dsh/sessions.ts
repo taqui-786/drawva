@@ -5,6 +5,9 @@ import { admitEncodedImages } from "@deepseek-ai/dsh-attachment";
 import type { Agent, AgentHandle } from "@deepseek-ai/dsh-agent";
 import type { ProviderType, ReasoningEffort } from "../provider";
 import { AGENT_SYSTEM_PROMPT, webAccessStatus } from "../prompts";
+import { VISUAL_EXPLAINER_CONTRACT } from "../visualExplainer";
+import { loadVisualSkillDocument } from "../visualSkills.server";
+import { isVisualSkillId } from "../visualSkills";
 import { getEnabledPluginDescriptors, getPluginMetadataList } from "@/lib/plugins/registry";
 import { agentRuntime } from "./runtime";
 import { buildConnectionProfile } from "./profiles";
@@ -141,9 +144,11 @@ async function createConversation(
     if (found) contractDocs.set(pluginId, `\n\n=== PLUGIN CONTRACT (durable): ${found.id} v${found.version} ===\n${found.document}`);
   }
 
+  const visualSkillsLoaded = new Set<string>();
   const setup = (agentCtx: Context) => {
     agentCtx.systemPrompt.section({ name: "drawva:persona", order: 0, text: systemBase });
-    let order = 1;
+    agentCtx.systemPrompt.section({ name: "drawva:visual-explainer", order: 1, text: VISUAL_EXPLAINER_CONTRACT });
+    let order = 2;
     for (const [pluginId, document] of contractDocs) {
       agentCtx.systemPrompt.section({ name: `drawva:plugin:${pluginId}`, order: order++, text: document });
     }
@@ -166,6 +171,19 @@ async function createConversation(
           return "already";
         }
       },
+      registerVisualSkill: (skill, document) => {
+        if (!isVisualSkillId(skill)) return "already";
+        if (visualSkillsLoaded.has(skill)) return "already";
+        const text = loadVisualSkillDocument(skill) || document;
+        agentCtx.systemPrompt.section({
+          name: `drawva:visual-skill:${skill}`,
+          order: 200 + order++,
+          text: `\n\n=== VISUAL SKILL (durable): ${skill} ===\n${text}`,
+        });
+        visualSkillsLoaded.add(skill);
+        return "registered";
+      },
+      loadedVisualSkills: () => visualSkillsLoaded,
     });
   };
 
