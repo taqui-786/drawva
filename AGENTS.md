@@ -8,6 +8,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 <!-- END:nextjs-agent-rules -->
 
+> 🧠 **Complete Codebase Memory:** Read [docs/codebase-memory.md](file:///home/md-taqui-imam/my-projects/drawva/docs/codebase-memory.md) to understand the entire architecture, engine layers, AI conductor loop, tools, and conventions in a single file without burning tokens exploring the repository.
+
 ## Commands
 
 Use **pnpm** (pinned to `pnpm@10.33.3` in `package.json`) — not npm/yarn, despite what README says.

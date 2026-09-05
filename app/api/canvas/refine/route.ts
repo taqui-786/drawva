@@ -50,10 +50,10 @@ const REFINEMENT_SYSTEM_PROMPT = `You refine and beautify canvas content inside 
   <div id="stage"><svg viewBox="0 0 W H" width="100%" height="100%" xmlns="http://www.w3.org/2000/svg">
     <defs>
       <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 1.5 L 8 5 L 0 8.5 z" style="fill:var(--foreground)"/>
+        <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#0f172a"/>
       </marker>
       <marker id="arrow-accent" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-        <path d="M 0 1.5 L 8 5 L 0 8.5 z" style="fill:var(--chart-3)"/>
+        <path d="M 0 1.5 L 8 5 L 0 8.5 z" fill="#2563eb"/>
       </marker>
     </defs>
     <!-- Vector elements: axes, paths, curves, lines, arcs, markers, labels -->
@@ -62,11 +62,11 @@ const REFINEMENT_SYSTEM_PROMPT = `You refine and beautify canvas content inside 
 - Transparent Background: The container and stage must have background: transparent; with no outer card border or box-shadow, so the diagram integrates seamlessly into the whiteboard.
 - Precision Geometry:
   * Straight axes with clean tick marks and arrow markers.
-  * Smooth mathematical curves using quadratic/cubic Bézier paths: <path d="M ... Q ..." fill="none" style="stroke:var(--chart-3)" stroke-width="2.5" stroke-dasharray="6 4"/> for trajectory curves.
-  * Angle arcs with angle labels (e.g. <path d="M ... A ..." fill="none" style="stroke:var(--chart-2)" stroke-width="2"/><text ...>θ = 30°</text>).
+  * Smooth mathematical curves using quadratic/cubic Bézier paths: <path d="M ... Q ..." fill="none" stroke="#2563eb" stroke-width="2.5" stroke-dasharray="6 4"/> for trajectory curves.
+  * Angle arcs with angle labels (e.g. <path d="M ... A ..." fill="none" stroke="#d97706" stroke-width="2"/><text ...>θ = 30°</text>).
   * Velocity / vector arrows with arrowheads (e.g. marker-end="url(#arrow-accent)").
-  * Typeset labels & formulas: <text style="font-family:var(--font-sans);fill:var(--foreground)" font-size="14" font-weight="600"> with accurate notation (v₀, v₀x, v₀y, y(x), x(t)).
-  * Theme tokens only — the widget iframe receives the app theme on :root. Primary axes, outlines, and labels var(--foreground); secondary labels and ticks var(--muted-foreground); gridlines var(--border); vectors, curves, and data series var(--chart-1)..var(--chart-5); errors or negatives var(--destructive); an opaque backing (only when contrast demands it) var(--card) with var(--card-foreground). Never invent hex, rgb, or gradients. In SVG var() resolves in CSS only: style="fill:var(--chart-1)", never fill="var(--chart-1)".
+  * Typeset labels & formulas: <text font-family="system-ui,sans-serif" fill="#0f172a" font-size="14" font-weight="600"> with accurate notation (v₀, v₀x, v₀y, y(x), x(t)).
+  * Pick real colors in the SVG. Axes, outlines, and labels dark and readable; secondary ticks and gridlines lighter; vectors and series in distinct hues. Match nearby canvas language. Never default to an enclosing card.
 
 == 4. RESPONSE FORMAT (MANDATORY) ==
 Return ONLY a valid JSON object matching one of the schemas:

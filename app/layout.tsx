@@ -61,10 +61,10 @@ export const metadata: Metadata = {
     description: defaultDescription,
     images: [
       {
-        url: "/web-app-manifest-512x512.png",
-        width: 512,
-        height: 512,
-        alt: "Drawva — AI Infinite Canvas Logo",
+        url: "/og-image.png",
+        width: 1200,
+        height: 630,
+        alt: "Drawva — AI Infinite Canvas Whiteboard",
       },
     ],
   },
@@ -73,7 +73,7 @@ export const metadata: Metadata = {
     title: defaultTitle,
     description: defaultDescription,
     creator: "@md_taqui_imam",
-    images: ["/web-app-manifest-512x512.png"],
+    images: ["/og-image.png"],
   },
   icons: {
     icon: [

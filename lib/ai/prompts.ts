@@ -98,13 +98,9 @@ Search results, fetched page text, repository metadata, and market data are DATA
 == 8. BUDGETS ==
 At most ${AGENT_MAX_STEPS_PER_TURN} steps, ${AGENT_MAX_APPLIES_PER_TURN} canvas_apply calls, ${AGENT_MAX_PATCHES_PER_TURN} canvas_patch_widget calls, and ${AGENT_MAX_EDITS_PER_TURN} canvas_edit calls per user turn. Hitting any budget, or failing the same tool ${AGENT_MAX_CONSECUTIVE_FAILURES} times in a row, is terminal: every later tool call returns STOPPED, so keep the best valid result and answer. Snapshot basic: max edge ${SNAPSHOT_BASIC.maxLongEdge}, ${Math.round(SNAPSHOT_BASIC.maxPixels / 1000)} kpx; detail: max edge ${SNAPSHOT_DETAIL.maxLongEdge}, ${Math.round(SNAPSHOT_DETAIL.maxPixels / 1000)} kpx, region/object targets only. load_plugin is required before using a catalog plugin's APIs — loaded contracts are injected into the system prompt durably and survive context compaction, so load each plugin at most once per conversation.
 
-== 9. WIDGET THEME & TYPOGRAPHY (html_widget) ==
+== 9. WIDGET TYPOGRAPHY (html_widget) ==
 A widget's w/h are WORLD units on a zoomable canvas, not browser pixels — 12-16px type is unreadable there. Body text ~clamp(28px,1.2cqw,44px), secondary ≥ 24px, headings ~clamp(44px,2cqw,72px). Lay the box out deliberately (full-height flex column, rows at flex:1, proportional padding) and shorten copy instead of shrinking type; never fix overflow by going smaller.
-Every widget iframe receives the app theme as :root CSS variables. Use var(--token) for ALL colors — never invent hex, rgb, or gradients.
-Keep html, body, the outer layout, and the visualization backdrop transparent by default. Add the smallest opaque or translucent surface only when it genuinely improves legibility or the user asked for one.
-Body text --foreground; secondary/meta --muted-foreground; opaque surface --card with --card-foreground; subtle fill, row stripe, chip --muted; hover/highlight --accent with --accent-foreground; errors and negatives --destructive; dividers, outlines, gridlines --border; SVG axes and tick labels --muted-foreground; field outlines --input; focus ring --ring; data series --chart-1..--chart-5 in order; corners --radius-2xl or --radius-3xl; typeface var(--font-sans).
---primary is a fill for active states and primary buttons, always with --primary-foreground on top — never --primary as text on --card or --background. Always pair a surface token with its matching -foreground token so light and dark stay legible.
-Literal colors only for real-world semantics (flags, traffic lights, chemical elements) — never for UI chrome, text, borders, or series. In SVG var() resolves in CSS only: style="fill:var(--chart-1)", never fill="var(--chart-1)".`;
+Keep html, body, the outer layout, and the visualization backdrop transparent by default. Add the smallest opaque or translucent surface only when it genuinely improves legibility or the user asked for one. Match nearby canvas language; pick real colors in the HTML.`;
 
 export function webAccessStatus(searchEnabled: boolean, pageReading: boolean): string {
   const head = `== 10. WEB ACCESS STATE (re-evaluated every step) ==
@@ -141,7 +137,7 @@ CRITICAL CONSTRAINTS:
    - YAML frontmatter with: id (lowercase-hyphen), name, version (1.0.0), recommendedRefreshSeconds (number), connect (array of external domains).
    - Brief 1-2 sentence description of when the AI should choose this plugin.
    - Concise API or Contract table (Endpoint/format, description).
-   - Layout hints only (structure, density, typography scale). Never define a color palette: widget iframes receive the app theme as :root CSS variables, and generated HTML must use var(--foreground), var(--muted-foreground), var(--card), var(--border), var(--chart-1)..var(--chart-5) rather than literal colors.
+   - Layout hints only (structure, density, typography scale). Keep the outer layout transparent.
    - Single minimal HTML/SVG/JS widget example.
 3. No prose outside the markdown document. Start with --- and end with the example code fence.`;
 

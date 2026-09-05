@@ -14,54 +14,6 @@
 "use strict";
 (() => {
   const MAX_HTML_LENGTH = 200000;
-  const MAX_THEME_TOKENS = 48;
-  const MAX_THEME_VALUE_LENGTH = 120;
-  const THEME_TOKEN_PATTERN = /^[a-z0-9-]{1,32}$/;
-  const THEME_VALUE_BLOCKLIST = /[;{}<>\\]|\/\*|@|url\s*\(/i;
-
-  const THEME_DERIVED =
-    "--radius-sm:calc(var(--radius) * 0.6);" +
-    "--radius-md:calc(var(--radius) * 0.8);" +
-    "--radius-lg:var(--radius);" +
-    "--radius-xl:calc(var(--radius) * 1.4);" +
-    "--radius-2xl:calc(var(--radius) * 1.8);" +
-    "--radius-3xl:calc(var(--radius) * 2.2);" +
-    "--radius-4xl:calc(var(--radius) * 2.6);";
-
-  let currentTheme = null;
-  let writtenThemeJson = null;
-
-  function sanitizeTheme(theme) {
-    if (!theme || typeof theme !== "object") return null;
-    const entries = Object.keys(theme).slice(0, MAX_THEME_TOKENS);
-    const clean = {};
-    let count = 0;
-    for (const token of entries) {
-      if (!THEME_TOKEN_PATTERN.test(token)) continue;
-      const raw = theme[token];
-      if (typeof raw !== "string") continue;
-      const value = raw.trim();
-      if (!value || value.length > MAX_THEME_VALUE_LENGTH) continue;
-      if (THEME_VALUE_BLOCKLIST.test(value)) continue;
-      clean[token] = value;
-      count++;
-    }
-    return count ? clean : null;
-  }
-
-  function themeStyleTag() {
-    if (!currentTheme) return "";
-    const declarations = Object.keys(currentTheme)
-      .map((token) => "--" + token + ":" + currentTheme[token])
-      .join(";");
-    if (!declarations) return "";
-    return (
-      "<style>@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');" +
-      ":root{" + declarations + ";" + THEME_DERIVED + "}" +
-      (currentTheme.foreground ? ":where(body){color:var(--foreground)}" : "") +
-      "</style>"
-    );
-  }
 
   const requestedParentOrigin = new URL(location.href).searchParams.get("parent-origin");
   let parentOrigin = null;
@@ -387,15 +339,6 @@
             postSnapshot(ev.data.reqId);
           } else if (ev.data.type === 'drawva-widget-check-size') {
             postContentSize();
-          } else if (ev.data.type === 'drawva-widget-theme') {
-            var theme = ev.data.theme;
-            if (!theme || typeof theme !== 'object') return;
-            var root = document.documentElement;
-            for (var key in theme) {
-              if (!Object.prototype.hasOwnProperty.call(theme, key)) continue;
-              if (typeof theme[key] !== 'string') continue;
-              try { root.style.setProperty('--' + key, theme[key]); } catch (e) {}
-            }
           } else if (ev.data.type === 'drawva-widget-state') {
             if (typeof ev.data.active === 'boolean') {
               setRuntimeActive(ev.data.active);
@@ -434,24 +377,11 @@
     <\/script>`;
 
     const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%!important;height:100%!important;container-type:size;}body{background:transparent!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}.drawva-widget-paused *,.drawva-widget-paused *::before,.drawva-widget-paused *::after{animation-play-state:paused!important;transition:none!important;}</style>' + autoResizeScript;
-    const injected = themeStyleTag() + transparentBase;
-    writtenThemeJson = currentTheme ? JSON.stringify(currentTheme) : null;
     const source = /<\/head>/i.test(html)
-      ? html.replace(/<\/head>/i, injected + '</head>')
-      : injected + html;
+      ? html.replace(/<\/head>/i, transparentBase + '</head>')
+      : transparentBase + html;
     inner.srcdoc = source;
   }
-
-  function pushTheme() {
-    if (!currentTheme || !inner.contentWindow) return;
-    inner.contentWindow.postMessage({ type: "drawva-widget-theme", theme: currentTheme }, "*");
-  }
-
-  inner.addEventListener("load", () => {
-    if (!currentTheme) return;
-    if (JSON.stringify(currentTheme) === writtenThemeJson) return;
-    pushTheme();
-  });
 
   function forward(msg) {
     if (parentOrigin) parent.postMessage(msg, parentOrigin);
@@ -466,15 +396,7 @@
     if (data.type === "drawva-widget-init") {
       if (!fromParent) return;
       if (typeof data.html !== "string" || data.html.length > MAX_HTML_LENGTH) return;
-      const initTheme = sanitizeTheme(data.theme);
-      if (initTheme) currentTheme = initTheme;
       writeInner(data.html);
-    } else if (data.type === "drawva-widget-theme") {
-      if (!fromParent) return;
-      const nextTheme = sanitizeTheme(data.theme);
-      if (!nextTheme) return;
-      currentTheme = nextTheme;
-      pushTheme();
     } else if (data.type === "drawva-widget-state") {
       if (!fromParent) return;
       inner.contentWindow && inner.contentWindow.postMessage({ type: "drawva-widget-state", selected: !!data.selected, active: !!data.active }, "*");
