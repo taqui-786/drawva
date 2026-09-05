@@ -12,7 +12,8 @@
     "db:push": "drizzle-kit push",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
-    "test:agent": "tsx tests/agent-check.mts"
+    "test:agent": "tsx tests/agent-check.mts",
+    "test:placement": "tsx tests/placement-check.mts"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

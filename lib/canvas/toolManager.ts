@@ -60,6 +60,10 @@ export class ToolManager {
     this.selection.setSelectionListener(fn);
   }
 
+  setShapeCommitListener(fn: ((p: import("./shapes").ShapePrimitive) => void) | null): void {
+    this.shapes.onCommit = fn ?? undefined;
+  }
+
   get isInteracting(): boolean {
     return (
       this.pan !== null ||

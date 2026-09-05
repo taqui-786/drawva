@@ -9,6 +9,7 @@ import {
   normalizeAnimationScene,
 } from "./animation";
 import { sampleSvgPath } from "./svgPath";
+import { solvePlacement, scaleAwareGap, largestInscribedRect } from "./placement";
 
 export const MAX_COMMANDS = 16;
 export const AI_TEXT_MAX_LENGTH = 800;
@@ -177,6 +178,7 @@ export interface CommandValidationContext {
   widgetGeometry?: { max?: { w?: number; h?: number } } | null;
   plotBudget?: { used: number };
   spatialPlan?: string;
+  intent?: { x: number; y: number } | null;
 }
 
 const isFiniteNum = n as (v: unknown, min?: number, max?: number) => boolean;
@@ -229,7 +231,7 @@ function textColumnWidth(
   return clampNum(fallback, 80, cap);
 }
 
-function textContentBox(
+export function textContentBox(
   text: string,
   fontSize: number,
   lineHeight: number,
@@ -268,78 +270,12 @@ function clampNum(v: number, lo: number, hi: number): number {
 }
 
 export const PLACE_GAP = 48;
-const SLIDE_GAP = 24;
-const TELEPORT_PX = 280;
 
 type Box = { x: number; y: number; w: number; h: number };
 type Side = "below" | "right" | "left" | "top";
 
-function overlaps(a: Box, b: Box, pad = 24): boolean {
+function overlaps(a: Box, b: Box, pad = 0): boolean {
   return a.x < b.x + b.w + pad && a.x + a.w > b.x - pad && a.y < b.y + b.h + pad && a.y + a.h > b.y - pad;
-}
-
-function viewOverlapRatio(box: Box, view?: Box): number {
-  if (!view) return 1;
-  const ix = Math.max(0, Math.min(box.x + box.w, view.x + view.w) - Math.max(box.x, view.x));
-  const iy = Math.max(0, Math.min(box.y + box.h, view.y + view.h) - Math.max(box.y, view.y));
-  return (ix * iy) / Math.max(1, box.w * box.h);
-}
-
-function slotFor(anchor: Box, w: number, h: number, dir: Side, gap = PLACE_GAP): { x: number; y: number } {
-  if (dir === "right") return { x: Math.round(anchor.x + anchor.w + gap), y: Math.round(anchor.y) };
-  if (dir === "left") return { x: Math.round(anchor.x - w - gap), y: Math.round(anchor.y) };
-  if (dir === "top") return { x: Math.round(anchor.x), y: Math.round(anchor.y - h - gap) };
-  return { x: Math.round(anchor.x), y: Math.round(anchor.y + anchor.h + gap) };
-}
-
-function sideOrder(preferred: string): Side[] {
-  if (preferred === "right") return ["right", "below", "left", "top"];
-  if (preferred === "left") return ["left", "below", "right", "top"];
-  if (preferred === "top") return ["top", "below", "right", "left"];
-  return ["below", "right", "left", "top"];
-}
-
-function slideClear(box: Box, dir: Side, blockers: Box[]): Box | null {
-  const next: Box = { ...box };
-  const alongX = dir === "below" || dir === "top";
-  for (let step = 0; step < 10; step++) {
-    const hit = blockers.find((b) => overlaps(next, b));
-    if (!hit) return next;
-    if (alongX) {
-      const right = hit.x + hit.w + SLIDE_GAP;
-      const left = hit.x - next.w - SLIDE_GAP;
-      next.x = Math.round(Math.abs(right - box.x) <= Math.abs(left - box.x) ? right : left);
-    } else {
-      const down = hit.y + hit.h + SLIDE_GAP;
-      const up = hit.y - next.h - SLIDE_GAP;
-      next.y = Math.round(Math.abs(down - box.y) <= Math.abs(up - box.y) ? down : up);
-    }
-    next.x = clampNum(next.x, 0, SIZE - next.w);
-    next.y = clampNum(next.y, 0, SIZE - next.h);
-    if (overlaps(next, hit, 0)) return null;
-  }
-  return blockers.some((b) => overlaps(next, b)) ? null : next;
-}
-
-function staysOnSide(box: Box, intended: { x: number; y: number }, dir: Side): boolean {
-  if (dir === "below" || dir === "top") return Math.abs(box.y - intended.y) <= TELEPORT_PX;
-  return Math.abs(box.x - intended.x) <= TELEPORT_PX;
-}
-
-function roomOnSide(
-  anchor: Box,
-  w: number,
-  h: number,
-  dir: Side,
-  view?: Box,
-  items?: Box[]
-): number {
-  const p = slotFor(anchor, w, h, dir);
-  const box = { x: clampNum(p.x, 0, SIZE - w), y: clampNum(p.y, 0, SIZE - h), w, h };
-  if (!staysOnSide(box, p, dir)) return -1;
-  const cleared = slideClear(box, dir, items || []);
-  if (!cleared || !staysOnSide(cleared, p, dir)) return -1;
-  return viewOverlapRatio(cleared, view);
 }
 
 function pickPreferredSide(
@@ -349,21 +285,25 @@ function pickPreferredSide(
   h: number,
   view?: Box,
   items?: Box[],
-  fallback: Side = "below"
+  fallback: Side = "below",
+  scale?: number,
+  intent?: { x: number; y: number } | null
 ): Side {
   if (requested === "right" || requested === "left" || requested === "top" || requested === "below") {
     return requested;
   }
-  let best: Side = fallback;
-  let bestScore = -1;
-  for (const dir of ["below", "right", "left", "top"] as Side[]) {
-    const score = roomOnSide(anchor, w, h, dir, view, items);
-    if (score > bestScore) {
-      bestScore = score;
-      best = dir;
-    }
-  }
-  return bestScore >= 0 ? best : fallback;
+  const blockers = (items || []).filter((it) => it !== anchor);
+  const res = solvePlacement({
+    anchor,
+    w,
+    h,
+    view,
+    obstacles: blockers,
+    preferred: fallback,
+    scale,
+    intent,
+  });
+  return res.side || fallback;
 }
 
 export function placeAroundAnchor(
@@ -372,38 +312,22 @@ export function placeAroundAnchor(
   h: number,
   view?: Box,
   items?: Box[],
-  preferred = "below"
+  preferred = "below",
+  scale?: number,
+  intent?: { x: number; y: number } | null
 ): { x: number; y: number } {
-  const order = sideOrder(preferred);
-  const blockers = (items || []).filter(
-    (it) => Math.abs(it.x - anchor.x) > 2 || Math.abs(it.y - anchor.y) > 2
-  );
-  let best: Box | null = null;
-  let bestScore = -1;
-  for (const dir of order) {
-    const intended = slotFor(anchor, w, h, dir);
-    const raw: Box = {
-      x: clampNum(intended.x, 0, SIZE - w),
-      y: clampNum(intended.y, 0, SIZE - h),
-      w,
-      h,
-    };
-    if (!staysOnSide(raw, intended, dir)) continue;
-    const cleared = slideClear(raw, dir, blockers);
-    if (!cleared || !staysOnSide(cleared, intended, dir)) continue;
-    const visible = viewOverlapRatio(cleared, view);
-    if (dir === order[0]) {
-      return { x: cleared.x, y: cleared.y };
-    }
-    const score = visible + (dir === order[0] ? 0.2 : 0) - (dir === "top" ? 0.05 : 0);
-    if (score > bestScore) {
-      bestScore = score;
-      best = cleared;
-    }
-  }
-  if (best) return { x: best.x, y: best.y };
-  const fallback = slotFor(anchor, w, h, order[0]);
-  return { x: clampNum(fallback.x, 0, SIZE - w), y: clampNum(fallback.y, 0, SIZE - h) };
+  const blockers = (items || []).filter((it) => it !== anchor);
+  const res = solvePlacement({
+    anchor,
+    w,
+    h,
+    view,
+    obstacles: blockers,
+    preferred,
+    scale,
+    intent,
+  });
+  return { x: res.box.x, y: res.box.y };
 }
 
 function isViewportDump(box: Box, view?: Box): boolean {
@@ -416,10 +340,11 @@ function isViewportDump(box: Box, view?: Box): boolean {
 function occupancy(
   changedBox?: { x: number; y: number; w: number; h: number },
   sceneItems?: Array<{ x: number; y: number; w: number; h: number }>,
-  visibleRect?: Box
+  _visibleRect?: Box
 ): Array<{ x: number; y: number; w: number; h: number }> {
+  void _visibleRect;
   const items = [...(sceneItems || [])];
-  if (changedBox && changedBox.w > 4 && changedBox.h > 4 && !isViewportDump(changedBox, visibleRect)) {
+  if (changedBox && changedBox.w > 4 && changedBox.h > 4) {
     items.push(changedBox);
   }
   return items;
@@ -507,11 +432,13 @@ function placeContentImpl(
       h,
       ctx.visibleRect,
       blockers,
-      "below"
+      "below",
+      ctx.scale,
+      ctx.intent
     );
-    return placeAroundAnchor(anchor, w, h, ctx.visibleRect, blockers, preferred);
+    return placeAroundAnchor(anchor, w, h, ctx.visibleRect, blockers, preferred, ctx.scale, ctx.intent);
   }
-  if (ctx.visibleRect) return placeInVisible(ctx.visibleRect, w, h, blockers);
+  if (ctx.visibleRect) return placeInVisible(ctx.visibleRect, w, h, blockers, ctx.scale, ctx.intent);
   return { x: 1000, y: 1000 };
 }
 
@@ -526,20 +453,31 @@ function placementAnchor(
   return changedBox;
 }
 
-function placeInVisible(view: Box, w: number, h: number, blockers: Box[]): { x: number; y: number } {
+function placeInVisible(
+  view: Box,
+  w: number,
+  h: number,
+  blockers: Box[],
+  scale?: number,
+  intent?: { x: number; y: number } | null
+): { x: number; y: number } {
+  const gap = scaleAwareGap(scale, view);
   const hint: Box = {
-    x: Math.round(view.x + 48),
+    x: Math.round(view.x + gap),
     y: Math.round(view.y + Math.min(220, view.h * 0.22)),
     w: Math.max(80, Math.min(w, Math.round(view.w * 0.35))),
     h: 36,
   };
-  return placeAroundAnchor(hint, w, h, view, blockers, "below");
+  return placeAroundAnchor(hint, w, h, view, blockers, "below", scale, intent);
 }
 
 function rescueCollision(
   box: Box,
   placement: string,
-  source: Pick<CommandValidationContext, "changedBox" | "visibleRect" | "sceneItems">,
+  source: Pick<CommandValidationContext, "changedBox" | "visibleRect" | "sceneItems"> & {
+    scale?: number;
+    intent?: { x: number; y: number } | null;
+  },
   allowMove: boolean
 ): Box {
   const anchor = placementAnchor(source.changedBox, source.visibleRect);
@@ -554,10 +492,11 @@ function rescueCollision(
   ) {
     return box;
   }
-  if (!overlaps(box, anchor, 4)) return box;
+  const pad = scaleAwareGap(source.scale, source.visibleRect);
+  if (!overlaps(box, anchor, pad)) return box;
   const blockers = occupancy(source.changedBox, source.sceneItems, source.visibleRect);
-  const preferred = pickPreferredSide(placement, anchor, box.w, box.h, source.visibleRect, blockers, "below");
-  const near = placeAroundAnchor(anchor, box.w, box.h, source.visibleRect, blockers, preferred);
+  const preferred = pickPreferredSide(placement, anchor, box.w, box.h, source.visibleRect, blockers, "below", source.scale, source.intent);
+  const near = placeAroundAnchor(anchor, box.w, box.h, source.visibleRect, blockers, preferred, source.scale, source.intent);
   return {
     x: clampNum(near.x, 0, SIZE - box.w),
     y: clampNum(near.y, 0, SIZE - box.h),
@@ -597,7 +536,9 @@ export function fitWidgetGeometry(
   _reposition = true,
   widgetEditBox?: Box,
   sceneItems?: Array<{ id?: string; kind: string; x: number; y: number; w: number; h: number; title?: string }>,
-  widgetGeometry?: { max?: { w?: number; h?: number } } | null
+  widgetGeometry?: { max?: { w?: number; h?: number } } | null,
+  scale?: number,
+  intent?: { x: number; y: number } | null
 ): Box | null {
   void _reposition;
   const placement = String(cmd.placement || "").toLowerCase();
@@ -657,23 +598,28 @@ export function fitWidgetGeometry(
       widgetGeometry
     );
     if (!box) return null;
-    return box;
+    return rescueCollision(box, placement, { changedBox, visibleRect, sceneItems, scale, intent }, true);
   }
 
   const anchor = placementAnchor(changedBox, visibleRect);
 
   if ((isTargetPlacement || placement === "in_place") && anchor && changedBox) {
-    const pad = 12;
-    const w = Math.max(160, Math.round(changedBox.w - pad * 2));
-    const h = Math.max(120, Math.round(changedBox.h - pad * 2));
-    return sanitizeWidgetGeometry(
-      {
-        x: Math.round(changedBox.x + pad),
-        y: Math.round(changedBox.y + pad),
-        w,
-        h,
+    const aspect =
+      Number.isFinite(rawW) && Number.isFinite(rawH) && rawW > 0 && rawH > 0
+        ? rawW / rawH
+        : changedBox.w / Math.max(1, changedBox.h);
+    const inscribed = largestInscribedRect(changedBox, aspect);
+    const containerGeom = {
+      max: {
+        w: Math.min(widgetGeometry?.max?.w ?? Infinity, changedBox.w),
+        h: Math.min(widgetGeometry?.max?.h ?? Infinity, changedBox.h),
       },
-      widgetGeometry
+      mode: "contained" as const,
+      scale,
+    };
+    return sanitizeWidgetGeometry(
+      inscribed,
+      containerGeom
     );
   }
 
@@ -694,12 +640,12 @@ export function fitWidgetGeometry(
   let y: number;
 
   if (anchor && changedBox) {
-    const preferred = pickPreferredSide(placement, changedBox, w, h, visibleRect, blockers, "below");
-    const near = placeAroundAnchor(changedBox, w, h, visibleRect, blockers, preferred);
+    const preferred = pickPreferredSide(placement, changedBox, w, h, visibleRect, blockers, "below", scale, intent);
+    const near = placeAroundAnchor(changedBox, w, h, visibleRect, blockers, preferred, scale, intent);
     x = near.x;
     y = near.y;
   } else if (visibleRect) {
-    const near = placeInVisible(visibleRect, w, h, blockers);
+    const near = placeInVisible(visibleRect, w, h, blockers, scale, intent);
     x = near.x;
     y = near.y;
   } else {
@@ -749,7 +695,7 @@ function fitAnimationGeometry(
     const x = clampNum(rawX, 0, SIZE - w);
     const y = clampNum(rawY, 0, SIZE - h);
 
-    return { x, y, w, h };
+    return rescueCollision({ x, y, w, h }, placement, ctx, true);
   }
 
   const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
@@ -770,12 +716,12 @@ function fitAnimationGeometry(
   let y: number;
 
   if (anchor && ctx.changedBox) {
-    const preferred = pickPreferredSide(placement, ctx.changedBox, w, h, ctx.visibleRect, blockers, "below");
-    const near = placeAroundAnchor(ctx.changedBox, w, h, ctx.visibleRect, blockers, preferred);
+    const preferred = pickPreferredSide(placement, ctx.changedBox, w, h, ctx.visibleRect, blockers, "below", ctx.scale, ctx.intent);
+    const near = placeAroundAnchor(ctx.changedBox, w, h, ctx.visibleRect, blockers, preferred, ctx.scale, ctx.intent);
     x = near.x;
     y = near.y;
   } else if (ctx.visibleRect) {
-    const near = placeInVisible(ctx.visibleRect, w, h, blockers);
+    const near = placeInVisible(ctx.visibleRect, w, h, blockers, ctx.scale, ctx.intent);
     x = near.x;
     y = near.y;
   } else {
@@ -836,6 +782,7 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
   if (Number.isFinite(rawX) && Number.isFinite(rawY)) {
     x = clampNum(rawX, 0, SIZE - w);
     y = clampNum(rawY, 0, SIZE - h);
+    return rescueCollision({ x, y, w, h }, String(c.placement || "").toLowerCase(), ctx, true);
   } else {
     const anchor = placementAnchor(ctx.changedBox, ctx.visibleRect);
     if (anchor) {
@@ -846,13 +793,15 @@ function fitPlotGeometry(c: Record<string, unknown>, ctx: CommandValidationConte
         h,
         ctx.visibleRect,
         blockers,
-        "below"
+        "below",
+        ctx.scale,
+        ctx.intent
       );
-      const near = placeAroundAnchor(anchor, w, h, ctx.visibleRect, blockers, preferred);
+      const near = placeAroundAnchor(anchor, w, h, ctx.visibleRect, blockers, preferred, ctx.scale, ctx.intent);
       x = near.x;
       y = near.y;
     } else if (ctx.visibleRect) {
-      const near = placeInVisible(ctx.visibleRect, w, h, blockers);
+      const near = placeInVisible(ctx.visibleRect, w, h, blockers, ctx.scale, ctx.intent);
       x = near.x;
       y = near.y;
     } else {
@@ -1123,18 +1072,21 @@ function flattenGeometry(c: Record<string, unknown>): Record<string, unknown> {
   const nested = ["box", "bbox", "rect", "geometry", "bounds", "frame"]
     .map((key) => c[key])
     .find((value): value is Record<string, unknown> => Boolean(value) && typeof value === "object" && !Array.isArray(value));
-  const pick = (...keys: string[]): unknown => {
-    for (const key of keys) {
-      if (c[key] !== undefined && c[key] !== null) return c[key];
-      if (nested && nested[key] !== undefined && nested[key] !== null) return nested[key];
-    }
-    return undefined;
-  };
+
   const out = { ...c };
-  const x = pick("x", "left");
-  const y = pick("y", "top");
-  const w = pick("w", "width");
-  const h = pick("h", "height");
+  const hasFlatX = (c.x !== undefined && c.x !== null) || (c.left !== undefined && c.left !== null);
+  const hasFlatY = (c.y !== undefined && c.y !== null) || (c.top !== undefined && c.top !== null);
+  const hasFlatW = (c.w !== undefined && c.w !== null) || (c.width !== undefined && c.width !== null);
+  const hasFlatH = (c.h !== undefined && c.h !== null) || (c.height !== undefined && c.height !== null);
+  const hasFlat = hasFlatX || hasFlatY || hasFlatW || hasFlatH;
+
+  const src = hasFlat ? c : (nested || c);
+
+  const x = src.x !== undefined && src.x !== null ? src.x : src.left;
+  const y = src.y !== undefined && src.y !== null ? src.y : src.top;
+  const w = src.w !== undefined && src.w !== null ? src.w : src.width;
+  const h = src.h !== undefined && src.h !== null ? src.h : src.height;
+
   if (x !== undefined) out.x = x;
   if (y !== undefined) out.y = y;
   if (w !== undefined) out.w = w;
@@ -1308,7 +1260,7 @@ export function validateCommand(
       const diagramKind = typeof c.diagramKind === "string" ? (c.diagramKind as string).trim().slice(0, 80) : "";
       const sourceFormat = typeof c.sourceFormat === "string" ? (c.sourceFormat as string).trim().slice(0, 80) : "";
       const frameworkVersion = typeof c.frameworkVersion === "string" ? (c.frameworkVersion as string).trim().slice(0, 120) : "";
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry, ctx.scale, ctx.intent);
       const rawTitle = typeof c.title === "string" ? (c.title as string).trim().slice(0, 120) : "";
       const title =
         rawTitle ||
@@ -1355,7 +1307,7 @@ export function validateCommand(
       if (ctx.plugins && !ctx.plugins.has("flowchart")) {
         return fail("diagram_source.plugin-disabled");
       }
-      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry);
+      const geometry = fitWidgetGeometry(c, ctx.visibleRect, ctx.changedBox, !ctx.keepPosition, ctx.widgetEditBox, ctx.sceneItems, ctx.widgetGeometry, ctx.scale, ctx.intent);
       const rawFormat = typeof c.sourceFormat === "string" ? c.sourceFormat : "";
       const rawSource = extractDiagramSource(c.source ?? c.code ?? c.content ?? c.diagram ?? c.text ?? c.body ?? c.spec ?? c.data ?? c);
       const source = rawSource.trim();

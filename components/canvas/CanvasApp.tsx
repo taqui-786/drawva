@@ -152,6 +152,12 @@ type RefineResult =
   | { kind: "html_widget"; html: string; title: string }
   | { kind: "reject"; reason: string };
 
+/**
+ * How long successive ink commits are treated as ONE user gesture. Governs both
+ * the newest-ink bounding box union and the arrow-intent lifetime.
+ */
+const INK_COALESCE_MS = 25_000;
+
 export function CanvasApp() {
   const { engine, mountRef } = useCanvas();
   const { mode, color, pen, aiStatus, autoOn } = useSnapshot(appState);
@@ -268,6 +274,11 @@ export function CanvasApp() {
   const inkSnapshotRef = useRef<HTMLCanvasElement | null>(null);
   const refreshRefineRectRef = useRef<() => void>(() => {});
   const inkBoxRef = useRef<Rect | null>(null);
+  // The arrow carries its OWN timestamp. Deriving its lifetime from
+  // lastStrokeTimeRef would be wrong: that ref is also refreshed by the text
+  // tool (commitText), which has no arrow-clearing branch, so a long-expired
+  // arrow would keep steering placement into a brand-new text session.
+  const lastArrowRef = useRef<{ from: Point; to: Point; at: number } | null>(null);
   const scheduledInkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
   const lastStrokeTimeRef = useRef<number>(0);
@@ -1094,6 +1105,7 @@ export function CanvasApp() {
     widgets.current?.clear();
     objects.current?.clear();
     inkBoxRef.current = null;
+    lastArrowRef.current = null;
     conductorRef.current?.cancel();
     conductorRef.current?.clearHistory();
     setAiStatus("idle");
@@ -1132,6 +1144,11 @@ export function CanvasApp() {
   useEffect(() => {
     if (!engine) return;
     const tm = new ToolManager(engine, () => ({ color: appState.color, pen: appState.pen, eraser }), "hand");
+    tm.setShapeCommitListener((p) => {
+      if (p.kind === "arrow") {
+        lastArrowRef.current = { from: p.from, to: p.to, at: Date.now() };
+      }
+    });
     tools.current = tm;
 
     const wm = new WidgetManager({
@@ -1676,6 +1693,15 @@ export function CanvasApp() {
       onEvent: (e) => handleConductorEventRef.current(e),
       afterBoardChange: () => afterBoardChangeRef.current(),
       getInkBox: () => scheduledInkBoxRef.current ?? inkBoxRef.current,
+      getInkIntent: () => {
+        const arrow = lastArrowRef.current;
+        if (!arrow) return null;
+        if (Date.now() - arrow.at >= INK_COALESCE_MS) return null;
+        const dx = arrow.to.x - arrow.from.x;
+        const dy = arrow.to.y - arrow.from.y;
+        const len = Math.hypot(dx, dy);
+        return len > 1e-4 ? { x: dx / len, y: dy / len } : null;
+      },
     });
     conductorRef.current = agent;
 
@@ -2098,7 +2124,7 @@ export function CanvasApp() {
       });
       const textBox = { x: textAnchor.x, y: textAnchor.y, w: block.w, h: block.h };
       const now = Date.now();
-      if (inkBoxRef.current && now - lastStrokeTimeRef.current < 25000) {
+      if (inkBoxRef.current && now - lastStrokeTimeRef.current < INK_COALESCE_MS) {
         inkBoxRef.current = unionRect(inkBoxRef.current, textBox);
       } else {
         inkBoxRef.current = textBox;
@@ -2471,11 +2497,14 @@ export function CanvasApp() {
             const now = Date.now();
             if (
               inkBoxRef.current &&
-              now - lastStrokeTimeRef.current < 25000
+              now - lastStrokeTimeRef.current < INK_COALESCE_MS
             ) {
               inkBoxRef.current = unionRect(inkBoxRef.current, singleStrokeBox);
             } else {
               inkBoxRef.current = singleStrokeBox;
+              if (mode !== "arrow") {
+                lastArrowRef.current = null;
+              }
             }
             lastStrokeTimeRef.current = now;
             const currentInkBox = { ...inkBoxRef.current };

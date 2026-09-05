@@ -13,9 +13,11 @@ export interface ShapePrimitive {
   kind: ShapeKind;
   from: Point;
   to: Point;
+  style?: ShapeStyle;
 }
 
 export class ShapeController {
+  public onCommit?: (p: ShapePrimitive) => void;
   private active: {
     id: number;
     start: Point;
@@ -102,6 +104,12 @@ export class ShapeController {
     this.engine.requestInteractionRender(
       previewRect(d.start, d.current, d.style.lineWidth)
     );
+    this.onCommit?.({
+      kind: d.kind,
+      style: d.style,
+      from: d.start,
+      to: d.current,
+    });
     rasterize(this.engine, d.start, d.current, d.kind, d.style);
   }
 

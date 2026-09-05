@@ -17,19 +17,19 @@ export interface WidgetGeometrySpec {
   sizingPolicy: string;
 }
 
+import { fitAspectLocked } from "@/lib/canvas/placement";
+
 export function widgetGeometryForViewport(visibleRect?: { w?: number; h?: number } | null): WidgetGeometrySpec {
-  const bucket = (value: number | undefined) =>
-    Math.ceil(Math.min(CANVAS_SIZE, Math.max(1, Number(value) || 1)) / 1000) * 1000;
-  const viewportW = bucket(visibleRect?.w);
-  const viewportH = bucket(visibleRect?.h);
+  const viewW = Math.max(1, Math.min(CANVAS_SIZE, Number(visibleRect?.w) || DEFAULT_WIDGET_WIDTH * 2));
+  const viewH = Math.max(1, Math.min(CANVAS_SIZE, Number(visibleRect?.h) || DEFAULT_WIDGET_HEIGHT));
 
   return {
-    basis: "half-of-current-visible-viewport",
-    viewportBucket: { w: viewportW, h: viewportH, rounding: "ceil-to-1000-before-halving" },
+    basis: "half-visible-width-full-visible-height",
+    viewportBucket: { w: Math.round(viewW), h: Math.round(viewH), rounding: "exact-viewport" },
     min: { w: MIN_WIDGET_WIDTH, h: MIN_WIDGET_HEIGHT },
     max: {
-      w: Math.max(MIN_WIDGET_WIDTH, Math.round(viewportW / 2)),
-      h: Math.max(MIN_WIDGET_HEIGHT, Math.round(viewportH / 2)),
+      w: Math.max(MIN_WIDGET_WIDTH, Math.round(viewW / 2)),
+      h: Math.max(MIN_WIDGET_HEIGHT, Math.round(viewH)),
     },
     sizingPolicy:
       "The bounds are not targets. Choose dimensions appropriate to content volume, aspect ratio, layout, and readable typography; neither maximize nor minimize by default.",
@@ -45,7 +45,7 @@ export interface BoxLike {
 
 export function fitWidgetGeometry(
   command: BoxLike | null | undefined,
-  widgetGeometry?: { max?: { w?: number; h?: number } } | null
+  widgetGeometry?: { max?: { w?: number; h?: number }; mode?: "free" | "contained"; scale?: number } | null
 ): { x: number; y: number; w: number; h: number } | null {
   if (
     !command ||
@@ -61,44 +61,42 @@ export function fitWidgetGeometry(
     return null;
   }
 
+  const mode = widgetGeometry?.mode || "free";
+  const minBoundW = mode === "contained" ? 1 : MIN_WIDGET_WIDTH;
+  const minBoundH = mode === "contained" ? 1 : MIN_WIDGET_HEIGHT;
   const targetMaxW = Math.max(
-    MIN_WIDGET_WIDTH,
+    minBoundW,
     Math.min(MAX_WIDGET_WIDTH, Math.round(widgetGeometry?.max?.w ?? 0) || MODEL_MAX_WIDGET_WIDTH)
   );
   const targetMaxH = Math.max(
-    MIN_WIDGET_HEIGHT,
+    minBoundH,
     Math.min(MAX_WIDGET_HEIGHT, Math.round(widgetGeometry?.max?.h ?? 0) || MODEL_MAX_WIDGET_HEIGHT)
   );
 
-  let x = Math.round(command.x);
-  let y = Math.round(command.y);
-  let w = Math.round(command.w);
-  let h = Math.round(command.h);
-
-  if (w <= 0 || h <= 0) {
-    w = DEFAULT_WIDGET_WIDTH;
-    h = DEFAULT_WIDGET_HEIGHT;
-  } else if (w < MIN_WIDGET_WIDTH || h < MIN_WIDGET_HEIGHT) {
-    const scale = Math.max(MIN_WIDGET_WIDTH / w, MIN_WIDGET_HEIGHT / h);
-    w = Math.ceil(w * scale);
-    h = Math.ceil(h * scale);
+  let rawW = Math.round(command.w);
+  let rawH = Math.round(command.h);
+  if (rawW <= 0 || rawH <= 0) {
+    rawW = DEFAULT_WIDGET_WIDTH;
+    rawH = DEFAULT_WIDGET_HEIGHT;
   }
 
-  if (w > targetMaxW || h > targetMaxH || w * h > MAX_WIDGET_AREA) {
-    const scale = Math.min(
-      1,
-      targetMaxW / w,
-      targetMaxH / h,
-      Math.sqrt(MAX_WIDGET_AREA / (w * h))
-    );
-    w = Math.floor(w * scale);
-    h = Math.floor(h * scale);
-  }
+  const scale = widgetGeometry?.scale || 1;
 
-  w = Math.max(MIN_WIDGET_WIDTH, Math.min(w, CANVAS_SIZE));
-  h = Math.max(MIN_WIDGET_HEIGHT, Math.min(h, CANVAS_SIZE));
-  x = Math.max(0, Math.min(CANVAS_SIZE - w, x));
-  y = Math.max(0, Math.min(CANVAS_SIZE - h, y));
+  const fitted = fitAspectLocked(
+    rawW,
+    rawH,
+    targetMaxW,
+    targetMaxH,
+    minBoundW,
+    minBoundH,
+    mode,
+    scale
+  );
 
-  return w >= MIN_WIDGET_WIDTH && h >= MIN_WIDGET_HEIGHT ? { x, y, w, h } : null;
+  const w = fitted.w;
+  const h = fitted.h;
+  const x = Math.max(0, Math.min(CANVAS_SIZE - w, Math.round(command.x)));
+  const y = Math.max(0, Math.min(CANVAS_SIZE - h, Math.round(command.y)));
+
+  return { x, y, w, h };
 }

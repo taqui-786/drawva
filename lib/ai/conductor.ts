@@ -81,6 +81,7 @@ export interface ConductorDeps {
   onEvent: (e: ConductorEvent) => void;
   afterBoardChange: () => void;
   getInkBox?: () => Rect | null;
+  getInkIntent?: () => { x: number; y: number } | null;
   canvasId?: () => string | undefined;
 }
 
@@ -388,6 +389,7 @@ export class Conductor {
         return "registered" as const;
       },
       getInkBox: this.deps.getInkBox,
+      getInkIntent: this.deps.getInkIntent,
     };
   }
 

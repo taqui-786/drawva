@@ -5,8 +5,8 @@ import type { BoardHistory } from "@/lib/canvas/history";
 import type { DraftManager } from "@/lib/canvas/draftStore";
 import type { Camera } from "@/lib/canvas/camera";
 import type { Rect } from "@/lib/canvas/types";
-import type { CanvasCommand, CommandValidationContext } from "@/lib/canvas/commands";
-import { MAX_WIDGET_HTML_LENGTH, placeContent, validateCommands } from "@/lib/canvas/commands";
+import type { CanvasCommand, CommandValidationContext, WriteTextCommand } from "@/lib/canvas/commands";
+import { MAX_WIDGET_HTML_LENGTH, placeContent, validateCommands, textContentBox } from "@/lib/canvas/commands";
 import { buildScene, visibleScene } from "@/lib/canvas/scene";
 import { buildAtlas, contentBounds } from "@/lib/canvas/atlas";
 import { MAX_SCALE, MIN_SCALE, SIZE } from "@/lib/canvas/constants";
@@ -48,6 +48,7 @@ export interface ConductorToolDeps {
   afterBoardChange: () => void;
   registerImage: (img: ActiveImage) => void;
   getInkBox?: () => Rect | null;
+  getInkIntent?: () => { x: number; y: number } | null;
   registerPlugin?: (pluginId: string) => "registered" | "already" | "limit";
 }
 
@@ -347,6 +348,7 @@ function applyContext(deps: ConductorToolDeps): CommandValidationContext {
   const ink = deps.getInkBox?.();
   const changedBox = ink && ink.w > 4 && ink.h > 4 ? ink : undefined;
   const scene = buildScene(deps.widgets, deps.objects);
+  const intent = deps.getInkIntent?.() ?? undefined;
   return {
     aiColor: "#2679b8",
     scale: Math.max(0.03, deps.engine.camera.scale || 1),
@@ -355,6 +357,7 @@ function applyContext(deps: ConductorToolDeps): CommandValidationContext {
     changedBox,
     sceneItems: scene.items,
     widgetGeometry: widgetGeometryForViewport(visibleRect),
+    intent,
   };
 }
 
@@ -365,10 +368,14 @@ function commandBox(cmd: CanvasCommand): { objectId: string; kind: string; box: 
   let w = Number(rec.w) || 0;
   let h = Number(rec.h) || 0;
   if (cmd.tool === "write_text") {
-    w = Number((cmd as { maxWidth?: number }).maxWidth) || 0;
-    const fs = Number((cmd as { fontSize?: number }).fontSize) || 24;
-    const lh = Number((cmd as { lineHeight?: number }).lineHeight) || 1.35;
-    h = Math.round(fs * lh * 4);
+    const textCmd = cmd as WriteTextCommand;
+    const fs = Number(textCmd.fontSize) || 24;
+    const lh = Number(textCmd.lineHeight) || 1.35;
+    const maxW = Number(textCmd.maxWidth) || 1200;
+    const text = String(textCmd.text || "");
+    const box = textContentBox(text, fs, lh, maxW);
+    w = box.w;
+    h = box.h;
   } else if (cmd.tool === "draw_formula") {
     const fs = Number((cmd as { fontSize?: number }).fontSize) || 24;
     const latex = String((cmd as { latex?: string }).latex || "");
