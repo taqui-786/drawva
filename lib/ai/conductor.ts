@@ -309,11 +309,11 @@ export class Conductor {
     this.postSteer(trimmed);
   }
 
-  cancel(): void {
+  cancel(dispose = false): void {
     this.currentGeneration++;
     this.sendQueue = [];
     this.abort?.abort();
-    this.postCancel(false);
+    this.postCancel(dispose);
     if (!this.running) return;
     this.messages.push({ role: "system", text: "[user cancelled]", tag: "cancel" });
     this.running = false;
@@ -321,7 +321,7 @@ export class Conductor {
   }
 
   reset(): void {
-    this.cancel();
+    this.cancel(true);
     this.turnImageIds = [];
     this.clearHistory();
   }
@@ -624,6 +624,7 @@ export class Conductor {
 
     const body = {
       conversation: this.conversationSuffix(),
+      connectionId: `${config.type}:${config.baseUrl || "default"}:${model}`,
       providerType: config.type,
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
@@ -793,6 +794,7 @@ export class Conductor {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
         conversation: this.conversationSuffix(),
+        connectionId: `${config.type}:${config.baseUrl || "default"}:${model}`,
         providerType: config.type,
         baseUrl: config.baseUrl,
         apiKey: config.apiKey,

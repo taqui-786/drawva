@@ -32,7 +32,21 @@ import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
 import { renderFormula, bakeFormula } from "@/lib/canvas/formulas";
 import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { unionRect } from "@/lib/canvas/engine";
-import { serializeSnapshot, restoreSnapshot, saveAutosave, loadAutosave, exportPng, exportJson, importJson, renderObject, applyTiles, computeSnapshotHash, loadAgentLogs, clearAgentLogs, getAutosaveEnabled } from "@/lib/canvas/persistence";
+import {
+  serializeSnapshot,
+  restoreSnapshot,
+  saveAutosave,
+  loadAutosave,
+  exportPng,
+  exportJson,
+  importJson,
+  renderObject,
+  applyTiles,
+  computeSnapshotHash,
+  loadAgentLogs,
+  clearAgentLogs,
+  getAutosaveEnabled,
+} from "@/lib/canvas/persistence";
 import {
   CloudSyncEngine,
   fetchCloudCanvas,
@@ -67,7 +81,13 @@ import {
 import { ConnectDialog } from "./ConnectDialog";
 import { MobileOrientationPrompt } from "./MobileOrientationPrompt";
 import { strokeSegment } from "@/lib/canvas/strokes";
-import { eraseRegion, eraseContainedInk, pasteDataUrl, captureRegion, pasteRegion } from "@/lib/canvas/selection";
+import {
+  eraseRegion,
+  eraseContainedInk,
+  pasteDataUrl,
+  captureRegion,
+  pasteRegion,
+} from "@/lib/canvas/selection";
 import {
   buildRefinementManifest,
   validateRefinementTarget,
@@ -86,7 +106,7 @@ function findInPlaceWidget(
   opts: {
     targetId: string | null;
     lockTarget?: boolean;
-  }
+  },
 ): WidgetItem | null {
   if (!opts.targetId) return null;
   return wm.get(opts.targetId) ?? null;
@@ -109,7 +129,7 @@ function tickerTail(text: string, max = 320): string {
 function computeOptimalTextFontSize(
   text: string,
   rect: { w: number; h: number },
-  requestedFontSize?: number
+  requestedFontSize?: number,
 ): number {
   const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
   const numLines = Math.max(1, lines.length);
@@ -146,9 +166,24 @@ interface RefineFormula {
   color?: string;
 }
 type RefineResult =
-  | { kind: "widget_patch"; targetId: string; expectedContentHash: string; patch: string }
-  | { kind: "native_canvas"; strokes?: RefineStroke[]; texts?: RefineText[]; formulas?: RefineFormula[] }
-  | { kind: "diagram_widget"; sourceFormat: string; source: string; title: string }
+  | {
+      kind: "widget_patch";
+      targetId: string;
+      expectedContentHash: string;
+      patch: string;
+    }
+  | {
+      kind: "native_canvas";
+      strokes?: RefineStroke[];
+      texts?: RefineText[];
+      formulas?: RefineFormula[];
+    }
+  | {
+      kind: "diagram_widget";
+      sourceFormat: string;
+      source: string;
+      title: string;
+    }
   | { kind: "html_widget"; html: string; title: string }
   | { kind: "reject"; reason: string };
 
@@ -168,14 +203,20 @@ export function CanvasApp() {
   const widgets = useRef<WidgetManager | null>(null);
   const objects = useRef<ObjectManager | null>(null);
   const history = useRef<BoardHistory | null>(null);
-  const widgetDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
+  const widgetDrag = useRef<{
+    id: string;
+    last: { x: number; y: number };
+  } | null>(null);
   const widgetResize = useRef<{
     id: string;
     mode: import("@/lib/canvas/widgetGeometry").WidgetResizeMode;
     startPoint: { x: number; y: number };
     startLayout: import("@/lib/canvas/widgets").WidgetItem;
   } | null>(null);
-  const objectDrag = useRef<{ id: string; last: { x: number; y: number } } | null>(null);
+  const objectDrag = useRef<{
+    id: string;
+    last: { x: number; y: number };
+  } | null>(null);
   const objectResize = useRef<{
     id: string;
     mode: import("@/lib/canvas/objects").ObjectResizeMode;
@@ -183,7 +224,9 @@ export function CanvasApp() {
   } | null>(null);
   const syncManager = useRef<SyncManager | null>(null);
   const agentCharacterRef = useRef<AgentCharacterController | null>(null);
-  const [agentCharCursor, setAgentCharCursor] = useState<"grab" | "grabbing" | null>(null);
+  const [agentCharCursor, setAgentCharCursor] = useState<
+    "grab" | "grabbing" | null
+  >(null);
   const agentCharHoverRef = useRef(false);
   const [syncState, setSyncState] = useState<{
     status: SyncStatus;
@@ -212,7 +255,10 @@ export function CanvasApp() {
   }, [isAuthenticated, session?.user?.name]);
 
   const lastMoveSyncRef = useRef<Record<string, number>>({});
-  function broadcastMove(kind: "widget" | "object", packet: Extract<import("@/lib/canvas/sync").SyncPacket, { id: string }>): void {
+  function broadcastMove(
+    kind: "widget" | "object",
+    packet: Extract<import("@/lib/canvas/sync").SyncPacket, { id: string }>,
+  ): void {
     const key = `${kind}:${packet.id}`;
     const now = performance.now();
     if (now - (lastMoveSyncRef.current[key] ?? 0) < 40) return;
@@ -224,31 +270,55 @@ export function CanvasApp() {
     objects.current?.add(item);
     const { image, ...cleanObject } = item;
     void image;
-    syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: cleanObject });
+    syncManager.current?.broadcast({
+      type: "SYNC_OBJECT_ADD",
+      object: cleanObject,
+    });
   }, []);
 
   function bakePlotObject(cmd: PlotFunctionCommand): HTMLCanvasElement {
     return plotCommand(cmd);
   }
 
-  const mergeObjectToInk = useCallback(async (id: string, opts?: { silent?: boolean }): Promise<void> => {
-    const om = objects.current;
-    const eng = engine;
-    const item = om?.get(id);
-    if (!om || !eng || !item) return;
-    history.current?.recordObjects();
-    if (item.kind === "text") {
-      rasterizeText(eng, item.source, { x: item.x, y: item.y }, { color: item.color, fontSize: item.fontSize, maxWidth: item.maxWidth ?? item.w });
-    } else if (item.kind === "formula") {
-      const r = await renderFormula(item.source, item.fontSize, item.color);
-      if (r.canvas.width > 0) bakeFormula(eng, item.x, item.y, r);
-    } else if (item.kind === "plot") {
-      bakePlot(eng, { tool: "plot_function", x: item.x, y: item.y, w: item.w, h: item.h, expression: item.source, color: item.color });
-    }
-    om.remove(id);
-    if (!opts?.silent) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MERGE", id });
-    afterBoardChangeRef.current();
-  }, [engine]);
+  const mergeObjectToInk = useCallback(
+    async (id: string, opts?: { silent?: boolean }): Promise<void> => {
+      const om = objects.current;
+      const eng = engine;
+      const item = om?.get(id);
+      if (!om || !eng || !item) return;
+      history.current?.recordObjects();
+      if (item.kind === "text") {
+        rasterizeText(
+          eng,
+          item.source,
+          { x: item.x, y: item.y },
+          {
+            color: item.color,
+            fontSize: item.fontSize,
+            maxWidth: item.maxWidth ?? item.w,
+          },
+        );
+      } else if (item.kind === "formula") {
+        const r = await renderFormula(item.source, item.fontSize, item.color);
+        if (r.canvas.width > 0) bakeFormula(eng, item.x, item.y, r);
+      } else if (item.kind === "plot") {
+        bakePlot(eng, {
+          tool: "plot_function",
+          x: item.x,
+          y: item.y,
+          w: item.w,
+          h: item.h,
+          expression: item.source,
+          color: item.color,
+        });
+      }
+      om.remove(id);
+      if (!opts?.silent)
+        syncManager.current?.broadcast({ type: "SYNC_OBJECT_MERGE", id });
+      afterBoardChangeRef.current();
+    },
+    [engine],
+  );
 
   const addObjectRef = useRef(addObject);
   const mergeObjectToInkRef = useRef(mergeObjectToInk);
@@ -265,12 +335,16 @@ export function CanvasApp() {
   const [agentRunning, setAgentRunning] = useState(false);
 
   const [refineRect, setRefineRect] = useState<Rect | null>(null);
-  const [refineState, setRefineState] = useState<"idle" | "loading" | "success" | "error">("idle");
+  const [refineState, setRefineState] = useState<
+    "idle" | "loading" | "success" | "error"
+  >("idle");
   const refineStateRef = useRef(refineState);
   useEffect(() => {
     refineStateRef.current = refineState;
   }, [refineState]);
-  const refineOpRef = useRef<{ id: string; abort: AbortController } | null>(null);
+  const refineOpRef = useRef<{ id: string; abort: AbortController } | null>(
+    null,
+  );
   const inkSnapshotRef = useRef<HTMLCanvasElement | null>(null);
   const refreshRefineRectRef = useRef<() => void>(() => {});
   const inkBoxRef = useRef<Rect | null>(null);
@@ -278,7 +352,9 @@ export function CanvasApp() {
   // lastStrokeTimeRef would be wrong: that ref is also refreshed by the text
   // tool (commitText), which has no arrow-clearing branch, so a long-expired
   // arrow would keep steering placement into a brand-new text session.
-  const lastArrowRef = useRef<{ from: Point; to: Point; at: number } | null>(null);
+  const lastArrowRef = useRef<{ from: Point; to: Point; at: number } | null>(
+    null,
+  );
   const scheduledInkBoxRef = useRef<Rect | null>(null);
   const drawingRef = useRef<Rect | null>(null);
   const lastStrokeTimeRef = useRef<number>(0);
@@ -309,7 +385,9 @@ export function CanvasApp() {
 
   const [models, setModels] = useState<string[]>([]);
   const [activeModel, setActiveModelState] = useState<string | null>(null);
-  const [reasoningEffort, setReasoningEffortState] = useState<ReasoningEffort>(() => getReasoningEffort());
+  const [reasoningEffort, setReasoningEffortState] = useState<ReasoningEffort>(
+    () => getReasoningEffort(),
+  );
   const [modelSelectOpen, setModelSelectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
@@ -318,7 +396,11 @@ export function CanvasApp() {
     let cancelled = false;
     void loadAgentLogs().then((saved) => {
       if (!cancelled && saved && saved.length > 0) {
-        setLogs((prev) => (prev.length > 0 ? [...saved, ...prev].slice(0, 20) : saved.slice(0, 20)));
+        setLogs((prev) =>
+          prev.length > 0
+            ? [...saved, ...prev].slice(0, 20)
+            : saved.slice(0, 20),
+        );
       }
     });
     return () => {
@@ -358,7 +440,9 @@ export function CanvasApp() {
       }
       setActiveModelState((prev) => (prev === nextActive ? prev : nextActive));
       const nextEffort = getReasoningEffort();
-      setReasoningEffortState((prev) => (prev === nextEffort ? prev : nextEffort));
+      setReasoningEffortState((prev) =>
+        prev === nextEffort ? prev : nextEffort,
+      );
     };
     refresh();
     window.addEventListener("storage", refresh);
@@ -368,11 +452,13 @@ export function CanvasApp() {
   const handleModelChange = (model: string | null) => {
     setActiveModel(model);
     setActiveModelState(model);
+    conductorRef.current?.cancel(true);
   };
 
   const handleReasoningEffortChange = (effort: ReasoningEffort) => {
     setReasoningEffort(effort);
     setReasoningEffortState(effort);
+    conductorRef.current?.cancel(true);
   };
 
   const [aiRun, setAiRun] = useState<AiRunState>({
@@ -387,9 +473,19 @@ export function CanvasApp() {
       if (e.kind === "turn_start") {
         character.onEvent({ kind: "turn_start" });
       } else if (e.kind === "tool_start") {
-        character.onEvent({ kind: "tool_start", tool: e.name, target: e.target });
+        character.onEvent({
+          kind: "tool_start",
+          tool: e.name,
+          target: e.target,
+        });
       } else if (e.kind === "tool_end") {
-        character.onEvent({ kind: "tool_end", tool: e.name, ok: e.ok, summary: e.summary, target: e.target });
+        character.onEvent({
+          kind: "tool_end",
+          tool: e.name,
+          ok: e.ok,
+          summary: e.summary,
+          target: e.target,
+        });
       } else if (e.kind === "text_delta" || e.kind === "reasoning_delta") {
         character.onEvent({ kind: e.kind });
       } else if (e.kind === "turn_end") {
@@ -429,17 +525,23 @@ export function CanvasApp() {
       setAiStatus("thinking");
       let label = `Executing ${e.name}…`;
       if (e.name === "canvas_apply") {
-        label = e.argsSummary ? `Placing on canvas: ${e.argsSummary}` : "Drawing it onto the board…";
+        label = e.argsSummary
+          ? `Placing on canvas: ${e.argsSummary}`
+          : "Drawing it onto the board…";
       } else if (e.name === "canvas_snapshot") {
         label = "Zooming in to inspect the board…";
       } else if (e.name === "canvas_read") {
-        label = e.argsSummary ? `Reading closely: ${e.argsSummary}` : "Reading the fine print…";
+        label = e.argsSummary
+          ? `Reading closely: ${e.argsSummary}`
+          : "Reading the fine print…";
       } else if (e.name === "canvas_patch_widget") {
         label = "Fine-tuning the details…";
       } else if (e.name === "canvas_scan") {
         label = "Surveying the whole canvas…";
       } else if (e.name === "load_plugin") {
-        label = e.argsSummary ? `Picking up a tool: ${e.argsSummary}` : "Grabbing a new tool…";
+        label = e.argsSummary
+          ? `Picking up a tool: ${e.argsSummary}`
+          : "Grabbing a new tool…";
       }
       setTickerState((prev) => ({
         status: "running",
@@ -448,10 +550,14 @@ export function CanvasApp() {
         detail: e.argsSummary ? tickerTail(e.argsSummary) : undefined,
       }));
     } else if (e.kind === "tool_end") {
-      let summaryText = e.ok ? `Done: ${e.summary || e.name}` : `Hit a snag: ${e.name}`;
+      let summaryText = e.ok
+        ? `Done: ${e.summary || e.name}`
+        : `Hit a snag: ${e.name}`;
       if (e.ok) {
         if (e.name === "canvas_apply") {
-          summaryText = e.summary ? `Placed on canvas: ${e.summary}` : "Placed on canvas ✓";
+          summaryText = e.summary
+            ? `Placed on canvas: ${e.summary}`
+            : "Placed on canvas ✓";
         } else if (e.name === "canvas_snapshot") {
           summaryText = "Inspecting layout…";
         } else if (e.name === "canvas_edit") {
@@ -471,12 +577,16 @@ export function CanvasApp() {
         detail: undefined,
       }));
     } else if (e.kind === "text_delta" || e.kind === "reasoning_delta") {
-      const label = e.kind === "text_delta" ? "Writing the answer…" : "Deep in thought…";
+      const label =
+        e.kind === "text_delta" ? "Writing the answer…" : "Deep in thought…";
       setTickerState((prev) => ({
         status: "running",
         currentMessage: label,
-        messageId: prev.currentMessage === label ? prev.messageId : prev.messageId + 1,
-        detail: tickerTail(`${prev.currentMessage === label ? prev.detail || "" : ""}${e.text}`),
+        messageId:
+          prev.currentMessage === label ? prev.messageId : prev.messageId + 1,
+        detail: tickerTail(
+          `${prev.currentMessage === label ? prev.detail || "" : ""}${e.text}`,
+        ),
       }));
     } else if (e.kind === "log") {
       setLogs((prev) => [e.entry, ...prev.slice(0, 19)]);
@@ -498,8 +608,12 @@ export function CanvasApp() {
         }));
         setTimeout(() => {
           setAiStatus("idle");
-          setAiRun((prev) => (prev.phase === "done" ? { ...prev, phase: "idle" } : prev));
-          setTickerState((prev) => (prev.status === "done" ? { ...prev, status: "idle" } : prev));
+          setAiRun((prev) =>
+            prev.phase === "done" ? { ...prev, phase: "idle" } : prev,
+          );
+          setTickerState((prev) =>
+            prev.status === "done" ? { ...prev, status: "idle" } : prev,
+          );
         }, 3500);
       } else if (e.reason === "error") {
         setAiStatus("error");
@@ -511,15 +625,21 @@ export function CanvasApp() {
         });
         setTickerState((prev) => ({
           status: "error",
-          currentMessage: e.error ? `Hit a wall: ${tickerTail(e.error, 80)}` : "Something went wrong — try again",
+          currentMessage: e.error
+            ? `Hit a wall: ${tickerTail(e.error, 80)}`
+            : "Something went wrong — try again",
           messageId: prev.messageId + 1,
           detail: undefined,
         }));
         toast.error(e.error || "Agent turn failed.");
         setTimeout(() => {
           setAiStatus("idle");
-          setAiRun((prev) => (prev.phase === "error" ? { ...prev, phase: "idle" } : prev));
-          setTickerState((prev) => (prev.status === "error" ? { ...prev, status: "idle" } : prev));
+          setAiRun((prev) =>
+            prev.phase === "error" ? { ...prev, phase: "idle" } : prev,
+          );
+          setTickerState((prev) =>
+            prev.status === "error" ? { ...prev, status: "idle" } : prev,
+          );
         }, 5000);
       } else {
         setAiStatus("idle");
@@ -548,9 +668,13 @@ export function CanvasApp() {
         : tickerState.currentMessage;
       character.setNarration(text);
     } else if (tickerState.status === "done") {
-      character.setNarration(tickerState.currentMessage || "All done — take a look! ✨");
+      character.setNarration(
+        tickerState.currentMessage || "All done — take a look! ✨",
+      );
     } else if (tickerState.status === "error") {
-      character.setNarration(tickerState.currentMessage || "Hit a snag — let's try again!");
+      character.setNarration(
+        tickerState.currentMessage || "Hit a snag — let's try again!",
+      );
     } else {
       character.setNarration(null);
     }
@@ -594,7 +718,9 @@ export function CanvasApp() {
       "Observe the canvas handwriting, formulas, diagrams, questions, and drawings. Provide the appropriate continuation, solution, calculation, diagram, or interactive widget.";
     agent.send(prompt).catch((err) => {
       console.error("[Ask AI] Error starting turn:", err);
-      toast.error(err instanceof Error ? err.message : "Failed to start AI turn.");
+      toast.error(
+        err instanceof Error ? err.message : "Failed to start AI turn.",
+      );
     });
   }, []);
 
@@ -603,7 +729,7 @@ export function CanvasApp() {
       if (!engine) return null;
       return captureRegion(engine, rect);
     },
-    [engine]
+    [engine],
   );
   const captureRegionRef = useRef(captureRegionForRefine);
   useEffect(() => {
@@ -631,7 +757,7 @@ export function CanvasApp() {
       boardRevisionRef.current,
       widgets.current,
       objects.current,
-      inkSnapshot
+      inkSnapshot,
     );
     const targetError = validateRefinementTarget(manifest);
     if (targetError) {
@@ -651,7 +777,9 @@ export function CanvasApp() {
     const timeoutTimer = setTimeout(() => {
       if (refineOpRef.current?.id === opId) {
         abort.abort();
-        toast.error("Refinement timed out (45s). Your AI provider took too long to respond.");
+        toast.error(
+          "Refinement timed out (45s). Your AI provider took too long to respond.",
+        );
       }
     }, 45000);
 
@@ -663,9 +791,16 @@ export function CanvasApp() {
         w: selRect.w + pad * 2,
         h: selRect.h + pad * 2,
       };
-      const atlas = await buildAtlas(eng, cropRect, null, widgets.current, objects.current, {
-        captureFullViewport: true,
-      });
+      const atlas = await buildAtlas(
+        eng,
+        cropRect,
+        null,
+        widgets.current,
+        objects.current,
+        {
+          captureFullViewport: true,
+        },
+      );
       if (refineOpRef.current?.id !== opId) return;
       const raw = await canvasFromDataUrl(atlas.atlasImage);
       if (refineOpRef.current?.id !== opId) return;
@@ -675,14 +810,25 @@ export function CanvasApp() {
       const targetWidget = manifest.containedWidgets[0];
       let target: Record<string, unknown> | undefined;
       if (targetWidget) {
-        const source = targetWidget.kind === "diagram" ? targetWidget.copyText || "" : targetWidget.html || "";
+        const source =
+          targetWidget.kind === "diagram"
+            ? targetWidget.copyText || ""
+            : targetWidget.html || "";
         target = {
           id: targetWidget.id,
           kind: targetWidget.kind,
           sourceFormat: targetWidget.sourceFormat,
-          box: { x: targetWidget.x, y: targetWidget.y, w: targetWidget.w, h: targetWidget.h },
+          box: {
+            x: targetWidget.x,
+            y: targetWidget.y,
+            w: targetWidget.w,
+            h: targetWidget.h,
+          },
           source: source.slice(0, 8000),
-          html: targetWidget.kind === "html" ? (targetWidget.html || "").slice(0, 8000) : undefined,
+          html:
+            targetWidget.kind === "html"
+              ? (targetWidget.html || "").slice(0, 8000)
+              : undefined,
           contentHash: fnv1aHash(source),
         };
       } else if (manifest.containedObjects.length > 0 && !manifest.inkPresent) {
@@ -711,8 +857,22 @@ export function CanvasApp() {
           fingerprint: manifest.fingerprint,
           target,
           containedItems: [
-            ...manifest.containedWidgets.map((w) => ({ id: w.id, kind: w.kind, x: w.x, y: w.y, w: w.w, h: w.h })),
-            ...manifest.containedObjects.map((o) => ({ id: o.id, kind: o.kind, x: o.x, y: o.y, w: o.w, h: o.h })),
+            ...manifest.containedWidgets.map((w) => ({
+              id: w.id,
+              kind: w.kind,
+              x: w.x,
+              y: w.y,
+              w: w.w,
+              h: w.h,
+            })),
+            ...manifest.containedObjects.map((o) => ({
+              id: o.id,
+              kind: o.kind,
+              x: o.x,
+              y: o.y,
+              w: o.w,
+              h: o.h,
+            })),
           ],
           nearbyItems: manifest.contextItems.slice(0, 10),
           palette,
@@ -721,17 +881,29 @@ export function CanvasApp() {
       });
       if (refineOpRef.current?.id !== opId) return;
       if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(data?.error || `Refine request failed (${res.status}).`);
+        const data = (await res.json().catch(() => null)) as {
+          error?: string;
+        } | null;
+        throw new Error(
+          data?.error || `Refine request failed (${res.status}).`,
+        );
       }
-      const data = (await res.json()) as { ok: boolean; result?: RefineResult; error?: string };
-      if (!data.ok || !data.result) throw new Error(data.error || "Refinement returned no result.");
+      const data = (await res.json()) as {
+        ok: boolean;
+        result?: RefineResult;
+        error?: string;
+      };
+      if (!data.ok || !data.result)
+        throw new Error(data.error || "Refinement returned no result.");
       const result = data.result;
 
       const applied = await applyRefinement(manifest, result, opId);
       if (applied) {
         setRefineState("success");
-        setTimeout(() => setRefineState((prev) => (prev === "success" ? "idle" : prev)), 2000);
+        setTimeout(
+          () => setRefineState((prev) => (prev === "success" ? "idle" : prev)),
+          2000,
+        );
       } else if (refineOpRef.current?.id === opId) {
         setRefineState("idle");
       }
@@ -743,7 +915,10 @@ export function CanvasApp() {
       }
       setRefineState("error");
       toast.error(err instanceof Error ? err.message : "Refinement failed.");
-      setTimeout(() => setRefineState((prev) => (prev === "error" ? "idle" : prev)), 3000);
+      setTimeout(
+        () => setRefineState((prev) => (prev === "error" ? "idle" : prev)),
+        3000,
+      );
     } finally {
       clearTimeout(timeoutTimer);
       if (refineOpRef.current?.id === opId) refineOpRef.current = null;
@@ -758,7 +933,11 @@ export function CanvasApp() {
   }, []);
 
   const applyRefinement = useCallback(
-    async (manifest: RefinementManifest, result: RefineResult, opId: string): Promise<boolean> => {
+    async (
+      manifest: RefinementManifest,
+      result: RefineResult,
+      opId: string,
+    ): Promise<boolean> => {
       const eng = engine;
       const wm = widgets.current;
       const om = objects.current;
@@ -775,10 +954,12 @@ export function CanvasApp() {
         boardRevisionRef.current,
         widgets.current,
         objects.current,
-        inkSnapshotRef.current
+        inkSnapshotRef.current,
       );
       if (fresh.fingerprint !== manifest.fingerprint) {
-        toast.error("This selection changed while it was being refined. Nothing was replaced.");
+        toast.error(
+          "This selection changed while it was being refined. Nothing was replaced.",
+        );
         return false;
       }
 
@@ -787,14 +968,25 @@ export function CanvasApp() {
       let widgetToPatch: WidgetItem | null = null;
 
       if (result.kind === "widget_patch") {
-        if (manifest.containedWidgets.length !== 1 || manifest.containedWidgets[0].id !== result.targetId) {
+        if (
+          manifest.containedWidgets.length !== 1 ||
+          manifest.containedWidgets[0].id !== result.targetId
+        ) {
           toast.error("Refinement target mismatch. Nothing was replaced.");
           return false;
         }
         widgetToPatch = manifest.containedWidgets[0];
-        const source = widgetToPatch.kind === "diagram" ? widgetToPatch.copyText || widgetToPatch.html || "" : widgetToPatch.html || "";
-        if (result.expectedContentHash && result.expectedContentHash !== fnv1aHash(source)) {
-          toast.error("Widget content changed since capture. Nothing was replaced.");
+        const source =
+          widgetToPatch.kind === "diagram"
+            ? widgetToPatch.copyText || widgetToPatch.html || ""
+            : widgetToPatch.html || "";
+        if (
+          result.expectedContentHash &&
+          result.expectedContentHash !== fnv1aHash(source)
+        ) {
+          toast.error(
+            "Widget content changed since capture. Nothing was replaced.",
+          );
           return false;
         }
         const patchResult = applyWidgetPatch(source, result.patch);
@@ -804,11 +996,20 @@ export function CanvasApp() {
         }
         if (widgetToPatch.kind === "diagram" && widgetToPatch.sourceFormat) {
           try {
-            const doc = await diagramDocument(widgetToPatch.sourceFormat, patchResult.content, widgetToPatch.diagramKind, widgetToPatch.title);
+            const doc = await diagramDocument(
+              widgetToPatch.sourceFormat,
+              patchResult.content,
+              widgetToPatch.diagramKind,
+              widgetToPatch.title,
+            );
             preparedHtml = typeof doc === "string" ? doc : doc.html;
             preparedCopyText = patchResult.content;
           } catch (err) {
-            toast.error(err instanceof Error ? err.message : "Diagram rebuild failed. Nothing was replaced.");
+            toast.error(
+              err instanceof Error
+                ? err.message
+                : "Diagram rebuild failed. Nothing was replaced.",
+            );
             return false;
           }
         } else {
@@ -838,62 +1039,97 @@ export function CanvasApp() {
           const next: WidgetItem = {
             ...widgetToPatch,
             html: preparedHtml,
-            ...(preparedCopyText !== undefined ? { copyText: preparedCopyText } : {}),
+            ...(preparedCopyText !== undefined
+              ? { copyText: preparedCopyText }
+              : {}),
           };
           wm.add(next);
-          syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(next) });
-      } else if (result.kind === "native_canvas") {
-        const strokes = result.strokes || [];
-        const texts = result.texts || [];
-        const formulas = result.formulas || [];
-        if (strokes.length === 0 && texts.length === 0 && formulas.length === 0) {
-          toast.error("AI returned empty refinement. Nothing was replaced.");
-          return false;
-        }
-        const inkColor = resolveThemeColor("foreground", "#0f172a");
-        for (const s of strokes) {
-          const pts = s.points.map((p) => ({
-            x: rect.x + p.x * rect.w,
-            y: rect.y + p.y * rect.h,
-          }));
-          const strokeColor = s.color || inkColor;
-          const strokeSize = s.width || 2;
-          for (let i = 1; i < pts.length; i++) {
-            strokeSegment(eng, pts[i - 1], pts[i], { erase: false, size: strokeSize, color: strokeColor });
+          syncManager.current?.broadcast({
+            type: "SYNC_WIDGET_ADD",
+            widget: compactWidgetForSync(next),
+          });
+        } else if (result.kind === "native_canvas") {
+          const strokes = result.strokes || [];
+          const texts = result.texts || [];
+          const formulas = result.formulas || [];
+          if (
+            strokes.length === 0 &&
+            texts.length === 0 &&
+            formulas.length === 0
+          ) {
+            toast.error("AI returned empty refinement. Nothing was replaced.");
+            return false;
           }
-        }
-        for (const t of texts) {
-          const fontSize = computeOptimalTextFontSize(t.text, rect, t.fontSize);
-          const textColor = t.color || inkColor;
-          const block = renderTextBlock(t.text, textColor, fontSize, rect.w);
-          let tx = Math.round(rect.x + (t.normX ?? 0) * rect.w);
-          let ty = Math.round(rect.y + (t.normY ?? 0) * rect.h);
-          if (t.normX === undefined || t.normX < 0.05) {
-            tx = Math.round(rect.x + Math.max(0, (rect.w - block.w) / 2));
+          const inkColor = resolveThemeColor("foreground", "#0f172a");
+          for (const s of strokes) {
+            const pts = s.points.map((p) => ({
+              x: rect.x + p.x * rect.w,
+              y: rect.y + p.y * rect.h,
+            }));
+            const strokeColor = s.color || inkColor;
+            const strokeSize = s.width || 2;
+            for (let i = 1; i < pts.length; i++) {
+              strokeSegment(eng, pts[i - 1], pts[i], {
+                erase: false,
+                size: strokeSize,
+                color: strokeColor,
+              });
+            }
           }
-          if (t.normY === undefined || t.normY < 0.05) {
-            ty = Math.round(rect.y + Math.max(0, (rect.h - block.h) / 2));
+          for (const t of texts) {
+            const fontSize = computeOptimalTextFontSize(
+              t.text,
+              rect,
+              t.fontSize,
+            );
+            const textColor = t.color || inkColor;
+            const block = renderTextBlock(t.text, textColor, fontSize, rect.w);
+            let tx = Math.round(rect.x + (t.normX ?? 0) * rect.w);
+            let ty = Math.round(rect.y + (t.normY ?? 0) * rect.h);
+            if (t.normX === undefined || t.normX < 0.05) {
+              tx = Math.round(rect.x + Math.max(0, (rect.w - block.w) / 2));
+            }
+            if (t.normY === undefined || t.normY < 0.05) {
+              ty = Math.round(rect.y + Math.max(0, (rect.h - block.h) / 2));
+            }
+            pasteRegion(eng, block.canvas, tx, ty);
           }
-          pasteRegion(eng, block.canvas, tx, ty);
-        }
-        for (const f of formulas) {
-          const fontSize = computeOptimalTextFontSize(f.latex, rect, f.fontSize);
-          const formulaColor = f.color || inkColor;
-          const rendered = await renderFormula(f.latex, fontSize, formulaColor);
-          let fx = Math.round(rect.x + (f.normX ?? 0) * rect.w);
-          let fy = Math.round(rect.y + (f.normY ?? 0) * rect.h);
-          if (f.normX === undefined || f.normX < 0.05) {
-            fx = Math.round(rect.x + Math.max(0, (rect.w - rendered.logicalWidth) / 2));
+          for (const f of formulas) {
+            const fontSize = computeOptimalTextFontSize(
+              f.latex,
+              rect,
+              f.fontSize,
+            );
+            const formulaColor = f.color || inkColor;
+            const rendered = await renderFormula(
+              f.latex,
+              fontSize,
+              formulaColor,
+            );
+            let fx = Math.round(rect.x + (f.normX ?? 0) * rect.w);
+            let fy = Math.round(rect.y + (f.normY ?? 0) * rect.h);
+            if (f.normX === undefined || f.normX < 0.05) {
+              fx = Math.round(
+                rect.x + Math.max(0, (rect.w - rendered.logicalWidth) / 2),
+              );
+            }
+            if (f.normY === undefined || f.normY < 0.05) {
+              fy = Math.round(
+                rect.y + Math.max(0, (rect.h - rendered.logicalHeight) / 2),
+              );
+            }
+            pasteRegion(eng, rendered.canvas, fx, fy);
           }
-          if (f.normY === undefined || f.normY < 0.05) {
-            fy = Math.round(rect.y + Math.max(0, (rect.h - rendered.logicalHeight) / 2));
-          }
-          pasteRegion(eng, rendered.canvas, fx, fy);
-        }
-      } else if (result.kind === "diagram_widget") {
-          const doc = await diagramDocument(result.sourceFormat, result.source, undefined, result.title);
+        } else if (result.kind === "diagram_widget") {
+          const doc = await diagramDocument(
+            result.sourceFormat,
+            result.source,
+            undefined,
+            result.title,
+          );
           const html = typeof doc === "string" ? doc : doc.html;
-          const base = manifest.containedWidgets[0] || manifest.containedObjects[0];
+          const base =
+            manifest.containedWidgets[0] || manifest.containedObjects[0];
           const item: WidgetItem = {
             id: base?.id || `diagram-${Date.now()}`,
             kind: "diagram",
@@ -910,16 +1146,21 @@ export function CanvasApp() {
             copyText: result.source,
             copyLabel: copyLabel(result.sourceFormat),
             status: "draft",
-            userResized: base && "userResized" in base ? base.userResized : false,
+            userResized:
+              base && "userResized" in base ? base.userResized : false,
           };
           for (const id of removeWidgetIds) {
             wm.remove(id);
             syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id });
           }
           wm.add(item);
-          syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
+          syncManager.current?.broadcast({
+            type: "SYNC_WIDGET_ADD",
+            widget: compactWidgetForSync(item),
+          });
         } else if (result.kind === "html_widget") {
-          const base = manifest.containedWidgets[0] || manifest.containedObjects[0];
+          const base =
+            manifest.containedWidgets[0] || manifest.containedObjects[0];
           const item: WidgetItem = {
             id: base?.id || `widget-${Date.now()}`,
             kind: "html",
@@ -940,7 +1181,10 @@ export function CanvasApp() {
             syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id });
           }
           wm.add(item);
-          syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
+          syncManager.current?.broadcast({
+            type: "SYNC_WIDGET_ADD",
+            widget: compactWidgetForSync(item),
+          });
         }
 
         for (const id of removeObjectIds) {
@@ -961,7 +1205,7 @@ export function CanvasApp() {
         return false;
       }
     },
-    [engine]
+    [engine],
   );
 
   const scheduleAi = useCallback((box: Rect | null, userPrompt?: string) => {
@@ -1000,9 +1244,16 @@ export function CanvasApp() {
     boardRevisionRef.current += 1;
     try {
       const frames = (new Error().stack ?? "").split("\n").slice(1);
-      const caller = frames.find((f) => !f.includes("bumpRevision")) ?? "unknown";
-      const key = caller.trim().replace(/^at\s+/, "").slice(0, 120);
-      revisionAuditRef.current.set(key, (revisionAuditRef.current.get(key) ?? 0) + 1);
+      const caller =
+        frames.find((f) => !f.includes("bumpRevision")) ?? "unknown";
+      const key = caller
+        .trim()
+        .replace(/^at\s+/, "")
+        .slice(0, 120);
+      revisionAuditRef.current.set(
+        key,
+        (revisionAuditRef.current.get(key) ?? 0) + 1,
+      );
     } catch {}
   }
 
@@ -1031,7 +1282,11 @@ export function CanvasApp() {
       }
       const eng = engine;
       if (eng) {
-        const snapshot = serializeSnapshot(eng, widgets.current, objects.current);
+        const snapshot = serializeSnapshot(
+          eng,
+          widgets.current,
+          objects.current,
+        );
         void saveAutosave(snapshot);
         if (isAuthenticated) {
           cloudSync.current?.scheduleCloudSync(snapshot, 4000);
@@ -1072,7 +1327,11 @@ export function CanvasApp() {
     inkEpochRef.current += 1;
     syncHistoryButtons();
     if (engine && syncManager.current) {
-      const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
+      const snapshot = serializeSnapshot(
+        engine,
+        widgets.current,
+        objects.current,
+      );
       syncManager.current.broadcastSnapshot(snapshot);
     }
   }
@@ -1087,7 +1346,11 @@ export function CanvasApp() {
     inkEpochRef.current += 1;
     syncHistoryButtons();
     if (engine && syncManager.current) {
-      const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
+      const snapshot = serializeSnapshot(
+        engine,
+        widgets.current,
+        objects.current,
+      );
       syncManager.current.broadcastSnapshot(snapshot);
     }
   }
@@ -1109,7 +1372,12 @@ export function CanvasApp() {
     conductorRef.current?.cancel();
     conductorRef.current?.clearHistory();
     setAiStatus("idle");
-    setAiRun({ phase: "idle", activeProvider: null, doneProvider: null, durationStage: "normal" });
+    setAiRun({
+      phase: "idle",
+      activeProvider: null,
+      doneProvider: null,
+      durationStage: "normal",
+    });
     syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
     afterBoardChange();
   }
@@ -1133,7 +1401,7 @@ export function CanvasApp() {
       afterBoardChange();
       if (syncManager.current) {
         syncManager.current.broadcastSnapshot(
-          serializeSnapshot(engine, widgets.current, objects.current)
+          serializeSnapshot(engine, widgets.current, objects.current),
         );
       }
     } catch (err) {
@@ -1143,7 +1411,11 @@ export function CanvasApp() {
 
   useEffect(() => {
     if (!engine) return;
-    const tm = new ToolManager(engine, () => ({ color: appState.color, pen: appState.pen, eraser }), "hand");
+    const tm = new ToolManager(
+      engine,
+      () => ({ color: appState.color, pen: appState.pen, eraser }),
+      "hand",
+    );
     tm.setShapeCommitListener((p) => {
       if (p.kind === "arrow") {
         lastArrowRef.current = { from: p.from, to: p.to, at: Date.now() };
@@ -1170,14 +1442,37 @@ export function CanvasApp() {
           wm.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
           const item = wm.get(id);
-          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
-
+          if (item)
+            broadcastMove("widget", {
+              type: "SYNC_WIDGET_MOVE",
+              id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              contentW: item.contentW,
+              contentH: item.contentH,
+              userResized: item.userResized,
+              resizeMode: item.resizeMode,
+            });
         },
         onDragEnd: (id) => {
           const wasDragging = widgetDrag.current?.id === id;
           widgetDrag.current = null;
           const item = wm.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
+          if (item)
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_MOVE",
+              id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              contentW: item.contentW,
+              contentH: item.contentH,
+              userResized: item.userResized,
+              resizeMode: item.resizeMode,
+            });
 
           if (wasDragging) afterBoardChangeRef.current();
         },
@@ -1199,17 +1494,53 @@ export function CanvasApp() {
           const dy = (e.clientY - g.startPoint.y) / engine.camera.scale;
           const requestedW = g.startLayout.w + dx;
           const requestedH = g.startLayout.h + dy;
-          const next = resizeWidgetGeometry(g.startLayout, g.mode, requestedW, requestedH);
-          wm.resize(id, next.w, next.h, next.contentW, next.contentH, true, g.mode);
+          const next = resizeWidgetGeometry(
+            g.startLayout,
+            g.mode,
+            requestedW,
+            requestedH,
+          );
+          wm.resize(
+            id,
+            next.w,
+            next.h,
+            next.contentW,
+            next.contentH,
+            true,
+            g.mode,
+          );
           const resized = wm.get(id);
-          if (resized) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h, contentW: resized.contentW, contentH: resized.contentH, userResized: resized.userResized, resizeMode: resized.resizeMode });
-
+          if (resized)
+            broadcastMove("widget", {
+              type: "SYNC_WIDGET_MOVE",
+              id,
+              x: resized.x,
+              y: resized.y,
+              w: resized.w,
+              h: resized.h,
+              contentW: resized.contentW,
+              contentH: resized.contentH,
+              userResized: resized.userResized,
+              resizeMode: resized.resizeMode,
+            });
         },
         onResizeEnd: (id) => {
           const wasResizing = widgetResize.current?.id === id;
           widgetResize.current = null;
           const item = wm.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
+          if (item)
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_MOVE",
+              id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              contentW: item.contentW,
+              contentH: item.contentH,
+              userResized: item.userResized,
+              resizeMode: item.resizeMode,
+            });
 
           if (wasResizing) afterBoardChangeRef.current();
         },
@@ -1263,19 +1594,34 @@ export function CanvasApp() {
           om.move(id, dx, dy);
           g.last = { x: e.clientX, y: e.clientY };
           const item = om.get(id);
-          if (item) broadcastMove("object", { type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
-
+          if (item)
+            broadcastMove("object", {
+              type: "SYNC_OBJECT_MOVE",
+              id,
+              x: item.x,
+              y: item.y,
+            });
         },
         onDragEnd: (id) => {
           const wasDragging = objectDrag.current?.id === id;
           objectDrag.current = null;
           const item = om.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id, x: item.x, y: item.y });
+          if (item)
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_MOVE",
+              id,
+              x: item.x,
+              y: item.y,
+            });
 
           if (wasDragging) afterBoardChangeRef.current();
         },
         onResizeStart: (id, mode, e) => {
-          objectResize.current = { id, mode, last: { x: e.clientX, y: e.clientY } };
+          objectResize.current = {
+            id,
+            mode,
+            last: { x: e.clientX, y: e.clientY },
+          };
         },
         onResizeMove: (id, mode, e) => {
           const g = objectResize.current;
@@ -1291,14 +1637,29 @@ export function CanvasApp() {
           om.resize(id, newW, newH);
           g.last = { x: e.clientX, y: e.clientY };
           const resized = om.get(id);
-          if (resized) broadcastMove("object", { type: "SYNC_OBJECT_RESIZE", id, x: resized.x, y: resized.y, w: resized.w, h: resized.h });
-
+          if (resized)
+            broadcastMove("object", {
+              type: "SYNC_OBJECT_RESIZE",
+              id,
+              x: resized.x,
+              y: resized.y,
+              w: resized.w,
+              h: resized.h,
+            });
         },
         onResizeEnd: (id) => {
           const wasResizing = objectResize.current?.id === id;
           objectResize.current = null;
           const item = om.get(id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_RESIZE", id, x: item.x, y: item.y, w: item.w, h: item.h });
+          if (item)
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_RESIZE",
+              id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+            });
 
           if (wasResizing) afterBoardChangeRef.current();
         },
@@ -1316,7 +1677,10 @@ export function CanvasApp() {
           if (item) {
             const { image, ...cleanObject } = item;
             void image;
-            syncManager.current?.broadcast({ type: "SYNC_OBJECT_ADD", object: cleanObject });
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_ADD",
+              object: cleanObject,
+            });
           }
 
           afterBoardChangeRef.current();
@@ -1352,11 +1716,9 @@ export function CanvasApp() {
         if (node.kind === "widget") {
           om.setSelected(null);
           wm.setSelected(node.id);
-
         } else {
           wm.setSelected(null);
           om.setSelected(node.id);
-
         }
       },
       translate: (node, dx, dy) => {
@@ -1364,21 +1726,57 @@ export function CanvasApp() {
           history.current?.recordWidgets();
           wm.move(node.id, dx, dy);
           const item = wm.get(node.id);
-          if (item) broadcastMove("widget", { type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
+          if (item)
+            broadcastMove("widget", {
+              type: "SYNC_WIDGET_MOVE",
+              id: node.id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              contentW: item.contentW,
+              contentH: item.contentH,
+              userResized: item.userResized,
+              resizeMode: item.resizeMode,
+            });
         } else {
           history.current?.recordObjects();
           om.move(node.id, dx, dy);
           const item = om.get(node.id);
-          if (item) broadcastMove("object", { type: "SYNC_OBJECT_MOVE", id: node.id, x: item.x, y: item.y });
+          if (item)
+            broadcastMove("object", {
+              type: "SYNC_OBJECT_MOVE",
+              id: node.id,
+              x: item.x,
+              y: item.y,
+            });
         }
       },
       endTranslate: (node) => {
         if (node.kind === "widget") {
           const item = wm.get(node.id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_WIDGET_MOVE", id: node.id, x: item.x, y: item.y, w: item.w, h: item.h, contentW: item.contentW, contentH: item.contentH, userResized: item.userResized, resizeMode: item.resizeMode });
+          if (item)
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_MOVE",
+              id: node.id,
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+              contentW: item.contentW,
+              contentH: item.contentH,
+              userResized: item.userResized,
+              resizeMode: item.resizeMode,
+            });
         } else {
           const item = om.get(node.id);
-          if (item) syncManager.current?.broadcast({ type: "SYNC_OBJECT_MOVE", id: node.id, x: item.x, y: item.y });
+          if (item)
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_MOVE",
+              id: node.id,
+              x: item.x,
+              y: item.y,
+            });
         }
       },
     });
@@ -1389,7 +1787,6 @@ export function CanvasApp() {
           return;
         }
         if (!wm.getSelectedId() && !om.getSelectedId()) {
-
         }
         setRefineRect(null);
         inkSnapshotRef.current = null;
@@ -1423,30 +1820,59 @@ export function CanvasApp() {
       if (targetId) {
         if (om.get(targetId)) {
           om.remove(targetId);
-          syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id: targetId });
+          syncManager.current?.broadcast({
+            type: "SYNC_OBJECT_REMOVE",
+            id: targetId,
+          });
         }
         if (wm.get(targetId)) {
           wm.remove(targetId);
-          syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: targetId });
+          syncManager.current?.broadcast({
+            type: "SYNC_WIDGET_REMOVE",
+            id: targetId,
+          });
         }
       }
 
-      if (ec.mode === "rect" && ec.x !== undefined && ec.y !== undefined && ec.w !== undefined && ec.h !== undefined && (ec.w > 0 || ec.h > 0)) {
+      if (
+        ec.mode === "rect" &&
+        ec.x !== undefined &&
+        ec.y !== undefined &&
+        ec.w !== undefined &&
+        ec.h !== undefined &&
+        (ec.w > 0 || ec.h > 0)
+      ) {
         const rect = { x: ec.x, y: ec.y, w: ec.w, h: ec.h };
         eraseRegion(_eng, rect);
         draft.notifyInkErase(rect);
         syncManager.current?.broadcast({ type: "SYNC_INK_ERASE", ...rect });
 
         for (const o of om.getAll()) {
-          if (rect.x < o.x + o.w && rect.x + rect.w > o.x && rect.y < o.y + o.h && rect.y + rect.h > o.y) {
+          if (
+            rect.x < o.x + o.w &&
+            rect.x + rect.w > o.x &&
+            rect.y < o.y + o.h &&
+            rect.y + rect.h > o.y
+          ) {
             om.remove(o.id);
-            syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id: o.id });
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_REMOVE",
+              id: o.id,
+            });
           }
         }
         for (const w of wm.getAll()) {
-          if (rect.x < w.x + w.w && rect.x + rect.w > w.x && rect.y < w.y + w.h && rect.y + rect.h > w.y) {
+          if (
+            rect.x < w.x + w.w &&
+            rect.x + rect.w > w.x &&
+            rect.y < w.y + w.h &&
+            rect.y + rect.h > w.y
+          ) {
             wm.remove(w.id);
-            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: w.id });
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_REMOVE",
+              id: w.id,
+            });
           }
         }
       } else if (ec.mode === "path" && ec.points && ec.points.length > 0) {
@@ -1464,15 +1890,31 @@ export function CanvasApp() {
         const maxY = Math.max(...ys) + size;
         const pathBox = { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
         for (const o of om.getAll()) {
-          if (pathBox.x < o.x + o.w && pathBox.x + pathBox.w > o.x && pathBox.y < o.y + o.h && pathBox.y + pathBox.h > o.y) {
+          if (
+            pathBox.x < o.x + o.w &&
+            pathBox.x + pathBox.w > o.x &&
+            pathBox.y < o.y + o.h &&
+            pathBox.y + pathBox.h > o.y
+          ) {
             om.remove(o.id);
-            syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id: o.id });
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_REMOVE",
+              id: o.id,
+            });
           }
         }
         for (const w of wm.getAll()) {
-          if (pathBox.x < w.x + w.w && pathBox.x + pathBox.w > w.x && pathBox.y < w.y + w.h && pathBox.y + pathBox.h > w.y) {
+          if (
+            pathBox.x < w.x + w.w &&
+            pathBox.x + pathBox.w > w.x &&
+            pathBox.y < w.y + w.h &&
+            pathBox.y + pathBox.h > w.y
+          ) {
             wm.remove(w.id);
-            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: w.id });
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_REMOVE",
+              id: w.id,
+            });
           }
         }
       }
@@ -1480,7 +1922,8 @@ export function CanvasApp() {
 
     draft.setRenderer("html_widget", (_eng, cmd) => {
       if (cmd.tool !== "html_widget") return;
-      const targetId = (cmd as { targetId?: string }).targetId || activeEditTargetRef.current;
+      const targetId =
+        (cmd as { targetId?: string }).targetId || activeEditTargetRef.current;
       activeEditTargetRef.current = null;
       const lockTarget = lockEditTargetRef.current;
       lockEditTargetRef.current = false;
@@ -1492,7 +1935,10 @@ export function CanvasApp() {
         : null;
       if (oldWidget) {
         wm.remove(oldWidget.id);
-        syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });
+        syncManager.current?.broadcast({
+          type: "SYNC_WIDGET_REMOVE",
+          id: oldWidget.id,
+        });
       }
       const initialW = oldWidget ? oldWidget.w : Math.round(cmd.w || 640);
       const initialH = oldWidget ? oldWidget.h : Math.round(cmd.h || 420);
@@ -1521,12 +1967,21 @@ export function CanvasApp() {
       om.setSelected(null);
       wm.setSelected(item.id);
 
-      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
+      syncManager.current?.broadcast({
+        type: "SYNC_WIDGET_ADD",
+        widget: compactWidgetForSync(item),
+      });
       setMode("select");
     });
     draft.setRenderer("write_text", (_eng, cmd) => {
       if (cmd.tool !== "write_text") return;
-      const block = renderTextBlock(cmd.text, cmd.color, cmd.fontSize, cmd.maxWidth, cmd.lineHeight);
+      const block = renderTextBlock(
+        cmd.text,
+        cmd.color,
+        cmd.fontSize,
+        cmd.maxWidth,
+        cmd.lineHeight,
+      );
       const textId = `text-${Date.now()}`;
       addObjectRef.current({
         id: textId,
@@ -1571,7 +2026,7 @@ export function CanvasApp() {
         });
         wm.setSelected(null);
         om.setSelected(formulaId);
-  
+
         setMode("select");
       }
     });
@@ -1597,13 +2052,15 @@ export function CanvasApp() {
         });
         wm.setSelected(null);
         om.setSelected(plotId);
-  
+
         setMode("select");
       }
     });
     draft.setRenderer("animate_scene", (_eng, cmd) => {
       if (cmd.tool !== "animate_scene") return;
-      const scene = (cmd as { scene?: import("@/lib/canvas/animation").AnimationScene }).scene;
+      const scene = (
+        cmd as { scene?: import("@/lib/canvas/animation").AnimationScene }
+      ).scene;
       const animId = `animation-${Date.now()}`;
       addObjectRef.current({
         id: animId,
@@ -1630,7 +2087,8 @@ export function CanvasApp() {
     });
     draft.setRenderer("diagram_source", async (_eng, cmd) => {
       if (cmd.tool !== "diagram_source") return;
-      const targetId = (cmd as { targetId?: string }).targetId || activeEditTargetRef.current;
+      const targetId =
+        (cmd as { targetId?: string }).targetId || activeEditTargetRef.current;
       activeEditTargetRef.current = null;
       const lockTarget = lockEditTargetRef.current;
       lockEditTargetRef.current = false;
@@ -1642,13 +2100,25 @@ export function CanvasApp() {
         : null;
       if (oldWidget) {
         wm.remove(oldWidget.id);
-        syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: oldWidget.id });
+        syncManager.current?.broadcast({
+          type: "SYNC_WIDGET_REMOVE",
+          id: oldWidget.id,
+        });
       }
-      const res = await diagramDocument(cmd.sourceFormat, cmd.source, cmd.diagramKind, cmd.title);
+      const res = await diagramDocument(
+        cmd.sourceFormat,
+        cmd.source,
+        cmd.diagramKind,
+        cmd.title,
+      );
       const html = typeof res === "string" ? res : res.html;
       const fromDoc = typeof res === "object" && res ? res : null;
-      const initialW = oldWidget ? oldWidget.w : Math.round(fromDoc?.width || cmd.w || 540);
-      const initialH = oldWidget ? oldWidget.h : Math.round(fromDoc?.height || cmd.h || 360);
+      const initialW = oldWidget
+        ? oldWidget.w
+        : Math.round(fromDoc?.width || cmd.w || 540);
+      const initialH = oldWidget
+        ? oldWidget.h
+        : Math.round(fromDoc?.height || cmd.h || 360);
 
       const item: WidgetItem = {
         id: oldWidget?.id || `diagram-${Date.now()}`,
@@ -1673,7 +2143,10 @@ export function CanvasApp() {
       om.setSelected(null);
       wm.setSelected(item.id);
 
-      syncManager.current?.broadcast({ type: "SYNC_WIDGET_ADD", widget: compactWidgetForSync(item) });
+      syncManager.current?.broadcast({
+        type: "SYNC_WIDGET_ADD",
+        widget: compactWidgetForSync(item),
+      });
       setMode("select");
     });
     drafts.current = draft;
@@ -1688,7 +2161,12 @@ export function CanvasApp() {
       provider: () => getProviderConfig(),
       getRevision: () => boardRevisionRef.current,
       getFingerprint: () =>
-        boardFingerprint(engine, widgets.current, objects.current, inkEpochRef.current),
+        boardFingerprint(
+          engine,
+          widgets.current,
+          objects.current,
+          inkEpochRef.current,
+        ),
       getRevisionAudit: () => Object.fromEntries(revisionAuditRef.current),
       onEvent: (e) => handleConductorEventRef.current(e),
       afterBoardChange: () => afterBoardChangeRef.current(),
@@ -1741,7 +2219,10 @@ export function CanvasApp() {
         lastZoom = zoom;
         setZoom(zoom);
       }
-      const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
+      const c = engine.camera.screenToWorld(
+        engine.cssWidth / 2,
+        engine.cssHeight / 2,
+      );
       const cx = Math.round(c.x);
       const cy = Math.round(c.y);
       if (cx !== lastCx || cy !== lastCy) {
@@ -1760,7 +2241,12 @@ export function CanvasApp() {
       if (widgetNeedsHydration(w) && w.copyText) {
         try {
           const format = w.sourceFormat || w.pluginId || "mermaid";
-          const res = await diagramDocument(format, w.copyText, w.diagramKind, w.title);
+          const res = await diagramDocument(
+            format,
+            w.copyText,
+            w.diagramKind,
+            w.title,
+          );
           widget = {
             ...w,
             kind: w.kind === "html" ? "html" : "diagram",
@@ -1771,7 +2257,11 @@ export function CanvasApp() {
         }
       }
       const existing = widgets.current?.get(widget.id);
-      if (existing && existing.html === widget.html && existing.title === widget.title) {
+      if (
+        existing &&
+        existing.html === widget.html &&
+        existing.title === widget.title
+      ) {
         widgets.current?.setStatus(widget.id, widget.status);
         existing.x = widget.x;
         existing.y = widget.y;
@@ -1782,7 +2272,7 @@ export function CanvasApp() {
           widget.contentW,
           widget.contentH,
           widget.userResized,
-          widget.resizeMode
+          widget.resizeMode,
         );
         return;
       }
@@ -1791,17 +2281,31 @@ export function CanvasApp() {
 
     draft.setInkListener((op) => {
       if (sm.isRemote) return;
-      sm.broadcast({ type: "SYNC_INK_ERASE", x: op.rect.x, y: op.rect.y, w: op.rect.w, h: op.rect.h });
+      sm.broadcast({
+        type: "SYNC_INK_ERASE",
+        x: op.rect.x,
+        y: op.rect.y,
+        w: op.rect.w,
+        h: op.rect.h,
+      });
     });
 
     sm.setHandlers({
       onStatusChange: (status, roomCode, peerCount, error, peerName) => {
-        setSyncState({ status, roomCode, peerCount, peerName: peerName ?? null, error });
+        setSyncState({
+          status,
+          roomCode,
+          peerCount,
+          peerName: peerName ?? null,
+          error,
+        });
       },
       onPeerConnect: (_peerId, isHost) => {
         if (isHost) {
           const name = sm.getStatus().peerName;
-          toast.success(name ? `${name} connected!` : "User connected to session!");
+          toast.success(
+            name ? `${name} connected!` : "User connected to session!",
+          );
           setConnectOpen(false);
         }
       },
@@ -1811,7 +2315,12 @@ export function CanvasApp() {
       },
       onInitState: (snapshot) => {
         if (!engine) return;
-        void restoreSnapshot(engine, widgets.current, objects.current, snapshot);
+        void restoreSnapshot(
+          engine,
+          widgets.current,
+          objects.current,
+          snapshot,
+        );
       },
       onRemoteScene: (nextWidgets, nextObjects) => {
         if (!engine) return;
@@ -1855,7 +2364,11 @@ export function CanvasApp() {
       onRemoteObjectAdd: (obj) => {
         if (!engine || !objects.current) return;
         const existing = objects.current.get(obj.id);
-        if (existing && existing.source === obj.source && existing.kind === obj.kind) {
+        if (
+          existing &&
+          existing.source === obj.source &&
+          existing.kind === obj.kind
+        ) {
           objects.current.setStatus(obj.id, obj.status);
           existing.x = obj.x;
           existing.y = obj.y;
@@ -1891,7 +2404,17 @@ export function CanvasApp() {
       onRemoteWidgetAdd: (w) => {
         void hydrateAndAddRemoteWidget(w);
       },
-      onRemoteWidgetMove: (id, x, y, w, h, contentW, contentH, userResized, resizeMode) => {
+      onRemoteWidgetMove: (
+        id,
+        x,
+        y,
+        w,
+        h,
+        contentW,
+        contentH,
+        userResized,
+        resizeMode,
+      ) => {
         const currentItem = widgets.current?.get(id);
         if (!currentItem || !widgets.current) return;
         currentItem.x = x;
@@ -1920,7 +2443,13 @@ export function CanvasApp() {
     tm.selection.setInkListener((op) => {
       if (sm.isRemote) return;
       if (op.kind === "erase") {
-        sm.broadcast({ type: "SYNC_INK_ERASE", x: op.rect.x, y: op.rect.y, w: op.rect.w, h: op.rect.h });
+        sm.broadcast({
+          type: "SYNC_INK_ERASE",
+          x: op.rect.x,
+          y: op.rect.y,
+          w: op.rect.w,
+          h: op.rect.h,
+        });
       } else {
         sm.broadcast({
           type: "SYNC_INK_MOVE",
@@ -2019,7 +2548,12 @@ export function CanvasApp() {
 
       const localSaved = await loadAutosave();
       if (localSaved && !cancelled) {
-        await restoreSnapshot(engine, widgets.current, objects.current, localSaved);
+        await restoreSnapshot(
+          engine,
+          widgets.current,
+          objects.current,
+          localSaved,
+        );
         history.current?.reset();
       }
 
@@ -2036,7 +2570,12 @@ export function CanvasApp() {
             if (cloudHash === localHash) {
               cloudSync.current?.setLastSyncedHash(cloudHash);
             } else if (cloudSavedAt > localSavedAt) {
-              await restoreSnapshot(engine, widgets.current, objects.current, cloudRes.data);
+              await restoreSnapshot(
+                engine,
+                widgets.current,
+                objects.current,
+                cloudRes.data,
+              );
               history.current?.reset();
               void saveAutosave(cloudRes.data);
               cloudSync.current?.setLastSyncedHash(cloudHash);
@@ -2070,28 +2609,65 @@ export function CanvasApp() {
   useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (e.data?.type !== "drawva-widget-wheel") return;
-      if (engine) {
-        let screenX = window.innerWidth / 2;
-        let screenY = window.innerHeight / 2;
-        if (typeof e.data.clientX === "number" && typeof e.data.clientY === "number") {
+      if (appState.mode !== "hand") return;
+      if (!engine) return;
+
+      let screenX = window.innerWidth / 2;
+      let screenY = window.innerHeight / 2;
+
+      if (e.data.isScreenCoord) {
+        screenX = typeof e.data.clientX === "number" ? e.data.clientX : screenX;
+        screenY = typeof e.data.clientY === "number" ? e.data.clientY : screenY;
+      } else {
+        const pt = widgets.current?.getIframeScreenPoint(
+          e.source,
+          typeof e.data.clientX === "number" ? e.data.clientX : 0,
+          typeof e.data.clientY === "number" ? e.data.clientY : 0,
+        );
+        if (pt) {
+          screenX = pt.x;
+          screenY = pt.y;
+        } else if (
+          typeof e.data.clientX === "number" &&
+          typeof e.data.clientY === "number"
+        ) {
           screenX = e.data.clientX;
           screenY = e.data.clientY;
         }
+      }
+
+      const deltaY = typeof e.data.deltaY === "number" ? e.data.deltaY : 0;
+      if (deltaY === 0) return;
+
+      if (e.data.ctrlKey || e.data.metaKey) {
         engine.camera.handleWheel({
           clientX: screenX,
           clientY: screenY,
-          deltaX: typeof e.data.deltaX === "number" ? e.data.deltaX : 0,
-          deltaY: typeof e.data.deltaY === "number" ? e.data.deltaY : 0,
-          ctrlKey: !!e.data.ctrlKey,
-          metaKey: !!e.data.metaKey,
-          deltaMode: typeof e.data.deltaMode === "number" ? e.data.deltaMode : 0,
+          deltaX: 0,
+          deltaY,
+          ctrlKey: true,
+          metaKey: false,
         });
-        engine.requestRender();
+      } else if (
+        Math.abs(deltaY) < 60 &&
+        (e.data.deltaMode === 0 || !e.data.deltaMode)
+      ) {
+        engine.camera.handleWheel({
+          clientX: screenX,
+          clientY: screenY,
+          deltaX: 0,
+          deltaY: deltaY * 2.5,
+          ctrlKey: true,
+          metaKey: false,
+        });
+      } else {
+        engine.camera.zoomAt(screenX, screenY, deltaY);
       }
+      engine.requestRender();
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
-  }, [engine]);
+  }, [engine, mode]);
 
   const [textOpen, setTextOpen] = useState(false);
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
@@ -2104,7 +2680,10 @@ export function CanvasApp() {
       const screenFontSize = 18;
       const fontSize = Math.max(12, Math.round(screenFontSize / scale));
       const screenMaxWidth = 540;
-      const maxWidth = Math.max(fontSize * 4, Math.round(screenMaxWidth / scale));
+      const maxWidth = Math.max(
+        fontSize * 4,
+        Math.round(screenMaxWidth / scale),
+      );
       const block = renderTextBlock(textValue, color, fontSize, maxWidth);
       addObjectRef.current({
         id: `obj-text-${Date.now()}`,
@@ -2122,9 +2701,17 @@ export function CanvasApp() {
         status: "accepted",
         image: block.canvas,
       });
-      const textBox = { x: textAnchor.x, y: textAnchor.y, w: block.w, h: block.h };
+      const textBox = {
+        x: textAnchor.x,
+        y: textAnchor.y,
+        w: block.w,
+        h: block.h,
+      };
       const now = Date.now();
-      if (inkBoxRef.current && now - lastStrokeTimeRef.current < INK_COALESCE_MS) {
+      if (
+        inkBoxRef.current &&
+        now - lastStrokeTimeRef.current < INK_COALESCE_MS
+      ) {
         inkBoxRef.current = unionRect(inkBoxRef.current, textBox);
       } else {
         inkBoxRef.current = textBox;
@@ -2188,7 +2775,11 @@ export function CanvasApp() {
 
       if (!result || result.moves.length === 0) {
         if (result && result.skippedLocked > 0) {
-          toast(result.skippedLocked === 1 ? "Skipped 1 locked item" : `Skipped ${result.skippedLocked} locked items`);
+          toast(
+            result.skippedLocked === 1
+              ? "Skipped 1 locked item"
+              : `Skipped ${result.skippedLocked} locked items`,
+          );
         } else {
           toast("Nothing to tidy");
         }
@@ -2240,13 +2831,21 @@ export function CanvasApp() {
       if (result.cappedAt150) {
         toast(`Tidied 150 of ${result.totalCandidates}`);
       } else {
-        toast(`Tidied ${result.movedCount} item${result.movedCount > 1 ? "s" : ""}`);
+        toast(
+          `Tidied ${result.movedCount} item${result.movedCount > 1 ? "s" : ""}`,
+        );
       }
       if (result.skippedLocked > 0) {
-        toast(result.skippedLocked === 1 ? "Skipped 1 locked item" : `Skipped ${result.skippedLocked} locked items`);
+        toast(
+          result.skippedLocked === 1
+            ? "Skipped 1 locked item"
+            : `Skipped ${result.skippedLocked} locked items`,
+        );
       }
       if (result.partialFailures > 0) {
-        toast(`Could not place ${result.partialFailures} item${result.partialFailures > 1 ? "s" : ""} (no space)`);
+        toast(
+          `Could not place ${result.partialFailures} item${result.partialFailures > 1 ? "s" : ""} (no space)`,
+        );
       }
     } finally {
       isTidyingRef.current = false;
@@ -2287,11 +2886,17 @@ export function CanvasApp() {
           if (wid) {
             history.current?.recordWidgets();
             widgets.current?.remove(wid);
-            syncManager.current?.broadcast({ type: "SYNC_WIDGET_REMOVE", id: wid });
+            syncManager.current?.broadcast({
+              type: "SYNC_WIDGET_REMOVE",
+              id: wid,
+            });
           } else if (oid) {
             history.current?.recordObjects();
             objects.current?.remove(oid);
-            syncManager.current?.broadcast({ type: "SYNC_OBJECT_REMOVE", id: oid });
+            syncManager.current?.broadcast({
+              type: "SYNC_OBJECT_REMOVE",
+              id: oid,
+            });
           }
         }
         afterBoardChangeRef.current();
@@ -2310,7 +2915,10 @@ export function CanvasApp() {
 
   const screenToWorld = (e: React.PointerEvent): Point => {
     const rect = engine!.canvas("screen").getBoundingClientRect();
-    return engine!.camera.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+    return engine!.camera.screenToWorld(
+      e.clientX - rect.left,
+      e.clientY - rect.top,
+    );
   };
 
   const gestureEvent = (e: React.PointerEvent): ToolGestureEvent => {
@@ -2341,7 +2949,8 @@ export function CanvasApp() {
       }
 
       const pts = Array.from(activePointersRef.current.values());
-      const target = gestureOverlayRef.current || (e.currentTarget as HTMLElement);
+      const target =
+        gestureOverlayRef.current || (e.currentTarget as HTMLElement);
       const rect = target.getBoundingClientRect();
       const p1 = { x: pts[0].x - rect.left, y: pts[0].y - rect.top };
       const p2 = { x: pts[1].x - rect.left, y: pts[1].y - rect.top };
@@ -2383,7 +2992,14 @@ export function CanvasApp() {
     }
     if (e.button !== 0) return;
     const world = screenToWorld(e);
-    const isDrawing = ["pen", "highlighter", "eraser", "rect", "ellipse", "arrow"].includes(mode);
+    const isDrawing = [
+      "pen",
+      "highlighter",
+      "eraser",
+      "rect",
+      "ellipse",
+      "arrow",
+    ].includes(mode);
     if (isDrawing) {
       drawingRef.current = { x: world.x, y: world.y, w: 0, h: 0 };
       if (aiTimer.current) {
@@ -2405,12 +3021,16 @@ export function CanvasApp() {
     if (!engine) return;
 
     if (activePointersRef.current.has(e.pointerId)) {
-      activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      activePointersRef.current.set(e.pointerId, {
+        x: e.clientX,
+        y: e.clientY,
+      });
     }
 
     if (activePointersRef.current.size >= 2 && pinchRef.current) {
       const pts = Array.from(activePointersRef.current.values());
-      const target = gestureOverlayRef.current || (e.currentTarget as HTMLElement);
+      const target =
+        gestureOverlayRef.current || (e.currentTarget as HTMLElement);
       const rect = target.getBoundingClientRect();
       const p1 = { x: pts[0].x - rect.left, y: pts[0].y - rect.top };
       const p2 = { x: pts[1].x - rect.left, y: pts[1].y - rect.top };
@@ -2426,7 +3046,7 @@ export function CanvasApp() {
         currentDistance,
         p.startScale,
         p.startPanX,
-        p.startPanY
+        p.startPanY,
       );
       engine.requestRender();
       return;
@@ -2488,11 +3108,18 @@ export function CanvasApp() {
         const hasErased = eraserBox.w > 1 || eraserBox.h > 1 || changed;
         if (hasErased && !changed) afterBoardChange();
       } else {
-        const isDrawing = ["pen", "highlighter", "rect", "ellipse", "arrow"].includes(mode);
+        const isDrawing = [
+          "pen",
+          "highlighter",
+          "rect",
+          "ellipse",
+          "arrow",
+        ].includes(mode);
         if (isDrawing) {
           const singleStrokeBox = { ...drawingRef.current };
           drawingRef.current = null;
-          const hasDrawn = singleStrokeBox.w > 1 || singleStrokeBox.h > 1 || changed;
+          const hasDrawn =
+            singleStrokeBox.w > 1 || singleStrokeBox.h > 1 || changed;
           if (hasDrawn) {
             const now = Date.now();
             if (
@@ -2529,7 +3156,10 @@ export function CanvasApp() {
   const onFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (engine && f) {
-      const c = engine.camera.screenToWorld(engine.cssWidth / 2, engine.cssHeight / 2);
+      const c = engine.camera.screenToWorld(
+        engine.cssWidth / 2,
+        engine.cssHeight / 2,
+      );
       try {
         const placed = await placeImageAt(engine, f, c);
         syncManager.current?.broadcast({
@@ -2551,9 +3181,10 @@ export function CanvasApp() {
 
   const importImage = () => fileRef.current?.click();
 
-  const anchorCss = textAnchor && engine
-    ? engine.camera.worldToScreen(textAnchor.x, textAnchor.y)
-    : null;
+  const anchorCss =
+    textAnchor && engine
+      ? engine.camera.worldToScreen(textAnchor.x, textAnchor.y)
+      : null;
 
   const zoomBy = (delta: number) => {
     if (!engine) return;
@@ -2566,14 +3197,23 @@ export function CanvasApp() {
     engine.requestRender();
   };
 
-  const [refineBtnPos, setRefineBtnPos] = useState<{ x: number; y: number } | null>(null);
+  const [refineBtnPos, setRefineBtnPos] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const lastRefinePosRef = useRef("");
   useEffect(() => {
     refreshRefineRectRef.current = () => {
       const r = tools.current?.selection.rect;
       if (r && mode === "select") {
         setRefineRect((prev) =>
-          prev && prev.x === r.x && prev.y === r.y && prev.w === r.w && prev.h === r.h ? prev : { ...r }
+          prev &&
+          prev.x === r.x &&
+          prev.y === r.y &&
+          prev.w === r.w &&
+          prev.h === r.h
+            ? prev
+            : { ...r },
         );
         const p = engine?.camera.worldToScreen(r.x + r.w, r.y);
         if (p) {
@@ -2597,7 +3237,9 @@ export function CanvasApp() {
 
   const handleModeChange = useCallback((newMode: CanvasMode) => {
     if (refineStateRef.current === "loading") {
-      toast.info("Refinement in progress. Please wait or cancel before switching tools.");
+      toast.info(
+        "Refinement in progress. Please wait or cancel before switching tools.",
+      );
       return;
     }
     setMode(newMode);
@@ -2643,17 +3285,21 @@ export function CanvasApp() {
         onOpenManual={() => setManualOpen(true)}
         onTidy={handleTidy}
         cloudStatus={cloudStatus}
-         onTriggerCloudSync={() => {
-           const sync = cloudSync.current;
-           if (!engine || !isAuthenticated || !sync) {
-             toast.info("Sign in to sync this canvas to the cloud.");
-             return;
-           }
-           const snapshot = serializeSnapshot(engine, widgets.current, objects.current);
-           void sync.syncNow(snapshot).then((synced) => {
-             if (!synced) toast.error("Cloud sync failed. Please try again.");
-           });
-         }}
+        onTriggerCloudSync={() => {
+          const sync = cloudSync.current;
+          if (!engine || !isAuthenticated || !sync) {
+            toast.info("Sign in to sync this canvas to the cloud.");
+            return;
+          }
+          const snapshot = serializeSnapshot(
+            engine,
+            widgets.current,
+            objects.current,
+          );
+          void sync.syncNow(snapshot).then((synced) => {
+            if (!synced) toast.error("Cloud sync failed. Please try again.");
+          });
+        }}
       />
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -2677,10 +3323,10 @@ export function CanvasApp() {
               (mode === "select"
                 ? "default"
                 : mode === "hand"
-                ? "grab"
-                : mode === "text"
-                ? "text"
-                : "crosshair"),
+                  ? "grab"
+                  : mode === "text"
+                    ? "text"
+                    : "crosshair"),
           }}
         />
 
@@ -2710,11 +3356,24 @@ export function CanvasApp() {
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-primary/40 bg-background/95 px-3 text-sm font-medium shadow-lg hover:bg-accent"
                 onClick={runRefine}
               >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
                   <path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.85.993 6.36 2.64L21 8" />
                   <path d="M21 3v5h-5" />
                 </svg>
-                {refineState === "error" ? "Retry Refine" : refineState === "success" ? "Refined ✓" : "Refine"}
+                {refineState === "error"
+                  ? "Retry Refine"
+                  : refineState === "success"
+                    ? "Refined ✓"
+                    : "Refine"}
               </button>
             )}
           </div>
@@ -2821,16 +3480,15 @@ export function CanvasApp() {
         onDisconnect={() => syncManager.current!.disconnect()}
         onGoOnline={(peerJsId) => syncManager.current!.goOnline(peerJsId)}
         onConnectToPeer={(targetPeerJsId, opts) => {
-          void syncManager.current!.connectToPeer(targetPeerJsId, opts).catch(() => {});
+          void syncManager
+            .current!.connectToPeer(targetPeerJsId, opts)
+            .catch(() => {});
         }}
         onAuthorizeRequest={(requestId, peerName) =>
           syncManager.current!.authorizeRequest(requestId, peerName)
         }
       />
-      <UserManualDialog
-        open={manualOpen}
-        onOpenChange={setManualOpen}
-      />
+      <UserManualDialog open={manualOpen} onOpenChange={setManualOpen} />
     </div>
   );
 }

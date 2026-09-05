@@ -90,11 +90,17 @@ export class WidgetManager {
   private style: HTMLStyleElement;
   private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
-  private snapshotWaiters = new Map<string, Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>>();
+  private snapshotWaiters = new Map<
+    string,
+    Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>
+  >();
   private lastLayoutSize = new Map<string, string>();
   private styleSizeKey = new Map<string, string>();
   private lastRenderState = new Map<string, string>();
-  private lastContentFit = new Map<string, { w: number; h: number; grows: number }>();
+  private lastContentFit = new Map<
+    string,
+    { w: number; h: number; grows: number }
+  >();
 
   private onPointerMove = (e: PointerEvent) => {
     const cb = this.opts.callbacks;
@@ -359,7 +365,8 @@ export class WidgetManager {
             widget.cachedImage = img;
             this.resolveSnapshot(id, img);
           };
-          img.onerror = () => this.resolveSnapshot(id, widget.cachedImage ?? null);
+          img.onerror = () =>
+            this.resolveSnapshot(id, widget.cachedImage ?? null);
           img.src = dataUrl;
           break;
         }
@@ -445,7 +452,8 @@ export class WidgetManager {
     const shell = this.shells.get(id);
     if (shell) shell.dataset.status = status;
     const tb = this.toolbars.get(id);
-    if (tb?.overlay) tb.overlay.style.display = status === "draft" ? "block" : "none";
+    if (tb?.overlay)
+      tb.overlay.style.display = status === "draft" ? "block" : "none";
     this.applyMode(id);
   }
 
@@ -461,7 +469,17 @@ export class WidgetManager {
   private applyMode(id: string): void {
     const tb = this.toolbars.get(id);
     if (!tb) return;
-    const { chrome, dragBar, resizeHandle, resizeWidth, resizeHeight, sideActions, refine, overlay, acceptBtn } = tb;
+    const {
+      chrome,
+      dragBar,
+      resizeHandle,
+      resizeWidth,
+      resizeHeight,
+      sideActions,
+      refine,
+      overlay,
+      acceptBtn,
+    } = tb;
     const shell = this.shells.get(id);
     const hand = this.mode === "hand";
     const select = this.mode === "select";
@@ -492,7 +510,8 @@ export class WidgetManager {
     }
     if (sideActions) {
       const isNarrow = shell?.dataset.narrow === "true";
-      sideActions.style.display = select && active && isNarrow ? "flex" : "none";
+      sideActions.style.display =
+        select && active && isNarrow ? "flex" : "none";
     }
     if (dragBar) {
       dragBar.style.display = select ? "inline-flex" : "none";
@@ -538,9 +557,54 @@ export class WidgetManager {
   hitTest(point: Point): WidgetItem | null {
     let hit: WidgetItem | null = null;
     for (const w of this.widgets.values()) {
-      if (point.x >= w.x && point.x <= w.x + w.w && point.y >= w.y && point.y <= w.y + w.h) hit = w;
+      if (
+        point.x >= w.x &&
+        point.x <= w.x + w.w &&
+        point.y >= w.y &&
+        point.y <= w.y + w.h
+      )
+        hit = w;
     }
     return hit;
+  }
+
+  getIframeScreenPoint(
+    sourceWindow: MessageEventSource | null,
+    localX: number,
+    localY: number,
+  ): { x: number; y: number } | null {
+    if (sourceWindow) {
+      for (const shell of this.shells.values()) {
+        const iframe = shell.querySelector("iframe");
+        if (iframe && iframe.contentWindow === sourceWindow) {
+          const rect = iframe.getBoundingClientRect();
+          const scaleX =
+            iframe.clientWidth > 0 ? rect.width / iframe.clientWidth : 1;
+          const scaleY =
+            iframe.clientHeight > 0 ? rect.height / iframe.clientHeight : 1;
+          return {
+            x: rect.left + localX * scaleX,
+            y: rect.top + localY * scaleY,
+          };
+        }
+      }
+    }
+    if (this.shells.size === 1) {
+      const shell = this.shells.values().next().value;
+      const iframe = shell?.querySelector("iframe");
+      if (iframe) {
+        const rect = iframe.getBoundingClientRect();
+        const scaleX =
+          iframe.clientWidth > 0 ? rect.width / iframe.clientWidth : 1;
+        const scaleY =
+          iframe.clientHeight > 0 ? rect.height / iframe.clientHeight : 1;
+        return {
+          x: rect.left + localX * scaleX,
+          y: rect.top + localY * scaleY,
+        };
+      }
+    }
+    return null;
   }
 
   move(id: string, dx: number, dy: number): void {
@@ -551,23 +615,47 @@ export class WidgetManager {
     this.position(w);
   }
 
-  resize(id: string, newW: number, newH: number, contentW?: number, contentH?: number, userResized?: boolean, mode: WidgetResizeMode = "corner"): void {
+  resize(
+    id: string,
+    newW: number,
+    newH: number,
+    contentW?: number,
+    contentH?: number,
+    userResized?: boolean,
+    mode: WidgetResizeMode = "corner",
+  ): void {
     const w = this.widgets.get(id);
     if (!w) return;
-    const resized = typeof contentW === "number" || typeof contentH === "number"
-      ? normalizeWidgetGeometry({ ...w, w: newW, h: newH, contentW: contentW ?? w.contentW, contentH: contentH ?? w.contentH, userResized: userResized ?? w.userResized, resizeMode: mode })
-      : resizeWidgetGeometry(w, mode, newW, newH);
-    Object.assign(w, resized, { userResized: userResized ?? resized.userResized });
+    const resized =
+      typeof contentW === "number" || typeof contentH === "number"
+        ? normalizeWidgetGeometry({
+            ...w,
+            w: newW,
+            h: newH,
+            contentW: contentW ?? w.contentW,
+            contentH: contentH ?? w.contentH,
+            userResized: userResized ?? w.userResized,
+            resizeMode: mode,
+          })
+        : resizeWidgetGeometry(w, mode, newW, newH);
+    Object.assign(w, resized, {
+      userResized: userResized ?? resized.userResized,
+    });
     this.position(w);
   }
 
-  private autoFitContent(id: string, measuredW: number, measuredH: number): void {
+  private autoFitContent(
+    id: string,
+    measuredW: number,
+    measuredH: number,
+  ): void {
     const widget = this.widgets.get(id);
     if (!widget || widget.userResized) return;
     const curW = Math.max(80, widget.contentW || widget.w);
     const curH = Math.max(60, widget.contentH || widget.h);
     const lastFit = this.lastContentFit.get(id);
-    const grows = lastFit && lastFit.w === curW && lastFit.h === curH ? lastFit.grows : 0;
+    const grows =
+      lastFit && lastFit.w === curW && lastFit.h === curH ? lastFit.grows : 0;
     let nextW = curW;
     let nextH = curH;
     if (measuredW > curW + 8 && grows < MAX_CONTENT_FIT_GROWS) {
@@ -608,7 +696,9 @@ export class WidgetManager {
     if (readyImmediately) {
       reveal();
     }
-    const fallbackReveal = readyImmediately ? 0 : window.setTimeout(reveal, 900);
+    const fallbackReveal = readyImmediately
+      ? 0
+      : window.setTimeout(reveal, 900);
 
     const body = document.createElement("div");
     body.className = "drawva-widget-body";
@@ -625,20 +715,30 @@ export class WidgetManager {
     const sendInit = (targetWindow: Window | null, origin?: string) => {
       if (initSent || !targetWindow) return;
       initSent = true;
-      const target = typeof origin === "string" && origin !== "null" ? origin : location.origin;
+      const target =
+        typeof origin === "string" && origin !== "null"
+          ? origin
+          : location.origin;
       targetWindow.postMessage(
         { type: "drawva-widget-init", title: widget.title, html: widget.html },
-        target
+        target,
       );
       targetWindow.postMessage(
-        { type: "drawva-widget-layout-size", width: Math.max(80, widget.contentW), height: Math.max(60, widget.contentH) },
-        target
+        {
+          type: "drawva-widget-layout-size",
+          width: Math.max(80, widget.contentW),
+          height: Math.max(60, widget.contentH),
+        },
+        target,
       );
     };
 
     const onMessage = (event: MessageEvent) => {
       if (event.source !== frame.contentWindow) return;
-      if (event.data?.type === "drawva-widget-ready" || event.data?.type === "drawva-widget-host-ready") {
+      if (
+        event.data?.type === "drawva-widget-ready" ||
+        event.data?.type === "drawva-widget-host-ready"
+      ) {
         sendInit(frame.contentWindow, event.origin);
         if (fallbackReveal) window.clearTimeout(fallbackReveal);
         requestAnimationFrame(() => requestAnimationFrame(reveal));
@@ -648,7 +748,8 @@ export class WidgetManager {
       } else if (event.data?.type === "drawva-widget-content-size") {
         const cw = Number(event.data.width);
         const ch = Number(event.data.height);
-        if (Number.isFinite(cw) && Number.isFinite(ch)) this.autoFitContent(widget.id, cw, ch);
+        if (Number.isFinite(cw) && Number.isFinite(ch))
+          this.autoFitContent(widget.id, cw, ch);
       }
     };
     window.addEventListener("message", onMessage);
@@ -673,7 +774,8 @@ export class WidgetManager {
 
     const leftGroup = document.createElement("div");
     leftGroup.className = "drawva-widget-left-group";
-    leftGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
+    leftGroup.style.cssText =
+      "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
@@ -697,14 +799,16 @@ export class WidgetManager {
 
     const rightGroup = document.createElement("div");
     rightGroup.className = "drawva-widget-right-group";
-    rightGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
+    rightGroup.style.cssText =
+      "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
     const acceptBtn = document.createElement("button");
     acceptBtn.type = "button";
     acceptBtn.className = "drawva-widget-btn drawva-widget-accept";
     acceptBtn.innerHTML = ACCEPT_SVG;
     acceptBtn.title = "Accept & keep widget";
-    acceptBtn.style.display = widget.status === "draft" ? "inline-flex" : "none";
+    acceptBtn.style.display =
+      widget.status === "draft" ? "inline-flex" : "none";
     acceptBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
     acceptBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -716,7 +820,9 @@ export class WidgetManager {
       btn.type = "button";
       btn.className = `drawva-widget-btn drawva-widget-btn-copy ${isTop ? "drawva-widget-top-copy" : "drawva-widget-side-copy"}`;
       const copyTextLabel = widget.copyLabel
-        ? (widget.copyLabel.startsWith("Copy ") ? widget.copyLabel : `Copy ${widget.copyLabel}`)
+        ? widget.copyLabel.startsWith("Copy ")
+          ? widget.copyLabel
+          : `Copy ${widget.copyLabel}`
         : "Copy HTML";
       btn.innerHTML = `${COPY_SVG}<span>${copyTextLabel}</span>`;
       btn.title = copyTextLabel;
@@ -761,7 +867,7 @@ export class WidgetManager {
     resizeWidth.innerHTML = RESIZE_WIDTH_SVG;
     resizeWidth.style.cssText =
       "position:absolute;left:0;top:0;width:28px;height:40px;cursor:ew-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;transform-origin:0 0;";
-    
+
     const resizeHeight = document.createElement("div");
     resizeHeight.className = "drawva-widget-resize drawva-widget-resize-height";
     resizeHeight.title = "Resize height (trim empty vertical space)";
@@ -769,16 +875,49 @@ export class WidgetManager {
     resizeHeight.style.cssText =
       "position:absolute;left:0;top:0;width:40px;height:28px;cursor:ns-resize;z-index:10;display:none;align-items:center;justify-content:center;pointer-events:auto;touch-action:none;transform-origin:0 0;";
 
-    shell.append(body, chrome, sideActions, resizeHandle, resizeWidth, resizeHeight);
+    shell.append(
+      body,
+      chrome,
+      sideActions,
+      resizeHandle,
+      resizeWidth,
+      resizeHeight,
+    );
 
     shell.addEventListener("pointerdown", (e) => {
       if (this.mode !== "select") return;
       const target = e.target as HTMLElement | null;
-      if (!target?.closest(".drawva-widget-btn") && !target?.closest(".drawva-widget-resize")) {
+      if (
+        !target?.closest(".drawva-widget-btn") &&
+        !target?.closest(".drawva-widget-resize")
+      ) {
         e.stopPropagation();
         this.setSelected(widget.id);
       }
     });
+
+    shell.addEventListener(
+      "wheel",
+      (e) => {
+        if (this.mode !== "hand") return;
+        e.preventDefault();
+        window.postMessage(
+          {
+            type: "drawva-widget-wheel",
+            clientX: e.clientX,
+            clientY: e.clientY,
+            deltaX: e.deltaX,
+            deltaY: e.deltaY,
+            ctrlKey: !!e.ctrlKey,
+            metaKey: !!e.metaKey,
+            deltaMode: e.deltaMode || 0,
+            isScreenCoord: true,
+          },
+          "*",
+        );
+      },
+      { passive: false, capture: true },
+    );
 
     const cb = this.opts.callbacks ?? {};
     const beginDrag = (e: PointerEvent) => {
@@ -800,21 +939,38 @@ export class WidgetManager {
 
     this.hostRoot.append(shell);
     this.shells.set(widget.id, shell);
-    this.toolbars.set(widget.id, { chrome, dragBar, resizeHandle, resizeWidth, resizeHeight, sideActions, refine: undefined, overlay, acceptBtn });
+    this.toolbars.set(widget.id, {
+      chrome,
+      dragBar,
+      resizeHandle,
+      resizeWidth,
+      resizeHeight,
+      sideActions,
+      refine: undefined,
+      overlay,
+      acceptBtn,
+    });
     this.applyMode(widget.id);
   }
 
-  refreshSnapshot(id: string, timeoutMs = 1100): Promise<HTMLImageElement | HTMLCanvasElement | null> {
+  refreshSnapshot(
+    id: string,
+    timeoutMs = 1100,
+  ): Promise<HTMLImageElement | HTMLCanvasElement | null> {
     const widget = this.widgets.get(id);
     const iframe = this.shells.get(id)?.querySelector("iframe");
     if (!widget) return Promise.resolve(null);
-    if (!iframe?.contentWindow) return Promise.resolve(widget.cachedImage ?? null);
+    if (!iframe?.contentWindow)
+      return Promise.resolve(widget.cachedImage ?? null);
     const reqId = `atlas-${id}-${Date.now()}`;
     return new Promise((resolve) => {
-      const timer = window.setTimeout(() => {
-        this.dropSnapshotWaiter(id, onReady);
-        resolve(widget.cachedImage ?? null);
-      }, Math.max(250, timeoutMs));
+      const timer = window.setTimeout(
+        () => {
+          this.dropSnapshotWaiter(id, onReady);
+          resolve(widget.cachedImage ?? null);
+        },
+        Math.max(250, timeoutMs),
+      );
       const onReady = (img: HTMLImageElement | HTMLCanvasElement | null) => {
         window.clearTimeout(timer);
         resolve(img || widget.cachedImage || null);
@@ -824,12 +980,15 @@ export class WidgetManager {
       this.snapshotWaiters.set(id, list);
       iframe.contentWindow!.postMessage(
         { type: "drawva-widget-snapshot-request", reqId },
-        location.origin
+        location.origin,
       );
     });
   }
 
-  private resolveSnapshot(id: string, img: HTMLImageElement | HTMLCanvasElement | null): void {
+  private resolveSnapshot(
+    id: string,
+    img: HTMLImageElement | HTMLCanvasElement | null,
+  ): void {
     const waiters = this.snapshotWaiters.get(id);
     if (!waiters || waiters.length === 0) return;
     this.snapshotWaiters.delete(id);
@@ -838,7 +997,7 @@ export class WidgetManager {
 
   private dropSnapshotWaiter(
     id: string,
-    waiter: (img: HTMLImageElement | HTMLCanvasElement | null) => void
+    waiter: (img: HTMLImageElement | HTMLCanvasElement | null) => void,
   ): void {
     const list = this.snapshotWaiters.get(id);
     if (!list) return;
@@ -858,7 +1017,12 @@ export class WidgetManager {
     this.lastContentFit.delete(id);
   }
 
-  private sendWidgetState(widget: WidgetItem, active: boolean, scaleX: number, scaleY: number): void {
+  private sendWidgetState(
+    widget: WidgetItem,
+    active: boolean,
+    scaleX: number,
+    scaleY: number,
+  ): void {
     const shell = this.shells.get(widget.id);
     const frame = shell?.querySelector("iframe");
     if (!frame?.contentWindow) return;
@@ -868,7 +1032,7 @@ export class WidgetManager {
     this.lastRenderState.set(widget.id, stateKey);
     frame.contentWindow.postMessage(
       { type: "drawva-widget-state", selected, active, scaleX, scaleY },
-      location.origin
+      location.origin,
     );
   }
 
@@ -881,8 +1045,18 @@ export class WidgetManager {
     const viewportH = vp.h || 1080;
     const screenX = cam.panX + widget.x * cam.scale;
     const screenY = cam.panY + widget.y * cam.scale;
-    const contentW = Math.max(80, widget.contentW && widget.contentW > 10 ? widget.contentW : (widget.w || 400));
-    const contentH = Math.max(60, widget.contentH && widget.contentH > 10 ? widget.contentH : (widget.h || 300));
+    const contentW = Math.max(
+      80,
+      widget.contentW && widget.contentW > 10
+        ? widget.contentW
+        : widget.w || 400,
+    );
+    const contentH = Math.max(
+      60,
+      widget.contentH && widget.contentH > 10
+        ? widget.contentH
+        : widget.h || 300,
+    );
     const scaleX = (cam.scale * widget.w) / contentW;
     const scaleY = (cam.scale * widget.h) / contentH;
 
@@ -906,7 +1080,8 @@ export class WidgetManager {
 
     const tb = this.toolbars.get(widget.id);
     if (tb) {
-      const { chrome, sideActions, resizeHandle, resizeWidth, resizeHeight } = tb;
+      const { chrome, sideActions, resizeHandle, resizeWidth, resizeHeight } =
+        tb;
       const chromeW = Math.max(110, renderedW);
       const chromeLeftScreen = (renderedW - chromeW) / 2;
       chrome.style.width = `${chromeW}px`;
@@ -928,9 +1103,19 @@ export class WidgetManager {
     }
 
     const frame = shell.querySelector("iframe");
-    if (frame?.contentWindow && this.lastLayoutSize.get(widget.id) !== sizeKey) {
+    if (
+      frame?.contentWindow &&
+      this.lastLayoutSize.get(widget.id) !== sizeKey
+    ) {
       this.lastLayoutSize.set(widget.id, sizeKey);
-      frame.contentWindow.postMessage({ type: "drawva-widget-layout-size", width: contentW, height: contentH }, location.origin);
+      frame.contentWindow.postMessage(
+        {
+          type: "drawva-widget-layout-size",
+          width: contentW,
+          height: contentH,
+        },
+        location.origin,
+      );
     }
 
     const offscreen =

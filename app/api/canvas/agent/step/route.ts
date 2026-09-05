@@ -88,7 +88,10 @@ export async function POST(req: Request) {
 
   const turnOptions = {
     conversationId,
-    connectionId: typeof body.connectionId === "string" && body.connectionId ? body.connectionId : "default",
+    connectionId:
+      typeof body.connectionId === "string" && body.connectionId && body.connectionId !== "default"
+        ? body.connectionId
+        : `${providerType}:${baseUrl || "default"}:${modelId}`,
     providerType,
     baseUrl,
     apiKey,

@@ -51,6 +51,10 @@ interface Conversation {
   handle: AgentHandle;
   sessionId: string;
   connectionId: string;
+  model: string;
+  providerType: ProviderType;
+  baseUrl?: string;
+  effort?: ReasoningEffort;
   route: string;
   emit: ((e: StreamEvent) => void) | null;
   lastText: string;
@@ -102,16 +106,36 @@ async function ensureConversation(opts: OpenTurnOptions): Promise<{ ctx: Context
   });
   await ctx.settings.update("llm-pi-ai", settingsPatch);
 
-  const fresh = !conversations.has(opts.conversationId);
-  const priorSeed = fresh && opts.priorTurns?.length ? priorTurnsText(opts.priorTurns) : "";
   const existing = conversations.get(opts.conversationId);
-  if (existing && existing.connectionId === opts.connectionId) {
-    return { ctx, conversation: existing, agent: existing.handle.agent, priorSeed };
+  if (
+    existing &&
+    existing.connectionId === opts.connectionId &&
+    existing.model === opts.model &&
+    existing.providerType === opts.providerType &&
+    existing.baseUrl === opts.baseUrl &&
+    existing.effort === opts.effort
+  ) {
+    return { ctx, conversation: existing, agent: existing.handle.agent, priorSeed: "" };
   }
+
+  if (existing) {
+    await disposeConversation(opts.conversationId).catch(() => {});
+  }
+
+  const priorSeed = opts.priorTurns?.length ? priorTurnsText(opts.priorTurns) : "";
   const inFlight = opening.get(opts.conversationId);
   if (inFlight) {
     const conversation = await inFlight;
-    return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
+    if (
+      conversation.connectionId === opts.connectionId &&
+      conversation.model === opts.model &&
+      conversation.providerType === opts.providerType &&
+      conversation.baseUrl === opts.baseUrl &&
+      conversation.effort === opts.effort
+    ) {
+      return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
+    }
+    await disposeConversation(opts.conversationId).catch(() => {});
   }
   const creating = createConversation(ctx, opts, profile);
   opening.set(opts.conversationId, creating);
@@ -204,6 +228,10 @@ async function createConversation(
         handle,
         sessionId,
         connectionId: opts.connectionId,
+        model: opts.model,
+        providerType: opts.providerType,
+        baseUrl: opts.baseUrl,
+        effort: opts.effort,
         route: profile.route,
         emit: null,
         lastText: "",

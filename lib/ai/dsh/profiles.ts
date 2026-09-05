@@ -9,8 +9,9 @@ export interface ConnectionProfile {
   maxTokens: number;
 }
 
-export function routeForConnection(connectionId: string): string {
-  const hash = createHash("sha256").update(String(connectionId)).digest("hex").slice(0, 12);
+export function routeForConnection(connectionId: string, model?: string): string {
+  const seed = model && !connectionId.includes(model) ? `${connectionId}:${model}` : connectionId;
+  const hash = createHash("sha256").update(String(seed)).digest("hex").slice(0, 12);
   return `drawva-${hash}`;
 }
 
@@ -69,7 +70,7 @@ export function buildConnectionProfile(options: {
     };
   }
 
-  const route = routeForConnection(options.connectionId);
+  const route = routeForConnection(options.connectionId, model);
   const headers: Record<string, string> = {};
   if (baseUrl.includes("agentrouter.org")) headers["user-agent"] = "claude-cli/0.2.29 (external, cli)";
   if (baseUrl.includes("openrouter.ai")) {
