@@ -86,7 +86,7 @@
     const rewritten = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (full, attrs, body) => {
       if (/\bsrc\s*=/i.test(attrs)) return full;
       if (!/\btype\s*=\s*["']module["']/i.test(attrs)) return full;
-      return "<script" + attrs + ">" + rewriteManimImports(body, MANIM_CDN, MANIM_LOCAL) + "</script>";
+      return "<script" + attrs + ">" + rewriteManimImports(body, MANIM_CDN, MANIM_LOCAL) + "<\/script>";
     });
     const manimSrc = MANIM_LOCAL.replace(/[?#].*$/, "");
     const mathjaxSrc = MATHJAX_LOCAL.replace(/[?#].*$/, "");

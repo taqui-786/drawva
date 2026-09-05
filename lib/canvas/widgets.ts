@@ -715,8 +715,11 @@ export class WidgetManager {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = `drawva-widget-btn drawva-widget-btn-copy ${isTop ? "drawva-widget-top-copy" : "drawva-widget-side-copy"}`;
-      btn.innerHTML = `${COPY_SVG}<span>${widget.copyLabel ? `Copy ${widget.copyLabel}` : "Copy HTML"}</span>`;
-      btn.title = widget.copyLabel ? `Copy ${widget.copyLabel}` : "Copy source code";
+      const copyTextLabel = widget.copyLabel
+        ? (widget.copyLabel.startsWith("Copy ") ? widget.copyLabel : `Copy ${widget.copyLabel}`)
+        : "Copy HTML";
+      btn.innerHTML = `${COPY_SVG}<span>${copyTextLabel}</span>`;
+      btn.title = copyTextLabel;
       btn.addEventListener("pointerdown", (e) => e.stopPropagation());
       btn.addEventListener("click", (e) => {
         e.stopPropagation();

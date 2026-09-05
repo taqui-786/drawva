@@ -188,15 +188,17 @@ const toolDef = (name: string): AgentToolDef => {
 const accepts = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args).length === 0;
 const violations = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args);
 
-await test("B1 exactly 16 tools with unique names", () => {
-  assert.equal(AGENT_TOOL_DEFS.length, 16);
+await test("B1 exactly 18 tools with unique names", () => {
+  assert.equal(AGENT_TOOL_DEFS.length, 18);
   const names = AGENT_TOOL_DEFS.map((t) => t.name);
-  assert.equal(new Set(names).size, 16);
+  assert.equal(new Set(names).size, 18);
   for (const expected of [
     "canvas_scan",
     "canvas_snapshot",
     "canvas_apply",
     "canvas_edit",
+    "visual_explainer",
+    "load_visual_skill",
     "load_plugin",
     "canvas_read",
     "canvas_patch_widget",
@@ -317,7 +319,7 @@ await test("B9 web tool names stay consistent and are all declared", () => {
 await test("B10 web tools register only behind their capability gate", () => {
   const names = (flags: WebToolFlags) => enabledToolNames(flags);
   const canvasOnly = names({});
-  assert.equal(canvasOnly.length, 9);
+  assert.equal(canvasOnly.length, 11);
   assert.ok(!canvasOnly.some((n) => isWebToolName(n)), `canvas-only set leaked: ${canvasOnly.join(", ")}`);
 
   const searchOnly = names({ search: true });
@@ -332,7 +334,7 @@ await test("B10 web tools register only behind their capability gate", () => {
   assert.ok(!readOnly.includes("web_search"));
   assert.ok(!readOnly.includes("research_search"));
 
-  assert.equal(names({ tinyfish: true, search: true }).length, 16);
+  assert.equal(names({ tinyfish: true, search: true }).length, 18);
 });
 
 await test("B11 fetch selection takes the Wikipedia hit, otherwise the top 2", () => {
