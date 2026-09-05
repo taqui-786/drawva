@@ -378,7 +378,7 @@ export function CanvasApp() {
       } else if (e.kind === "tool_start") {
         character.onEvent({ kind: "tool_start", tool: e.name, target: e.target });
       } else if (e.kind === "tool_end") {
-        character.onEvent({ kind: "tool_end", tool: e.name, ok: e.ok, target: e.target });
+        character.onEvent({ kind: "tool_end", tool: e.name, ok: e.ok, summary: e.summary, target: e.target });
       } else if (e.kind === "text_delta" || e.kind === "reasoning_delta") {
         character.onEvent({ kind: e.kind });
       } else if (e.kind === "turn_end") {
@@ -437,7 +437,22 @@ export function CanvasApp() {
         detail: e.argsSummary ? tickerTail(e.argsSummary) : undefined,
       }));
     } else if (e.kind === "tool_end") {
-      const summaryText = e.ok ? `Done: ${e.summary || e.name}` : `Hit a snag: ${e.name}`;
+      let summaryText = e.ok ? `Done: ${e.summary || e.name}` : `Hit a snag: ${e.name}`;
+      if (e.ok) {
+        if (e.name === "canvas_apply") {
+          summaryText = e.summary ? `Placed on canvas: ${e.summary}` : "Placed on canvas ✓";
+        } else if (e.name === "canvas_snapshot") {
+          summaryText = "Inspecting layout…";
+        } else if (e.name === "canvas_edit") {
+          summaryText = "Updated layout ✓";
+        } else if (e.name === "canvas_scan") {
+          summaryText = "Surveyed canvas ✓";
+        } else if (e.name === "canvas_read") {
+          summaryText = "Checked details ✓";
+        } else if (e.summary) {
+          summaryText = e.summary.replace(/^Done:\s*/i, "");
+        }
+      }
       setTickerState((prev) => ({
         status: "running",
         currentMessage: summaryText,
@@ -521,6 +536,10 @@ export function CanvasApp() {
         ? `${tickerState.currentMessage} · ${tickerState.detail}`
         : tickerState.currentMessage;
       character.setNarration(text);
+    } else if (tickerState.status === "done") {
+      character.setNarration(tickerState.currentMessage || "All done — take a look! ✨");
+    } else if (tickerState.status === "error") {
+      character.setNarration(tickerState.currentMessage || "Hit a snag — let's try again!");
     } else {
       character.setNarration(null);
     }

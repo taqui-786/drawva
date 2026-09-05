@@ -16,7 +16,7 @@ export interface ToolTargetHint {
 export type AgentCharacterInput =
   | { kind: "turn_start" }
   | { kind: "tool_start"; tool: string; target?: ToolTargetHint }
-  | { kind: "tool_end"; tool: string; ok: boolean; target?: ToolTargetHint }
+  | { kind: "tool_end"; tool: string; ok: boolean; summary?: string; target?: ToolTargetHint }
   | { kind: "text_delta" }
   | { kind: "reasoning_delta" }
   | { kind: "turn_end"; reason: "done" | "cancelled" | "error" };
@@ -44,6 +44,7 @@ interface Character {
   pos: { x: number; y: number };
   landing: { x: number; y: number } | null;
   targetBox: Rect | null;
+  lastWorkBox: Rect | null;
   state: CharState;
   queuedState: CharState | null;
   resumeState: CharState | null;
@@ -55,6 +56,9 @@ interface Character {
   narration: string | null;
   dragging: boolean;
   pendingEnd: "done" | "cancelled" | "error" | null;
+  turnActive: boolean;
+  completedCount: number;
+  idleSince: number;
 }
 
 const READ_TOOLS = new Set(["canvas_scan", "canvas_snapshot", "canvas_read", "canvas_focus"]);
@@ -64,6 +68,8 @@ const WORK_TOOLS = new Set([
   "canvas_patch_widget",
   "canvas_undo",
   "load_plugin",
+  "visual_explainer",
+  "load_visual_skill",
 ]);
 
 function clamp(v: number, min: number, max: number): number {
@@ -190,19 +196,67 @@ export class AgentCharacterController {
   }
 
   setNarration(text: string | null): void {
-    const clean = text && text.trim() ? text.trim().slice(0, 160) : null;
+    if (!text || !text.trim()) {
+      for (const ch of this.chars.values()) {
+        if (!ch.turnActive && ch.state === "celebrating") continue;
+        ch.narration = null;
+      }
+      this.ensureLoop();
+      return;
+    }
+
+    const clean = text.trim();
     let changed = false;
     for (const ch of this.chars.values()) {
-      if (ch.narration !== clean) {
-        ch.narration = clean;
+      let speech = clean;
+      if (ch.turnActive) {
+        // Prevent premature / deceptive "Done:" messages while agent turn is still running
+        if (/^Done[:\s·-]/i.test(speech)) {
+          const detail = speech.replace(/^Done[:\s·-]*/i, "").trim();
+          speech = this.formatIntermediateStep(detail);
+        } else if (/^All done/i.test(speech)) {
+          speech = "Working on it…";
+        }
+      }
+      speech = speech.slice(0, 160);
+      if (ch.narration !== speech) {
+        ch.narration = speech;
         changed = true;
       }
     }
     if (changed) this.ensureLoop();
   }
 
+  private formatIntermediateStep(raw: string): string {
+    const text = raw.trim();
+    if (!text) return "Step complete ✓";
+    if (/^applied\s*(\d+)?/i.test(text)) {
+      return "Placed on canvas ✓";
+    }
+    if (/^snapshot/i.test(text)) {
+      return "Inspecting layout…";
+    }
+    if (/^ok$/i.test(text)) {
+      return "Updated ✓";
+    }
+    if (/^\d+\s*items/i.test(text)) {
+      return "Surveyed canvas ✓";
+    }
+    if (/REVISION_CONFLICT/i.test(text)) {
+      return "Syncing canvas revision…";
+    }
+    if (/LAYOUT_REVIEW_REQUIRED/i.test(text)) {
+      return "Reviewing layout…";
+    }
+    const stripped = text.replace(/^Done[:\s·-]*/i, "").trim();
+    if (!stripped) return "Step complete ✓";
+    return stripped.length > 35 ? `${stripped.slice(0, 32)}…` : stripped;
+  }
+
   private dragId: string | null = null;
   private dragNarration: string | null = null;
+  private dragStartPos: { x: number; y: number } | null = null;
+  private dragStartTime = 0;
 
   hitTest(world: { x: number; y: number }): boolean {
     for (const ch of this.chars.values()) {
@@ -243,6 +297,8 @@ export class AgentCharacterController {
         world.y <= ch.pos.y
       ) {
         this.dragId = id;
+        this.dragStartPos = { x: world.x, y: world.y };
+        this.dragStartTime = performance.now();
         ch.dragging = true;
         this.dragNarration = ch.narration;
         ch.narration = null;
@@ -271,17 +327,43 @@ export class AgentCharacterController {
     if (ch) {
       ch.dragging = false;
       ch.narration = this.dragNarration;
+      if (this.dragStartPos) {
+        const dist = Math.hypot(ch.pos.x - this.dragStartPos.x, ch.pos.y - this.dragStartPos.y);
+        const dur = performance.now() - this.dragStartTime;
+        if (dist < 8 && dur < 350 && !ch.turnActive) {
+          this.poke(ch);
+          this.dragStartPos = null;
+          this.dragNarration = null;
+          this.ensureLoop();
+          return;
+        }
+      }
       if (ch.pendingEnd) {
         const reason = ch.pendingEnd;
         ch.pendingEnd = null;
         this.dragNarration = null;
-        ch.narration = null;
+        ch.narration = reason === "done" ? "All done! Take a look ✨" : "Hit a snag — try again!";
         ch.landing = null;
         this.setState(ch, reason === "done" ? "celebrating" : "sad");
       }
     }
+    this.dragStartPos = null;
     this.dragNarration = null;
     if (ch) this.ensureLoop();
+  }
+
+  private poke(ch: Character): void {
+    if (ch.turnActive) return;
+    this.setState(ch, "celebrating");
+    ch.narration = "Hi! 👋 Ready to draw!";
+    ch.stateSince = performance.now();
+    setTimeout(() => {
+      if (ch.state === "celebrating" && !ch.turnActive) {
+        this.setState(ch, "idle");
+        ch.narration = null;
+        ch.idleSince = performance.now();
+      }
+    }, 1800);
   }
 
   onEvent(e: AgentCharacterInput & { agentId?: string }): void {
@@ -292,11 +374,17 @@ export class AgentCharacterController {
       if (!ch) {
         ch = this.spawn(id, target);
         this.chars.set(id, ch);
+        ch.turnActive = true;
+        ch.narration = "Taking a look at your board…";
         this.ensureLoop();
         return;
       }
       ch.fadingOut = false;
-      if (ch.alpha < 1) ch.alpha = Math.max(ch.alpha, 0.3);
+      ch.alpha = Math.max(ch.alpha, 0.85);
+      ch.turnActive = true;
+      ch.completedCount = 0;
+      ch.idleSince = 0;
+      ch.narration = "Taking a look at your board…";
       this.retarget(ch, target, "thinking");
       this.ensureLoop();
       return;
@@ -305,6 +393,7 @@ export class AgentCharacterController {
     if (!ch) return;
     if (ch.dragging) {
       if (e.kind === "turn_end") {
+        ch.turnActive = false;
         ch.pendingEnd = e.reason;
         ch.narration = null;
       }
@@ -312,36 +401,92 @@ export class AgentCharacterController {
     }
     switch (e.kind) {
       case "tool_start": {
-        this.retarget(ch, this.resolveTarget(e.target), animForTool(e.tool));
+        ch.turnActive = true;
+        const anim = animForTool(e.tool);
+        const resolved = this.resolveTarget(e.target);
+        if (resolved) ch.lastWorkBox = resolved.box;
+        this.retarget(ch, resolved, anim);
+        if (e.tool === "canvas_apply" || e.tool === "visual_explainer") {
+          ch.narration = "Drawing onto the board…";
+        } else if (e.tool === "canvas_snapshot") {
+          ch.narration = "Inspecting board layout…";
+        } else if (e.tool === "canvas_edit" || e.tool === "canvas_patch_widget") {
+          ch.narration = "Adjusting elements…";
+        } else if (e.tool === "canvas_scan") {
+          ch.narration = "Surveying the canvas…";
+        } else if (e.tool === "canvas_read") {
+          ch.narration = "Reading closely…";
+        }
         this.ensureLoop();
         break;
       }
       case "tool_end": {
+        ch.completedCount = (ch.completedCount || 0) + 1;
         if (!e.ok) {
           this.stumble(ch);
-        } else if (e.target) {
-          this.retarget(ch, this.resolveTarget(e.target), animForTool(e.tool));
+          ch.narration = e.tool === "canvas_edit" ? "Syncing canvas updates…" : "Hit a slight snag…";
+        } else {
+          // Tool finished! Turn is still running, so provide informative step progress
+          if (e.summary) {
+            ch.narration = this.formatIntermediateStep(e.summary);
+          } else if (e.tool === "canvas_apply" || e.tool === "visual_explainer") {
+            ch.narration = "Placed on canvas ✓";
+          } else if (e.tool === "canvas_snapshot") {
+            ch.narration = "Layout looking good…";
+          } else if (e.tool === "canvas_edit") {
+            ch.narration = "Updated layout ✓";
+          } else if (e.tool === "canvas_scan") {
+            ch.narration = "Surveyed canvas ✓";
+          }
+
+          if (e.target) {
+            const resolved = this.resolveTarget(e.target);
+            if (resolved) {
+              ch.lastWorkBox = resolved.box;
+              // Transition from hammering to admiring/inspecting the result
+              this.retarget(ch, resolved, e.tool === "canvas_snapshot" ? "reading" : "thinking");
+            }
+          } else if (ch.state === "working") {
+            // Finished current work command; transition to thoughtful waiting pose
+            this.setState(ch, "thinking");
+          }
         }
         this.ensureLoop();
         break;
       }
       case "text_delta":
       case "reasoning_delta": {
-        if (ch.state === "walking") ch.queuedState = "thinking";
-        else if (ch.state !== "celebrating" && ch.state !== "sad" && ch.state !== "stumble") {
+        ch.turnActive = true;
+        if (ch.state === "walking") {
+          ch.queuedState = "thinking";
+        } else if (ch.state !== "celebrating" && ch.state !== "sad" && ch.state !== "stumble") {
           this.setState(ch, "thinking");
+        }
+        if (e.kind === "text_delta" && !ch.narration?.startsWith("Writing")) {
+          ch.narration = "Writing the answer…";
         }
         break;
       }
       case "turn_end": {
-        ch.narration = null;
-        const final: CharState = e.reason === "done" ? "celebrating" : "sad";
-        if (ch.state === "walking" && ch.landing) {
-          ch.queuedState = final;
-        } else {
+        ch.turnActive = false;
+        if (e.reason === "done") {
+          ch.narration = "All done! Take a look ✨";
+          if (ch.state === "walking" && ch.landing) {
+            ch.queuedState = "celebrating";
+          } else {
+            ch.landing = null;
+            this.setState(ch, "celebrating");
+          }
+        } else if (e.reason === "error") {
+          ch.narration = "Hit a snag — let's try again!";
           ch.landing = null;
-          this.setState(ch, final);
+          this.setState(ch, "sad");
+        } else {
+          ch.narration = "Paused.";
+          ch.landing = null;
+          this.setState(ch, "idle");
         }
+        this.ensureLoop();
         break;
       }
     }
@@ -433,21 +578,56 @@ export class AgentCharacterController {
   private landingFor(box: Rect, ch: Character): { x: number; y: number } {
     const scale = this.deps.engine.camera.scale || 1;
     const charW = this.charWorldWidth();
-    const pad = charW * 0.55 + clamp(18 / scale, 12, 200);
+    const pad = charW * 0.6 + clamp(20 / scale, 12, 200);
     const cx = box.x + box.w / 2;
     const cy = box.y + box.h / 2;
     const candidates = [
-      { x: cx, y: box.y + box.h + pad },
       { x: box.x + box.w + pad, y: cy },
-      { x: cx, y: box.y - pad },
+      { x: cx, y: box.y + box.h + pad },
       { x: box.x - pad, y: cy },
+      { x: cx, y: box.y - pad },
     ];
+
+    const wm = this.deps.widgets();
+    const om = this.deps.objects();
+    const ink = this.deps.getInkBox();
+
+    const overlapsBox = (pt: { x: number; y: number }, b: Rect, margin = 20): boolean => {
+      return (
+        pt.x >= b.x - margin &&
+        pt.x <= b.x + b.w + margin &&
+        pt.y >= b.y - margin &&
+        pt.y <= b.y + b.h + margin
+      );
+    };
+
+    const collidesOther = (pt: { x: number; y: number }): boolean => {
+      if (wm) {
+        for (const w of wm.all()) {
+          if (w.x === box.x && w.y === box.y) continue;
+          if (overlapsBox(pt, { x: w.x, y: w.y, w: w.w, h: w.h })) return true;
+        }
+      }
+      if (om) {
+        for (const o of om.all()) {
+          if (o.x === box.x && o.y === box.y) continue;
+          if (overlapsBox(pt, { x: o.x, y: o.y, w: o.w, h: o.h })) return true;
+        }
+      }
+      if (ink && overlapsBox(pt, ink)) {
+        return true;
+      }
+      return false;
+    };
+
     let best = candidates[0];
-    let bestD = Infinity;
+    let bestScore = Infinity;
     for (const c of candidates) {
       const d = (c.x - ch.pos.x) ** 2 + (c.y - ch.pos.y) ** 2;
-      if (d < bestD) {
-        bestD = d;
+      const penalty = collidesOther(c) ? 10000000 : 0;
+      const score = d + penalty;
+      if (score < bestScore) {
+        bestScore = score;
         best = c;
       }
     }
@@ -516,6 +696,7 @@ export class AgentCharacterController {
       },
       landing: null,
       targetBox: target?.box ?? null,
+      lastWorkBox: null,
       state: "idle",
       queuedState: "thinking",
       resumeState: null,
@@ -527,6 +708,9 @@ export class AgentCharacterController {
       narration: null,
       dragging: false,
       pendingEnd: null,
+      turnActive: true,
+      completedCount: 0,
+      idleSince: 0,
     };
     if (target && target.source !== "viewport" && !this.isWholeViewport(target.box)) {
       ch.landing = this.landingFor(target.box, ch);
@@ -561,11 +745,17 @@ export class AgentCharacterController {
 
     const elapsed = now - ch.stateSince;
     if (ch.state === "stumble" && elapsed > 650) {
-      const resume = ch.resumeState ?? "idle";
+      const resume = ch.resumeState ?? (ch.turnActive ? "thinking" : "idle");
       this.setState(ch, resume);
-    } else if (ch.state === "celebrating" && elapsed > 1500) {
-      ch.fadingOut = true;
-    } else if (ch.state === "sad" && elapsed > 1700) {
+    } else if (ch.state === "celebrating" && elapsed > 2800) {
+      this.setState(ch, "idle");
+      ch.idleSince = now;
+      ch.narration = null;
+    } else if (ch.state === "sad" && elapsed > 3000) {
+      this.setState(ch, "idle");
+      ch.idleSince = now;
+      ch.narration = null;
+    } else if (ch.state === "idle" && !ch.turnActive && ch.idleSince > 0 && (now - ch.idleSince > 30000)) {
       ch.fadingOut = true;
     }
 
@@ -703,9 +893,7 @@ export class AgentCharacterController {
     if (
       !ch.narration ||
       ch.dragging ||
-      ch.state === "walking" ||
-      ch.state === "celebrating" ||
-      ch.state === "sad"
+      ch.state === "walking"
     ) {
       return null;
     }
@@ -745,7 +933,9 @@ export class AgentCharacterController {
     const w = Math.max(fs * 3, maxW) + pad * 2;
     const charW = this.charWorldWidth();
     const charH = charW * (SPRITE_H / SPRITE_W);
-    const gap = fs * 1.9;
+    const hasGlyph = ch.state === "celebrating" || ch.state === "working" || ch.state === "sad" || ch.state === "stumble";
+    const px = clamp(4 / scale, 2, 60);
+    const gap = fs * 1.9 + (hasGlyph ? px * 4.5 : 0);
     const h = pad * 2 + lines.length * lineH;
     const left =
       ch.facing === 1
