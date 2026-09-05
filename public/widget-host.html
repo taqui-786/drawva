@@ -16,12 +16,84 @@
   const MAX_HTML_LENGTH = 200000;
   const MANIM_CDN = "https://cdn.jsdelivr.net/npm/manim-web@0.3.24/dist/manim-web.browser.js";
   const MANIM_LOCAL = new URL("/vendor/manim-web-0.3.24/manim-web.browser.js", location.href).href;
+  const MATHJAX_LOCAL = new URL("/vendor/manim-web-0.3.24/MathJaxBundle-xSidSV0E.js", location.href).href;
+
+  function rewriteManimImports(source, fromUrl, toUrl) {
+    const text = String(source || "");
+    const replacements = [];
+    const tokens = [];
+    let index = 0;
+    const identifierStart = /[A-Za-z_$]/, identifierPart = /[A-Za-z0-9_$]/;
+    while (index < text.length) {
+      const char = text[index], next = text[index + 1];
+      if (/\s/.test(char)) { index++; continue; }
+      if (char === "/" && next === "/") {
+        index += 2;
+        while (index < text.length && !/[\r\n]/.test(text[index])) index++;
+        continue;
+      }
+      if (char === "/" && next === "*") {
+        index += 2;
+        while (index < text.length && !(text[index] === "*" && text[index + 1] === "/")) index++;
+        index = Math.min(text.length, index + 2);
+        continue;
+      }
+      if (char === "'" || char === '"' || char === "`") {
+        const quote = char, start = index++;
+        const valueStart = index;
+        while (index < text.length) {
+          if (text[index] === "\\") { index += 2; continue; }
+          if (text[index++] === quote) break;
+        }
+        const value = text.slice(valueStart, Math.max(valueStart, index - 1));
+        if (value === fromUrl) {
+          const previous = tokens[tokens.length - 1], beforePrevious = tokens[tokens.length - 2];
+          let exactImport = previous?.text === "import" && previous.kind === "identifier";
+          if (previous?.text === "(" && previous.kind === "punctuation" && beforePrevious?.text === "import" && beforePrevious.kind === "identifier") exactImport = true;
+          if (previous?.text === "from" && previous.kind === "identifier") {
+            let cursor = tokens.length - 2, importToken = false;
+            while (cursor >= 0) {
+              const token = tokens[cursor--];
+              if (token.kind === "identifier" && token.text === "import") { importToken = true; break; }
+              if (!(token.kind === "identifier" || ["{", "}", "*", ","].includes(token.text))) break;
+            }
+            exactImport = exactImport || importToken;
+          }
+          if (exactImport) replacements.push([start, index, quote + toUrl + quote]);
+        }
+        tokens.push({ kind: "string", text: value, quote });
+        continue;
+      }
+      if (identifierStart.test(char)) {
+        const start = index++;
+        while (index < text.length && identifierPart.test(text[index])) index++;
+        tokens.push({ kind: "identifier", text: text.slice(start, index) });
+        continue;
+      }
+      tokens.push({ kind: "punctuation", text: char });
+      index++;
+    }
+    let result = text;
+    for (let i = replacements.length - 1; i >= 0; i--) {
+      const [start, end, replacement] = replacements[i];
+      result = result.slice(0, start) + replacement + result.slice(end);
+    }
+    return result;
+  }
 
   function prepareScienceHtml(html) {
     if (!/<meta\b[^>]*\bname\s*=\s*["']drawva-visual-skill["']/i.test(html)) return html;
-    const rewritten = html.split(MANIM_CDN).join(MANIM_LOCAL);
-    const bootstrap = "<script>(function(){try{var orig=HTMLCanvasElement.prototype.getContext;if(typeof orig===\"function\"){HTMLCanvasElement.prototype.getContext=function(type,attrs){if(type===\"webgl\"||type===\"webgl2\")attrs=Object.assign({},attrs||{},{preserveDrawingBuffer:true});return orig.call(this,type,attrs);}}}catch(e){}window.drawvaWidgetReady=function(){window.parent.postMessage({type:\"drawva-widget-updated\"},\"*\");};})();<\/script>";
-    return /<\/head>/i.test(rewritten) ? rewritten.replace(/<\/head>/i, bootstrap + "</head>") : bootstrap + rewritten;
+    const rewritten = html.replace(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi, (full, attrs, body) => {
+      if (/\bsrc\s*=/i.test(attrs)) return full;
+      if (!/\btype\s*=\s*["']module["']/i.test(attrs)) return full;
+      return "<script" + attrs + ">" + rewriteManimImports(body, MANIM_CDN, MANIM_LOCAL) + "</script>";
+    });
+    const manimSrc = MANIM_LOCAL.replace(/[?#].*$/, "");
+    const mathjaxSrc = MATHJAX_LOCAL.replace(/[?#].*$/, "");
+    const csp = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https: " + manimSrc + " " + mathjaxSrc + "; style-src 'unsafe-inline' https:; connect-src https:; img-src data: blob: https:; font-src data: https:; media-src data: blob: https:; frame-src 'none'; worker-src blob: https:; object-src 'none'; form-action 'none'; base-uri 'none'\">";
+    const bootstrap = "<script>(function(){try{var orig=HTMLCanvasElement.prototype.getContext;if(typeof orig===\"function\"){HTMLCanvasElement.prototype.getContext=function(type,attrs){if(type===\"webgl\"||type===\"webgl2\")attrs=Object.assign({},attrs||{},{preserveDrawingBuffer:true});return orig.call(this,type,attrs);}}}catch(e){}var hooks={beforeSnapshot:null,afterSnapshot:null};window.__drawvaScienceSnapshotHooks=hooks;window.drawvaWidgetReady=function(options){if(options&&typeof options===\"object\"){hooks.beforeSnapshot=typeof options.beforeSnapshot===\"function\"?options.beforeSnapshot:null;hooks.afterSnapshot=typeof options.afterSnapshot===\"function\"?options.afterSnapshot:null;}var n=0;function tick(){n++;if(n<2){if(typeof requestAnimationFrame===\"function\")return requestAnimationFrame(tick);}window.parent.postMessage({type:\"drawva-widget-updated\"},\"*\");}if(typeof requestAnimationFrame===\"function\")requestAnimationFrame(tick);else tick();};})();<\/script>";
+    const headBits = csp + bootstrap;
+    return /<\/head>/i.test(rewritten) ? rewritten.replace(/<\/head>/i, headBits + "</head>") : headBits + rewritten;
   }
 
   const requestedParentOrigin = new URL(location.href).searchParams.get("parent-origin");
@@ -315,31 +387,48 @@
         }
 
         async function snapshotLive(reqId) {
-          var svgs = document.querySelectorAll('svg');
-          var canvases = document.querySelectorAll('canvas');
-          var imgs = document.querySelectorAll('img');
-          var extra = canvases.length + imgs.length;
-          var shot = null;
-          if (svgs.length === 1 && extra === 0) {
-            shot = await rasterizeSingleSvg(svgs[0]);
-          } else if (svgs.length === 0 && canvases.length === 1 && imgs.length === 0) {
-            var el = canvases[0];
-            if (el.width > 2 && el.height > 2) {
-              postSnapshotResult(reqId, canvasToDataUrl(el), el.width, el.height);
+          var hooks = window.__drawvaScienceSnapshotHooks;
+          async function runHook(fn, phase) {
+            if (typeof fn !== 'function') return;
+            await Promise.race([
+              Promise.resolve().then(fn),
+              new Promise(function(_, reject) {
+                setTimeout(function() { reject(new Error(phase + ' timed out')); }, 1500);
+              })
+            ]);
+          }
+          try {
+            if (hooks) await runHook(hooks.beforeSnapshot, 'before');
+            var svgs = document.querySelectorAll('svg');
+            var canvases = document.querySelectorAll('canvas');
+            var imgs = document.querySelectorAll('img');
+            var extra = canvases.length + imgs.length;
+            var shot = null;
+            if (svgs.length === 1 && extra === 0) {
+              shot = await rasterizeSingleSvg(svgs[0]);
+            } else if (svgs.length === 0 && canvases.length === 1 && imgs.length === 0) {
+              var el = canvases[0];
+              if (el.width > 2 && el.height > 2) {
+                postSnapshotResult(reqId, canvasToDataUrl(el), el.width, el.height);
+                return;
+              }
+            }
+            if (!shot) shot = await rasterizeDocument();
+            if (!shot || !shot.canvas) {
+              postSnapshotResult(reqId, null, 0, 0);
               return;
             }
+            var dataUrl = canvasToDataUrl(shot.canvas);
+            if (!dataUrl || dataUrl.length > 28 * 1024 * 1024) {
+              postSnapshotResult(reqId, null, 0, 0);
+              return;
+            }
+            postSnapshotResult(reqId, dataUrl, shot.w, shot.h);
+          } finally {
+            if (hooks) {
+              try { await runHook(hooks.afterSnapshot, 'after'); } catch (e) {}
+            }
           }
-          if (!shot) shot = await rasterizeDocument();
-          if (!shot || !shot.canvas) {
-            postSnapshotResult(reqId, null, 0, 0);
-            return;
-          }
-          var dataUrl = canvasToDataUrl(shot.canvas);
-          if (!dataUrl || dataUrl.length > 28 * 1024 * 1024) {
-            postSnapshotResult(reqId, null, 0, 0);
-            return;
-          }
-          postSnapshotResult(reqId, dataUrl, shot.w, shot.h);
         }
 
         window.addEventListener('message', function(ev) {
