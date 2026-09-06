@@ -280,8 +280,23 @@
           try {
             var de = document.documentElement;
             var body = document.body;
-            var neededW = Math.max(de.scrollWidth, body ? body.scrollWidth : 0);
+            var maxBottom = 0;
+            var maxRight = 0;
+            if (body) {
+              var children = body.children;
+              for (var i = 0; i < children.length; i++) {
+                var ch = children[i];
+                if (ch.tagName === 'SCRIPT' || ch.tagName === 'STYLE') continue;
+                var r = ch.getBoundingClientRect();
+                if (r.bottom > maxBottom) maxBottom = r.bottom;
+                if (r.right > maxRight) maxRight = r.right;
+              }
+            }
+            var neededW = Math.max(de.scrollWidth, maxRight, body ? body.scrollWidth : 0);
             var neededH = Math.max(de.scrollHeight, body ? body.scrollHeight : 0);
+            if (maxBottom > 80 && maxBottom < neededH - 20) {
+              neededH = Math.ceil(maxBottom + 16);
+            }
             if (neededW > 0 && neededH > 0) {
               window.parent.postMessage({
                 type: 'drawva-widget-inner-content-size',
@@ -294,25 +309,28 @@
 
          var adaptiveLayout = { width: 0, height: 0, factor: 1 };
          function adaptHtmlTypography(width, height) {
-           if (document.querySelector('svg, canvas')) return;
-           var elements = document.querySelectorAll('body *');
+           var elements = document.querySelectorAll('body p, body span, body li, body td, body div');
            var sizes = [];
            for (var i = 0; i < elements.length; i++) {
              var element = elements[i];
              if (!element.textContent || !element.textContent.trim()) continue;
+             if (element.children.length > 0) continue;
              var rect = element.getBoundingClientRect();
              if (rect.width < 2 || rect.height < 2) continue;
              var size = parseFloat(getComputedStyle(element).fontSize);
-             if (Number.isFinite(size) && size >= 8 && size <= 80) sizes.push(size);
+             if (Number.isFinite(size) && size >= 8 && size <= 60) sizes.push(size);
            }
            if (!sizes.length) return;
            sizes.sort(function(a, b) { return a - b; });
-           var current = sizes[Math.floor(sizes.length / 2)];
-           var target = Math.max(18, Math.min(38, Math.min(width, height) * 0.055));
-           var factor = current < target * 0.82 ? Math.max(1, Math.min(2.6, target / current)) : 1;
+           var median = sizes[Math.floor(sizes.length / 2)];
+           var target = Math.max(22, Math.min(32, Math.min(width, height) * 0.04));
+           var factor = median < 20 ? Math.max(1, Math.min(2.2, target / median)) : 1;
            if (adaptiveLayout.width === width && adaptiveLayout.height === height && adaptiveLayout.factor === factor) return;
            adaptiveLayout = { width: width, height: height, factor: factor };
            document.documentElement.style.setProperty('--drawva-widget-scale', String(factor));
+           if (factor > 1.05) {
+             document.documentElement.style.fontSize = (factor * 100) + '%';
+           }
            setTimeout(postContentSize, 0);
          }
          setTimeout(postContentSize, 120);
@@ -496,7 +514,7 @@
       })();
     <\/script>`;
 
-    const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%!important;height:100%!important;container-type:size;}body{background:transparent!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}.drawva-widget-paused *,.drawva-widget-paused *::before,.drawva-widget-paused *::after{animation-play-state:paused!important;transition:none!important;}</style>' + innerWheelScript + autoResizeScript;
+    const transparentBase = '<style>html{background:transparent!important;overflow:hidden!important;margin:0!important;padding:0!important;box-sizing:border-box;width:100%!important;height:100%!important;container-type:size;}body{background:transparent!important;margin:0!important;padding:0!important;width:100%!important;height:100%!important;min-width:0;min-height:0;box-sizing:border-box;touch-action:none!important;overscroll-behavior:contain!important}#stage,body>div,.drawva-window,.window,.card-root,.wrapper,.page,.drawva-notebook-page{background-color:transparent!important;box-shadow:none!important;border:none!important;}*{box-shadow:none!important;}#stage{width:100%;height:100%;min-height:0;display:flex;align-items:center;justify-content:center;padding:0;box-sizing:border-box;margin:0}#stage svg,#stage canvas{display:block;margin:auto;max-width:100%;max-height:100%}::-webkit-scrollbar{display:none!important}.drawva-widget-paused *,.drawva-widget-paused *::before,.drawva-widget-paused *::after{animation-play-state:paused!important;transition:none!important;}</style>' + innerWheelScript + autoResizeScript;
     const prepared = prepareScienceHtml(html);
     let source;
     if (/<head\b[^>]*>/i.test(prepared)) {

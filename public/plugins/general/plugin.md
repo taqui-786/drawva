@@ -35,7 +35,7 @@ The widget must answer visually. Do not make JSON, XML, YAML, source, or a `<pre
 
 Place the widget where it solves the problem. Overlay a transparent SVG on existing ink when annotating or animating it — draw only the new path, projectile, or effect; never redraw the figures underneath. Use nearby blank space only for a standalone visual.
 
-Keep `html`, `body`, the outer layout, and the SVG root transparent. Pick real colors in the HTML. Match nearby ink for overlays; when refining, keep the existing look unless the user asks to change it. Add a small opaque surface only when contrast or grouping needs it, or the user asked for one. No default card, border, radius, or shadow.
+Keep `html`, `body`, the outer layout, and the SVG root completely transparent. NEVER add an outer card background, window border, or box-shadow. Modules use clean vector borders and subtle translucent fills, but the infinite canvas grid must always show through. Use readable canvas-scale typography (titles 52–64px, section headers 34–42px, body 24–28px, diagram labels 20–26px). Structure visual explainers using the 6 infographic layout archetypes (Useful Bait, Versus/Comparison, Heavy Data, Road Map, Timeline, Visualized Article) like a masterclass technical notebook page with theory + diagrams and zero useless empty space.
 
 Prefer compact inline SVG. Use canvas or a third-party library only when SVG cannot do the job. For motion, prefer SVG with CSS, SMIL, or JavaScript.
 

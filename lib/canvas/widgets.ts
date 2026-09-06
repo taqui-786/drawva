@@ -663,6 +663,8 @@ export class WidgetManager {
     }
     if (measuredH > curH + 8 && grows < MAX_CONTENT_FIT_GROWS) {
       nextH = Math.min(MAX_CONTENT_H, Math.round(measuredH));
+    } else if (measuredH < curH - 40 && measuredH >= 120 && grows < MAX_CONTENT_FIT_GROWS) {
+      nextH = Math.max(120, Math.round(measuredH));
     }
     if (nextW === curW && nextH === curH) return;
     const next = settleWidgetContent(widget, nextW, nextH);
@@ -670,7 +672,7 @@ export class WidgetManager {
     this.lastContentFit.set(id, {
       w: next.w,
       h: next.h,
-      grows: nextW > curW || nextH > curH ? grows + 1 : grows,
+      grows: nextW > curW || nextH !== curH ? grows + 1 : grows,
     });
     this.position(widget);
   }

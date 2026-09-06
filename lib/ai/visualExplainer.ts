@@ -6,42 +6,70 @@ export function isVisualExplainer(sourceFormat?: string, frameworkVersion?: stri
 }
 
 export const VISUAL_EXPLAINER_CONTRACT = `== VISUAL EXPLAINER ==
-Default path for understand / explain / learn / analyze / organize / plan — even if the user never says "infographic". One coordinated HTML visual on the board. Yields when the job is only to edit existing ink, or when the defining result is interaction, simulation, live data, a small applet, or a professional diagram.
+Default path for understand / explain / learn / analyze / organize / plan — even if the user never says "infographic". One coordinated, canvas-native infographic on the board combining theory + diagrams like a high-density illustrated notebook page. Yields when the job is only to edit existing ink, or when the defining result is interaction, simulation, live data, a small applet, or a professional diagram.
 
 Do not decorate first. Rank the information, then pick the structure that carries it.
 
-## Concise document mode
-Turn this on immediately (do not ask) when the user wants simple, concise, at-a-glance, visual-first, one-page, slides, a deck, a handout, export/print, or a straightforward concept. Words like explain/analyze/learn alone do not force it — keep full depth when they asked for comprehensive detail.
+## 1. CANVAS INTEGRATION (IRONCLAD: NO BOX SHADOW, NO WINDOW BACKGROUND)
+- The infographic MUST feel like it is directly drawn onto the whiteboard canvas alongside ink, NOT an external floating card, modal, or desktop window.
+- ZERO WINDOW BACKGROUND: html, body, #stage, and outer wrapper divs MUST have background: transparent !important. Never paint a solid white or dark rectangle across the whole canvas viewport. The infinite canvas grid must show through.
+- ZERO BOX SHADOW: Never use box-shadow on the container, outer window, or modules. Drop shadows create artificial card elevation that breaks whiteboard immersion.
+- MODULE STYLING: Individual diagram boxes, cards, and chips use clean, crisp vector borders (e.g. border: 1.5px solid rgba(0,0,0,0.12) in light mode or rgba(255,255,255,0.15) in dark mode, border-radius: 8px..12px) and subtle translucent tinted fills (background: rgba(248, 250, 252, 0.7) or rgba(..., 0.04)), never heavy opaque cards.
 
-Concise mode keeps the 3–5 second overview. Prefer diagrams, arrows, comparisons, small tables, short labels. Each module is a title plus one short line or 1–3 labels. Required facts stay; extra prose goes.
+## 2. NOTEBOOK-PAGE TYPOGRAPHY & SCALE (NEVER TOO SMALL)
+Canvas-world units are larger than desktop websites! Standard web text (11px-14px) is microscopic and completely unreadable on the canvas. Use large, bold, crisp typography:
+- Hero / Infographic Title: 52px – 64px, font-weight 700, tracking -0.02em.
+- Subtitle / Framing: 28px – 34px, font-weight 500, muted color.
+- Section Headings: 34px – 42px, font-weight 600.
+- Panel Titles / Key Concept Badges: 28px – 32px, font-weight 600.
+- Body Text (Theory & Explanations): 24px – 28px, line-height 1.45 – 1.55.
+- Data Values & Metrics: 36px – 56px, bold, aligned with units.
+- Diagram Node Labels, Flowchart Text, Chips: 20px – 26px.
+- Footnotes & Meta Tags: 18px – 20px. Never drop below 18px anywhere!
 
-## 1. Information architecture
-Level 1 — overview (3–5 seconds): 4–8 major parts. Pick the grammar that fits: pipeline, layered system, causal graph, hub-and-spoke, timeline, comparison, matrix, hierarchy, feedback loop, spatial map. Do not force a pipeline on a non-sequence.
+## 3. ZERO WASTED SPACE (COMPACT NOTEBOOK PAGE)
+- Treat the visual like a masterclass technical notebook page: dense, balanced, and purposeful.
+- Every pixel has a reason to exist. Never leave giant empty voids or unused vertical space at the bottom.
+- Flow theory paragraphs directly next to or above corresponding visual diagram components.
+- Choose compact dimensions that tightly wrap the content: e.g. 1400×900 for focused explainers, 1600×1000 for standard landscape, 1800×1100 for multi-panel systems, or 1200×1600 for vertical timelines/articles.
 
-Level 2 — panels (~30 seconds): normally 3–5 labeled panels (A, B, C…) each zooming one overview part. Flows, mini charts, tables, equations, trees, timelines, matrices.
+## 4. THE 6 INFOGRAPHIC LAYOUT ARCHETYPES
+Pick the one archetype from the layout cheat sheet that naturally fits the topic:
 
-Level 3 — micro (up to ~3 minutes): numbers, formulas, thresholds, assumptions, constraints, exceptions. Short labels, not paragraphs.
+1. Useful Bait (Key Points & Core Takeaways)
+   - Layout: Top headline banner → Primary hero diagram box (~40-50% height) → 2×2 grid of key takeaways cards → Large callout / feature block with side-by-side visual + text description → 3 bottom highlight cards.
+   - Best for: Concept summaries, feature overviews, executive briefs, essential facts.
 
-## 2. Hierarchy
-Title → subtitle → overview → panels → micro notes. A compact key-facts badge near the title when useful (scale, time, accuracy, assumptions).
+2. Versus / Comparison (Side-by-Side Analysis)
+   - Layout: Header title + criteria → Two balanced side-by-side vertical columns (Option A vs Option B) with parallel structured points → Central comparison criteria spine or matrix → Comparative summary text → Bottom comparative badges / radar / indicator chips.
+   - Best for: Contrasting technologies (e.g. REST vs GraphQL, Docker vs VM), pros & cons, trade-offs, before vs after.
 
-## 3. Visual grammar
-Colors encode meaning, not decoration. A useful default: blue=inputs/foundations, teal=transform, green=stable/output, orange=core mechanism, purple=rules/edge cases, red=risks. Adapt to nearby ink. Arrows only for real flow, dependency, causality, or feedback. Rounded modules, thin borders, numbered stages, small tables. No stock-art icons unless they carry information.
+3. Heavy Data (Numbers & System Metrics)
+   - Layout: Header title → Central conceptual network hub with connected radial data chips → Connected horizontal metric flow chips (percentages, benchmarks, throughput) → Detailed breakdown cards with large stat callouts (48px+) and comparative bar meters.
+   - Best for: Performance benchmarks, data-intensive topics, statistical reports, telemetry, quantitative comparisons.
 
-## 4. Density
-High information, no clutter. Each large module: one idea, 2–5 supporting facts, one visual cue. Whitespace separates groups. No huge empty decorative areas.
+4. Road Map (Process Journey & Winding Steps)
+   - Layout: Top title → Serpentine / winding S-curve connecting path (SVG stroke) through sequential stages → Milestone node boxes with step numbers, icons/diagrams, and explanatory theory → Final destination / outcome card.
+   - Best for: Step-by-step processes, workflows, development roadmaps, algorithmic execution stages, user journeys.
 
-## 5. Typography
-Technical sans-serif unless asked otherwise. Readable in the focused widget. Labels 2–8 words. Bold headings, aligned numbers, consistent terms. Widget w/h are world units — body ~clamp(28px,1.2cqw,44px), headings larger. On a nonempty board, canvas_scan plannedWidget with bodyPx/titlePx first and reuse the proposed box.
+5. Timeline (Chronological Evolution)
+   - Layout: Header title → Central vertical timeline spine (thick line with milestone dots) → Alternating left-and-right milestone cards → Circular date/version badges → Accompanying theory bullets and change notes → Milestone summary chips at the base.
+   - Best for: History of a technology, version progression, project milestones, sequential causal chains.
 
-## 6. Accuracy
-Do not invent numbers. Omit, describe qualitatively, or mark as illustrative. Relationships must match the topic. Web facts need a tool result and a cited URL.
+6. Visualized Article (In-Depth Technical Deep Dive)
+   - Layout: Editorial headline with subtitle → Left-column data chart / architectural SVG diagram + Right-column core theoretical narrative → Central spotlight concept callout circle with bulleted notes → Bottom multi-column analytical breakdown columns with summary takeaway.
+   - Best for: Deep conceptual explanations (e.g. "Explain LLM", "How Transformers Work"), combining extensive theory with multi-stage diagrams.
 
-## 7. Style
-Conference-paper figure / systems diagram / technical poster. Light inner surface is fine; keep html/body/outer stage transparent so the board shows around it. Crisp vectors. No photorealism, glossy 3D, unnecessary gradients, cartoons, or decorative illustration.
-
-## 8. Composition
-Landscape when it helps; do not force a layout that weakens the explanation. A useful default when it fits: title+metrics on top, system map, then 2–3 mechanism panels, then a compact summary. The viewer should see: what it is, major parts, how they relate, what happens inside, which numbers/rules matter, the conclusion. Use the user's language.
+## 5. Visual Grammar & Palette
+- Clean technical illustration: Crisp inline SVG vectors for diagrams, arrows, and schemas.
+- Purposeful semantic colors:
+  * Blue (#2563eb / #3b82f6): Inputs, foundations, user space.
+  * Teal / Cyan (#0891b2 / #06b6d4): Transformations, data processing.
+  * Green (#16a34a / #22c55e): Outputs, verified state, success, stable results.
+  * Amber / Orange (#d97706 / #f59e0b): Core mechanism, attention, compute, latency.
+  * Purple (#7c3aed / #8b5cf6): Rules, algorithms, parameters, edge cases.
+  * Red (#dc2626 / #ef4444): Risks, bottlenecks, constraints.
+- Real SVG paths and shapes with labeled nodes, never blank placeholders or fake diagrams.
 
 ## Invocation
 Call the visual_explainer tool once this turn with one complete HTML document (inline CSS/SVG, only the JS that helps). First paint must already be useful with JS off. Markers are stamped for you: sourceFormat ${VISUAL_EXPLAINER_SOURCE_FORMAT}, frameworkVersion ${VISUAL_EXPLAINER_FRAMEWORK_VERSION}, pluginId general, refreshSeconds 0. Omit copyText. Do not minify. Stable multiline HTML for later canvas_patch_widget.
