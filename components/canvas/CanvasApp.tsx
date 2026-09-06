@@ -3268,6 +3268,14 @@ export function CanvasApp() {
         onAutoChange={setAutoOn}
         onAskAi={handleAskAi}
         agentRunning={agentRunning}
+        onCancelAi={() => {
+          conductorRef.current?.cancel();
+          toast.info("Agent generation cancelled.");
+        }}
+        onSteerAi={(guidance) => {
+          conductorRef.current?.steer(guidance);
+          toast.success("Guidance sent to agent.");
+        }}
         models={models}
         activeModel={activeModel}
         onModelChange={handleModelChange}

@@ -75,6 +75,8 @@ import {
   CloudSavingDone01Icon,
   CloudAlertIcon,
   CloudOffIcon,
+  Cancel01Icon,
+  SteeringIcon,
 } from "@hugeicons/core-free-icons";
 import { useSession, signOut } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
@@ -202,6 +204,8 @@ export function CanvasHeader({
   autoOn,
   onAutoChange,
   onAskAi,
+  onCancelAi,
+  onSteerAi,
   agentRunning = false,
   models,
   activeModel,
@@ -241,6 +245,8 @@ export function CanvasHeader({
   autoOn: boolean;
   onAutoChange: (v: boolean) => void;
   onAskAi?: () => void;
+  onCancelAi?: () => void;
+  onSteerAi?: (guidance: string) => void;
   agentRunning?: boolean;
   models: string[];
   activeModel: string | null;
@@ -262,6 +268,10 @@ export function CanvasHeader({
   const router = useRouter();
   const { data: session } = useSession();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const isGenerating = agentRunning || aiStatus === "thinking";
+  const [steerOpen, setSteerOpen] = useState(false);
+  const [steerInput, setSteerInput] = useState("");
+  const isSteerOpen = steerOpen && isGenerating;
 
   useEffect(() => {
     const updateFs = () => {
@@ -735,7 +745,7 @@ export function CanvasHeader({
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
               transition={{ duration: 0.2 }}
-              className="flex items-center"
+              className="flex items-center gap-1 sm:gap-1.5 shrink-0"
             >
               {(() => {
                 const stage = aiRun?.durationStage || "normal";
@@ -782,6 +792,110 @@ export function CanvasHeader({
                   </>
                 );
               })()}
+
+              {onSteerAi && (
+                <Popover
+                  open={isSteerOpen}
+                  onOpenChange={(open) => {
+                    setSteerOpen(open);
+                    if (!open) setSteerInput("");
+                  }}
+                >
+                  <Tooltip open={isSteerOpen ? false : undefined}>
+                    <TooltipTrigger
+                      render={
+                        <PopoverTrigger
+                          render={
+                            <Button
+                              size="icon-sm"
+                              variant={isSteerOpen ? "secondary" : "ghost"}
+                              data-icon="true"
+                              aria-label="Steer agent"
+                              className={cn(
+                                "shrink-0 size-7 sm:size-8 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
+                                isSteerOpen && "text-primary bg-primary/10"
+                              )}
+                            >
+                              <HugeiconsIcon icon={SteeringIcon} className="size-4" />
+                            </Button>
+                          }
+                        />
+                      }
+                    />
+                    <TooltipContent>Steer agent</TooltipContent>
+                  </Tooltip>
+                  <PopoverContent
+                    align="end"
+                    side="bottom"
+                    sideOffset={6}
+                    className="w-80 p-3 shadow-lg border bg-popover text-popover-foreground"
+                  >
+                    <div className="flex flex-col gap-2.5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5 text-xs font-semibold">
+                          <HugeiconsIcon icon={SteeringIcon} className="size-4 text-primary" />
+                          <span>Steer Agent</span>
+                        </div>
+                        <span className="text-[10px] text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
+                          mid-turn
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-snug">
+                        Give real-time instructions to steer the agent without stopping or resetting its progress.
+                      </p>
+                      <form
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const val = steerInput.trim();
+                          if (!val) return;
+                          onSteerAi(val);
+                          setSteerInput("");
+                          setSteerOpen(false);
+                        }}
+                        className="flex items-center gap-1.5 mt-0.5"
+                      >
+                        <input
+                          type="text"
+                          value={steerInput}
+                          onChange={(e) => setSteerInput(e.target.value)}
+                          placeholder="e.g. 'Use blue color', 'Make it a flowchart'..."
+                          className="flex-1 h-8 rounded-md border bg-background px-2.5 text-xs outline-none focus:ring-1 focus:ring-primary text-foreground placeholder:text-muted-foreground"
+                          autoFocus
+                        />
+                        <Button
+                          type="submit"
+                          size="sm"
+                          disabled={!steerInput.trim()}
+                          className="h-8 px-2.5 text-xs gap-1 shrink-0"
+                        >
+                          <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
+                          <span>Steer</span>
+                        </Button>
+                      </form>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+
+              {onCancelAi && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="destructive"
+                        data-icon="true"
+                        onClick={onCancelAi}
+                        aria-label="Cancel generation"
+                        className="shrink-0 border-2 border-red-700 size-7 sm:size-8 p-0 text-destructive"
+                      >
+                        <HugeiconsIcon icon={Cancel01Icon} className="size-4" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>Cancel generation</TooltipContent>
+                </Tooltip>
+              )}
             </motion.div>
           ) : (
             <motion.div
