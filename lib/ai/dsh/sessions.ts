@@ -349,7 +349,16 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
           emit({ event: "text_delta", data: { text: `\n${block.text}` } });
         }
       } else if (block?.type === "reasoning" && block.text) {
-        conversation.lastReasoning += block.text;
+        if (!conversation.lastReasoning.trim()) {
+          conversation.lastReasoning = block.text;
+          emit({ event: "reasoning", data: { text: String(block.text).slice(0, 2000) } });
+        } else if (
+          !conversation.lastReasoning.endsWith(block.text) &&
+          !conversation.lastReasoning.includes(block.text)
+        ) {
+          conversation.lastReasoning += block.text;
+          emit({ event: "reasoning", data: { text: String(block.text).slice(0, 2000) } });
+        }
       }
     }
     if (usage && (usage.inputTokens || usage.outputTokens)) {

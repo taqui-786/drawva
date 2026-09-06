@@ -49,6 +49,7 @@ interface Character {
   id: string;
   pos: { x: number; y: number };
   landing: { x: number; y: number } | null;
+  waypoints: { x: number; y: number }[];
   targetBox: Rect | null;
   lastWorkBox: Rect | null;
   state: CharState;
@@ -117,6 +118,128 @@ function animForTool(tool: string): CharState {
   return "thinking";
 }
 
+export type BoardSide = "l" | "r" | "t" | "b";
+
+export function closestEdgeStands(
+  pos: { x: number; y: number },
+  box: Rect,
+  pad: number,
+): { x: number; y: number; side: BoardSide }[] {
+  const yAlong = clamp(pos.y, box.y, box.y + box.h);
+  const xAlong = clamp(pos.x, box.x, box.x + box.w);
+  return [
+    { x: box.x - pad, y: yAlong, side: "l" },
+    { x: box.x + box.w + pad, y: yAlong, side: "r" },
+    { x: xAlong, y: box.y - pad, side: "t" },
+    { x: xAlong, y: box.y + box.h + pad, side: "b" },
+  ];
+}
+
+export function pickStandPoint(
+  pos: { x: number; y: number },
+  box: Rect,
+  pad: number,
+  blocked: (p: { x: number; y: number }) => boolean = () => false,
+): { x: number; y: number; side: BoardSide } {
+  const spots = closestEdgeStands(pos, box, pad);
+  let best = spots[0];
+  let bestScore = Infinity;
+  for (const s of spots) {
+    const d = Math.hypot(s.x - pos.x, s.y - pos.y);
+    const view = s.side === "l" || s.side === "r" ? 1 : 1.28;
+    const score = d * view + (blocked(s) ? 1e8 : 0);
+    if (score < bestScore) {
+      bestScore = score;
+      best = s;
+    }
+  }
+  return best;
+}
+
+export function segmentHitsRect(
+  a: { x: number; y: number },
+  b: { x: number; y: number },
+  r: Rect,
+): boolean {
+  let t0 = 0;
+  let t1 = 1;
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const clips: [number, number][] = [
+    [-dx, a.x - r.x],
+    [dx, r.x + r.w - a.x],
+    [-dy, a.y - r.y],
+    [dy, r.y + r.h - a.y],
+  ];
+  for (const [p, q] of clips) {
+    if (p === 0) {
+      if (q < 0) return false;
+      continue;
+    }
+    const t = q / p;
+    if (p < 0) t0 = Math.max(t0, t);
+    else t1 = Math.min(t1, t);
+    if (t0 > t1) return false;
+  }
+  return t1 >= t0 && t0 < 1 && t1 > 0;
+}
+
+function inflateRect(box: Rect, margin: number): Rect {
+  return {
+    x: box.x - margin,
+    y: box.y - margin,
+    w: box.w + margin * 2,
+    h: box.h + margin * 2,
+  };
+}
+
+function compactRoute(
+  from: { x: number; y: number },
+  pts: { x: number; y: number }[],
+): { x: number; y: number }[] {
+  const out: { x: number; y: number }[] = [];
+  let prev = from;
+  for (const p of pts) {
+    if (Math.hypot(p.x - prev.x, p.y - prev.y) < 6) continue;
+    out.push(p);
+    prev = p;
+  }
+  return out.length ? out : pts.slice(-1);
+}
+
+export function routeAround(
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  box: Rect | null,
+  margin = 8,
+): { x: number; y: number }[] {
+  if (!box) return [to];
+  const r = inflateRect(box, margin);
+  if (!segmentHitsRect(from, to, r)) return [to];
+
+  const x0 = r.x;
+  const y0 = r.y;
+  const x1 = r.x + r.w;
+  const y1 = r.y + r.h;
+  const horiz = Math.abs(to.x - from.x) >= Math.abs(to.y - from.y);
+  if (horiz) {
+    const y = (from.y + to.y) / 2 < y0 + (y1 - y0) / 2 ? y0 : y1;
+    const leftFirst = from.x <= to.x;
+    return compactRoute(from, [
+      { x: leftFirst ? x0 : x1, y },
+      { x: leftFirst ? x1 : x0, y },
+      to,
+    ]);
+  }
+  const x = (from.x + to.x) / 2 < x0 + (x1 - x0) / 2 ? x0 : x1;
+  const topFirst = from.y <= to.y;
+  return compactRoute(from, [
+    { x, y: topFirst ? y0 : y1 },
+    { x, y: topFirst ? y1 : y0 },
+    to,
+  ]);
+}
+
 interface FrameChoice {
   name: SpriteFrameName;
   jump: number;
@@ -148,7 +271,7 @@ export function cleanSpeechText(raw: string): string {
   return text;
 }
 
-export function formatThinkingStream(raw: string): string {
+export function formatThinkingStream(raw: string, maxLen = 58): string {
   if (!raw) return "Thinking…";
   let cleaned = raw
     .replace(/```[\s\S]*?```/g, "")
@@ -159,8 +282,7 @@ export function formatThinkingStream(raw: string): string {
     .replace(/\s+/g, " ")
     .trim();
   if (!cleaned) return "Thinking…";
-  // Keep the most recent window so the thought bubble displays the active thinking stream
-  const maxLen = 58;
+  // Keep the most recent window so the bubble displays the active thinking stream
   if (cleaned.length > maxLen) {
     const start = cleaned.length - maxLen;
     const spaceIdx = cleaned.indexOf(" ", start);
@@ -171,6 +293,22 @@ export function formatThinkingStream(raw: string): string {
     }
   }
   return cleaned;
+}
+
+function isStreamingThought(ch: { turnActive: boolean; thinkingBuffer: string }): boolean {
+  return ch.turnActive && Boolean(ch.thinkingBuffer.trim());
+}
+
+/** Live thought-bubble copy. Reasoning wins over ticker status while a turn is streaming. */
+export function resolveThoughtText(input: {
+  thinkingBuffer: string;
+  turnActive: boolean;
+  narration: string | null;
+}): string | null {
+  if (input.turnActive && input.thinkingBuffer.trim()) {
+    return formatThinkingStream(input.thinkingBuffer);
+  }
+  return input.narration;
 }
 
 interface SpeechBubbleLayout {
@@ -292,6 +430,7 @@ export class AgentCharacterController {
     if (!text || !text.trim()) {
       for (const ch of this.chars.values()) {
         if (!ch.turnActive && (ch.state === "celebrating" || ch.speech)) continue;
+        if (ch.turnActive && ch.thinkingBuffer.trim()) continue;
         ch.narration = null;
       }
       this.ensureLoop();
@@ -302,8 +441,9 @@ export class AgentCharacterController {
     let changed = false;
     for (const ch of this.chars.values()) {
       if (!ch.turnActive && ch.speech) continue;
-      // Do not overwrite live streaming thinking buffer while reasoning deltas are actively streaming
-      if (ch.thinkingBuffer && ch.turnActive && ch.state === "thinking") {
+      // Ticker status must not clobber a live reasoning stream — including while
+      // the sprite is still walking to the target (state is not "thinking" yet).
+      if (ch.turnActive && ch.thinkingBuffer.trim()) {
         continue;
       }
       let speech = clean;
@@ -422,6 +562,8 @@ export class AgentCharacterController {
         this.dragSpeech = ch.speech;
         ch.narration = null;
         ch.speech = null;
+        ch.waypoints = [];
+        ch.landing = null;
         this.setState(ch, "idle");
         this.ensureLoop();
         return true;
@@ -507,14 +649,15 @@ export class AgentCharacterController {
         return;
       }
       ch.fadingOut = false;
-      ch.alpha = Math.max(ch.alpha, 0.85);
+      ch.alpha = 0.2;
       ch.turnActive = true;
       ch.thinkingBuffer = "";
       ch.speech = null;
       ch.completedCount = 0;
       ch.idleSince = 0;
       ch.narration = "Taking a look at your board…";
-      this.retarget(ch, target, "thinking");
+      ch.pos = this.spawnFromAskAi();
+      this.dispatchToTarget(ch, target, "thinking");
       this.ensureLoop();
       return;
     }
@@ -594,9 +737,10 @@ export class AgentCharacterController {
         } else if (ch.state !== "celebrating" && ch.state !== "sad" && ch.state !== "stumble") {
           this.setState(ch, "thinking");
         }
-        if (e.text) {
-          ch.thinkingBuffer = (ch.thinkingBuffer + e.text).slice(-400);
-          ch.narration = formatThinkingStream(ch.thinkingBuffer);
+        const chunk = e.text ?? "";
+        if (chunk) {
+          ch.thinkingBuffer = (ch.thinkingBuffer + chunk).slice(-800);
+          this.streamThoughtToBubble(ch);
           this.ensureLoop();
         }
         break;
@@ -620,20 +764,23 @@ export class AgentCharacterController {
         if (e.reason === "done") {
           const msg = e.message?.trim() || "All done! Take a look ✨";
           this.speakToCharacter(ch, msg);
-          if (ch.state === "walking" && ch.landing) {
+          if (ch.state === "walking" && (ch.waypoints.length || ch.landing)) {
             ch.queuedState = "celebrating";
           } else {
             ch.landing = null;
+            ch.waypoints = [];
             this.setState(ch, "celebrating");
           }
         } else if (e.reason === "error") {
           const msg = e.message?.trim() || "Hit a snag — let's try again!";
           this.speakToCharacter(ch, msg);
           ch.landing = null;
+          ch.waypoints = [];
           this.setState(ch, "sad");
         } else {
           this.speakToCharacter(ch, "Paused.");
           ch.landing = null;
+          ch.waypoints = [];
           this.setState(ch, "idle");
         }
         this.ensureLoop();
@@ -725,19 +872,15 @@ export class AgentCharacterController {
     return null;
   }
 
-  private landingFor(box: Rect, ch: Character): { x: number; y: number } {
-    const scale = this.deps.engine.camera.scale || 1;
+  private standPad(anim: CharState): number {
     const charW = this.charWorldWidth();
-    const pad = charW * 0.6 + clamp(20 / scale, 12, 200);
-    const cx = box.x + box.w / 2;
-    const cy = box.y + box.h / 2;
-    const candidates = [
-      { x: box.x + box.w + pad, y: cy },
-      { x: cx, y: box.y + box.h + pad },
-      { x: box.x - pad, y: cy },
-      { x: cx, y: box.y - pad },
-    ];
+    const scale = this.deps.engine.camera.scale || 1;
+    const closeness = anim === "working" ? 0.42 : 0.68;
+    return charW * closeness + clamp(16 / scale, 8, 140);
+  }
 
+  private landingFor(box: Rect, ch: Character, anim: CharState = "thinking"): { x: number; y: number } {
+    const pad = this.standPad(anim);
     const wm = this.deps.widgets();
     const om = this.deps.objects();
     const ink = this.deps.getInkBox();
@@ -764,25 +907,21 @@ export class AgentCharacterController {
           if (overlapsBox(pt, { x: o.x, y: o.y, w: o.w, h: o.h })) return true;
         }
       }
-      if (ink && overlapsBox(pt, ink)) {
+      if (ink && !(ink.x === box.x && ink.y === box.y) && overlapsBox(pt, ink)) {
         return true;
       }
       return false;
     };
 
-    let best = candidates[0];
-    let bestScore = Infinity;
-    for (const c of candidates) {
-      const d = (c.x - ch.pos.x) ** 2 + (c.y - ch.pos.y) ** 2;
-      const penalty = collidesOther(c) ? 10000000 : 0;
-      const score = d + penalty;
-      if (score < bestScore) {
-        bestScore = score;
-        best = c;
-      }
-    }
-    const m = charW / 2 + 8;
+    const best = pickStandPoint(ch.pos, box, pad, collidesOther);
+    const m = this.charWorldWidth() / 2 + 8;
     return { x: clamp(best.x, m, SIZE - m), y: clamp(best.y, m, SIZE - m) };
+  }
+
+  private setRoute(ch: Character, dest: { x: number; y: number }, obstacle: Rect | null): void {
+    const margin = this.charWorldWidth() * 0.22;
+    ch.landing = dest;
+    ch.waypoints = routeAround(ch.pos, dest, obstacle, margin);
   }
 
   private retarget(
@@ -794,6 +933,7 @@ export class AgentCharacterController {
     if (!target) {
       if (ch.state === "walking") {
         ch.landing = null;
+        ch.waypoints = [];
         this.setState(ch, anim);
       }
       return;
@@ -801,29 +941,33 @@ export class AgentCharacterController {
 
     if (target.source === "viewport" || this.isWholeViewport(target.box)) {
       ch.targetBox = target.box;
-      if (ch.state === "walking" && ch.landing) {
+      if (ch.state === "walking" && ch.waypoints.length) {
         ch.queuedState = anim;
       } else {
         ch.landing = null;
+        ch.waypoints = [];
         if (ch.state !== "celebrating" && ch.state !== "sad" && ch.state !== "stumble") {
           this.setState(ch, anim);
         }
+        this.faceContent(ch);
       }
       return;
     }
 
     ch.targetBox = target.box;
-    const landing = this.landingFor(target.box, ch);
+    const landing = this.landingFor(target.box, ch, anim);
     const scale = this.deps.engine.camera.scale || 1;
     const dist = Math.hypot(landing.x - ch.pos.x, landing.y - ch.pos.y);
     if (dist > Math.max(8 / scale, 12)) {
-      ch.landing = landing;
+      this.setRoute(ch, landing, target.box);
       if (ch.state !== "walking") this.setState(ch, "walking");
     } else {
       ch.landing = null;
+      ch.waypoints = [];
       if (ch.state !== "celebrating" && ch.state !== "sad" && ch.state !== "stumble") {
         this.setState(ch, anim);
       }
+      this.faceContent(ch);
     }
   }
 
@@ -832,25 +976,53 @@ export class AgentCharacterController {
     this.setState(ch, "stumble");
   }
 
-  private spawn(id: string, target: { box: Rect; source: string } | null): Character {
+  private spawnFromAskAi(): { x: number; y: number } {
     const cam = this.deps.engine.camera;
     const v = cam.visibleWorldRect();
     const scale = cam.scale || 1;
-    const inset = clamp(70 / scale, 40, 1600);
+    const insetX = clamp(52 / scale, 28, 1400);
+    const insetY = clamp(44 / scale, 24, 1200);
     const m = this.charWorldWidth() / 2 + 8;
+    return {
+      x: clamp(v.x + v.w - insetX, m, SIZE - m),
+      y: clamp(v.y + insetY, m, SIZE - m),
+    };
+  }
+
+  private dispatchToTarget(
+    ch: Character,
+    target: { box: Rect; source: string } | null,
+    anim: CharState,
+  ): void {
+    ch.queuedState = anim;
+    if (!target) {
+      const v = this.deps.engine.camera.visibleWorldRect();
+      this.setRoute(ch, { x: v.x + v.w * 0.55, y: v.y + v.h * 0.62 }, null);
+      this.setState(ch, "walking");
+      ch.facing = -1;
+      return;
+    }
+    ch.targetBox = target.box;
+    const landing = this.landingFor(target.box, ch, anim);
+    const obstacle =
+      target.source === "viewport" || this.isWholeViewport(target.box) ? null : target.box;
+    this.setRoute(ch, landing, obstacle);
+    this.setState(ch, "walking");
+    ch.facing = landing.x < ch.pos.x ? -1 : 1;
+  }
+
+  private spawn(id: string, target: { box: Rect; source: string } | null): Character {
     const ch: Character = {
       id,
-      pos: {
-        x: clamp(v.x + inset, m, SIZE - m),
-        y: clamp(v.y + v.h - inset, m, SIZE - m),
-      },
+      pos: this.spawnFromAskAi(),
       landing: null,
+      waypoints: [],
       targetBox: target?.box ?? null,
       lastWorkBox: null,
       state: "idle",
       queuedState: "thinking",
       resumeState: null,
-      facing: 1,
+      facing: -1,
       walkDir: "h",
       stateSince: performance.now(),
       alpha: 0,
@@ -864,12 +1036,7 @@ export class AgentCharacterController {
       completedCount: 0,
       idleSince: 0,
     };
-    if (target && target.source !== "viewport" && !this.isWholeViewport(target.box)) {
-      ch.landing = this.landingFor(target.box, ch);
-      ch.state = "walking";
-    } else if (target) {
-      ch.targetBox = target.box;
-    }
+    this.dispatchToTarget(ch, target, "thinking");
     return ch;
   }
 
@@ -877,6 +1044,7 @@ export class AgentCharacterController {
     if (ch.state === s) return;
     ch.state = s;
     ch.stateSince = performance.now();
+    if (s === "idle" && !ch.turnActive) ch.idleSince = performance.now();
   }
 
   private charWorldWidth(): number {
@@ -915,27 +1083,42 @@ export class AgentCharacterController {
       ch.fadingOut = true;
     }
 
-    if (ch.state === "walking" && ch.landing) {
+    if (ch.state === "walking" && (ch.waypoints.length || ch.landing)) {
       const scale = this.deps.engine.camera.scale || 1;
-      if (this.reduced) {
-        ch.pos = { ...ch.landing };
+      const finishWalk = () => {
+        if (ch.landing) ch.pos = { ...ch.landing };
         ch.landing = null;
+        ch.waypoints = [];
         this.setState(ch, ch.queuedState ?? "idle");
         this.faceContent(ch);
+        this.syncThoughtNarration(ch);
+      };
+      if (this.reduced) {
+        finishWalk();
         return;
       }
-      const speed = clamp(560 / scale, 60, 24000);
-      const dx = ch.landing.x - ch.pos.x;
-      const dy = ch.landing.y - ch.pos.y;
+      const dest = ch.waypoints[0] ?? ch.landing;
+      if (!dest) {
+        finishWalk();
+        return;
+      }
+      const remain = ch.landing
+        ? Math.hypot(ch.landing.x - ch.pos.x, ch.landing.y - ch.pos.y)
+        : Math.hypot(dest.x - ch.pos.x, dest.y - ch.pos.y);
+      const charW = this.charWorldWidth();
+      const ease = remain < charW * 1.8 ? clamp(0.42 + 0.58 * (remain / (charW * 1.8)), 0.42, 1) : 1;
+      const speed = clamp(620 / scale, 70, 26000) * ease;
+      const dx = dest.x - ch.pos.x;
+      const dy = dest.y - ch.pos.y;
       const dist = Math.hypot(dx, dy);
       const step = speed * dt;
-      if (Math.abs(dx) > 1) ch.facing = dx < 0 ? -1 : 1;
+      if (remain < charW * 0.9) this.faceContent(ch);
+      else if (Math.abs(dx) > 1) ch.facing = dx < 0 ? -1 : 1;
       ch.walkDir = Math.abs(dx) >= Math.abs(dy) ? "h" : "v";
       if (dist <= step || dist < 4 / scale) {
-        ch.pos = { ...ch.landing };
-        ch.landing = null;
-        this.setState(ch, ch.queuedState ?? "idle");
-        this.faceContent(ch);
+        ch.pos = { ...dest };
+        ch.waypoints.shift();
+        if (!ch.waypoints.length) finishWalk();
       } else {
         ch.pos.x += (dx / dist) * step;
         ch.pos.y += (dy / dist) * step;
@@ -943,12 +1126,38 @@ export class AgentCharacterController {
     }
   }
 
+  private syncThoughtNarration(ch: Character): void {
+    if (isStreamingThought(ch)) this.streamThoughtToBubble(ch);
+  }
+
+  private streamThoughtToBubble(ch: Character): void {
+    const thought = formatThinkingStream(ch.thinkingBuffer);
+    const spoken = formatThinkingStream(ch.thinkingBuffer, 160);
+    ch.narration = thought;
+    ch.speech = {
+      text: spoken,
+      since: performance.now(),
+      duration: 20000,
+    };
+  }
+
+  private standsBesideBoard(ch: Character): boolean {
+    const b = ch.targetBox;
+    if (!b) return false;
+    return ch.pos.x < b.x - 2 || ch.pos.x > b.x + b.w + 2;
+  }
+
   private faceContent(ch: Character): void {
-    if (!ch.targetBox) return;
-    const cx = ch.targetBox.x + ch.targetBox.w / 2;
-    const threshold = this.charWorldWidth() * 0.2;
-    if (cx > ch.pos.x + threshold) ch.facing = 1;
-    else if (cx < ch.pos.x - threshold) ch.facing = -1;
+    const b = ch.targetBox;
+    if (!b) return;
+    if (ch.pos.x + 2 < b.x) ch.facing = 1;
+    else if (ch.pos.x - 2 > b.x + b.w) ch.facing = -1;
+    else {
+      const cx = b.x + b.w / 2;
+      if (Math.abs(cx - ch.pos.x) > this.charWorldWidth() * 0.1) {
+        ch.facing = cx > ch.pos.x ? 1 : -1;
+      }
+    }
   }
 
   private frameFor(ch: Character, now: number): FrameChoice {
@@ -974,6 +1183,9 @@ export class AgentCharacterController {
         return { name: ch.walkDir === "h" ? side[f] : front, ...none };
       }
       case "idle": {
+        if (this.standsBesideBoard(ch) && ch.turnActive) {
+          return { name: Math.floor(now / 420) % 2 ? "side_read1" : "side_read0", ...none };
+        }
         const cycle = ((now - ch.stateSince) % 3200) / 3200;
         return { name: cycle < 0.91 ? "front_idle0" : "front_idle1", ...none };
       }
@@ -982,6 +1194,9 @@ export class AgentCharacterController {
       case "working":
         return { name: Math.floor(now / 150) % 2 ? "side_work1" : "side_work0", ...none };
       case "thinking":
+        if (this.standsBesideBoard(ch)) {
+          return { name: Math.floor(now / 480) % 2 ? "side_read1" : "side_read0", ...none };
+        }
         return { name: Math.floor(now / 600) % 2 ? "front_think1" : "front_think0", ...none };
       case "celebrating": {
         const up = Math.floor(now / 160) % 2 === 1;
@@ -1046,7 +1261,7 @@ export class AgentCharacterController {
     ch: Character,
     measureCtx: CanvasRenderingContext2D | null
   ): SpeechBubbleLayout | null {
-    if (!ch.speech || ch.dragging || ch.state === "walking") {
+    if (!ch.speech || ch.dragging || (ch.state === "walking" && !isStreamingThought(ch))) {
       return null;
     }
     const scale = this.deps.engine.camera.scale || 1;
@@ -1199,11 +1414,9 @@ export class AgentCharacterController {
     ch: Character,
     measureCtx: CanvasRenderingContext2D | null
   ): { rect: Rect; lines: string[]; fs: number; pad: number; lineH: number } | null {
-    if (
-      !ch.narration ||
-      ch.dragging ||
-      ch.state === "walking"
-    ) {
+    const thought = resolveThoughtText(ch);
+    const streamingThought = isStreamingThought(ch);
+    if (!thought || ch.dragging || (ch.state === "walking" && !streamingThought)) {
       return null;
     }
     const scale = this.deps.engine.camera.scale || 1;
@@ -1215,7 +1428,7 @@ export class AgentCharacterController {
     const lines: string[] = [];
     if (measureCtx) {
       measureCtx.font = font;
-      let rest = ch.narration.replace(/\s+/g, " ").trim();
+      let rest = thought.replace(/\s+/g, " ").trim();
       while (rest && lines.length < 2) {
         let take = rest;
         while (take.length > 1 && measureCtx.measureText(take).width > maxW) {

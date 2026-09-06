@@ -757,8 +757,8 @@ export class Conductor {
     stepsLog: AiLogStep[],
     sink: { text: string; sawFinal: boolean; reasoningOnly: boolean }
   ): Promise<"continue" | "final" | "error"> {
-    const eventName = /^event: (.+)$/m.exec(block)?.[1] ?? "message";
-    const dataLine = /^data: (.+)$/m.exec(block)?.[1] ?? "";
+    const eventName = (/^event: (.+)$/m.exec(block)?.[1] ?? "message").trim();
+    const dataLine = (/^data: (.+)$/m.exec(block)?.[1] ?? "").trimEnd();
     if (!dataLine) return "continue";
     let data: unknown = null;
     try {
@@ -771,7 +771,10 @@ export class Conductor {
     if (eventName === "text_delta" && typeof rec.text === "string") {
       sink.text += rec.text;
       this.emit({ kind: "text_delta", text: rec.text });
-    } else if (eventName === "reasoning" && typeof rec.text === "string") {
+    } else if (
+      (eventName === "reasoning" || eventName === "reasoning_delta") &&
+      typeof rec.text === "string"
+    ) {
       this.emit({ kind: "reasoning_delta", text: rec.text });
     } else if (eventName === "tool_request" && typeof rec.name === "string") {
       // Text streamed before a tool call is a preamble ("let me check the board"),
