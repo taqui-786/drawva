@@ -27,7 +27,6 @@
     "@deepseek-ai/dsh-compaction-basic": "0.1.2-rc.1",
     "@deepseek-ai/dsh-compaction-tool-result-pruner": "0.1.2-rc.1",
     "@deepseek-ai/dsh-credentials": "0.1.2-rc.1",
-    "@deepseek-ai/dsh-home-paths": "0.1.2-rc.1",
     "@deepseek-ai/dsh-llm": "0.1.2-rc.1",
     "@deepseek-ai/dsh-llm-pi-ai": "0.1.2-rc.1",
     "@deepseek-ai/dsh-llm-retry": "0.1.2-rc.1",
@@ -46,9 +45,7 @@
     "better-auth": "^1.7.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
-    "cn": "^0.2.5",
     "diff": "^9.0.0",
-    "dotenv": "^17.4.2",
     "drizzle-orm": "^0.45.2",
     "mathjax-full": "^3.2.2",
     "mermaid": "^11.16.1",
@@ -74,7 +71,8 @@
     "eslint-config-next": "16.3.0",
     "tailwindcss": "^4",
     "tsx": "^4.23.11",
-    "typescript": "^5"
+    "typescript": "^5",
+    "dotenv": "^17.4.2"
   },
   "packageManager": "pnpm@10.33.3"
 }
