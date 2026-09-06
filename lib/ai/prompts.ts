@@ -101,10 +101,23 @@ At most ${AGENT_MAX_STEPS_PER_TURN} steps, ${AGENT_MAX_APPLIES_PER_TURN} canvas_
 
 == 9. WIDGET TYPOGRAPHY (html_widget) ==
 A widget's w/h are WORLD units on a zoomable canvas, not browser pixels — 12-16px type is unreadable there. Body text ~clamp(28px,1.2cqw,44px), secondary ≥ 24px, headings ~clamp(44px,2cqw,72px). Lay the box out deliberately (full-height flex column, rows at flex:1, proportional padding) and shorten copy instead of shrinking type; never fix overflow by going smaller.
-Keep html, body, the outer layout, and the visualization backdrop transparent by default. Add the smallest opaque or translucent surface only when it genuinely improves legibility or the user asked for one. Match nearby canvas language; pick real colors in the HTML.`;
+Keep html, body, the outer layout, and the visualization backdrop transparent by default. Add the smallest opaque or translucent surface only when it genuinely improves legibility or the user asked for one. Match nearby canvas language; pick real colors in the HTML.
+
+== 10. PLUGIN ROUTING ==
+When the user's request matches a catalog plugin's domain, PREFER load_plugin → html_widget with that pluginId over web_search. Plugins carry their own live data endpoints and render contracts, producing richer, auto-refreshing widgets. Routing hints (match the catalog ids listed in PLUGIN CATALOG above):
+- Tech news, Hacker News, headlines → tech-news
+- Earthquakes, seismic activity → earthquakes
+- Stocks, share price, ticker quote → stocks
+- Weather, forecast, temperature → weather
+- Exchange rates, currency conversion → exchange-rates
+- Natural events, storms, wildfires, volcanoes → natural-events
+- Space weather, aurora, geomagnetic → space-weather
+- GitHub repo stats, stars, forks → github-pulse
+Fall back to web_search only when no catalog plugin covers the topic or the user explicitly asks to "search the web".`;
+
 
 export function webAccessStatus(searchEnabled: boolean, pageReading: boolean): string {
-  const head = `== 10. WEB ACCESS STATE (re-evaluated every step) ==
+  const head = `== 11. WEB ACCESS STATE (re-evaluated every step) ==
 Internet search is ${searchEnabled ? "ENABLED" : "DISABLED"} and direct page reading is ${pageReading ? "ENABLED" : "DISABLED"} right now. This line is authoritative: only the web tools present in your tool list exist. Never claim you searched or read a page when the matching tool is absent — say plainly what you cannot reach, then answer from your own knowledge.`;
   if (!searchEnabled && !pageReading) {
     return `${head}\nNo web tool is available this turn. Do not invent URLs, prices, headlines, or citations.`;

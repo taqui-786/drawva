@@ -502,11 +502,7 @@ export class Conductor {
       }
 
       if (!policy.mutated && !finalText.trim()) {
-        // Name the actual cause. "Empty response" used to be reported for every
-        // no-answer path, including turns where the model emitted thousands of
-        // reasoning tokens — which sends users looking for a provider fault that
-        // is not there.
-        const errorMsg = turnResult.reasoningOnly
+          const errorMsg = turnResult.reasoningOnly
           ? "The model finished thinking but never wrote an answer or called a tool. Retry, or pick a model with stronger tool-calling support in Settings."
           : policy.steps > 0
             ? "The model ran tools but never produced a final answer. Retry — the canvas is unchanged."
