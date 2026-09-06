@@ -17,9 +17,9 @@ export type AgentCharacterInput =
   | { kind: "turn_start" }
   | { kind: "tool_start"; tool: string; target?: ToolTargetHint }
   | { kind: "tool_end"; tool: string; ok: boolean; summary?: string; target?: ToolTargetHint }
-  | { kind: "text_delta" }
-  | { kind: "reasoning_delta" }
-  | { kind: "turn_end"; reason: "done" | "cancelled" | "error" };
+  | { kind: "text_delta"; text?: string }
+  | { kind: "reasoning_delta"; text?: string }
+  | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; message?: string };
 
 export interface AgentCharacterDeps {
   engine: CanvasEngine;
@@ -39,6 +39,12 @@ type CharState =
   | "sad"
   | "stumble";
 
+export interface CharacterSpeech {
+  text: string;
+  since: number;
+  duration: number;
+}
+
 interface Character {
   id: string;
   pos: { x: number; y: number };
@@ -54,6 +60,8 @@ interface Character {
   alpha: number;
   fadingOut: boolean;
   narration: string | null;
+  thinkingBuffer: string;
+  speech: CharacterSpeech | null;
   dragging: boolean;
   pendingEnd: "done" | "cancelled" | "error" | null;
   turnActive: boolean;
@@ -113,6 +121,69 @@ interface FrameChoice {
   name: SpriteFrameName;
   jump: number;
   shake: number;
+}
+
+export function cleanSpeechText(raw: string): string {
+  if (!raw) return "";
+  let text = raw.trim();
+  // Strip markdown links [label](url) -> label
+  text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  // Strip bold/italic formatting
+  text = text.replace(/(\*\*|__)(.*?)\1/g, "$2");
+  text = text.replace(/(\*|_)(.*?)\1/g, "$2");
+  // Strip inline code backticks
+  text = text.replace(/`([^`]+)`/g, "$1");
+  // Strip markdown headers
+  text = text.replace(/^#+\s+/gm, "");
+  // Strip list bullet markers
+  text = text.replace(/^[\s]*[•\-\*]\s+/gm, "");
+  // Normalize newlines and whitespace
+  text = text.replace(/\n\s*\n+/g, " ");
+  text = text.replace(/\r?\n/g, " ");
+  text = text.replace(/\s+/g, " ").trim();
+  // If the model produced something too long, cap gracefully
+  if (text.length > 220) {
+    text = text.slice(0, 217).trim() + "…";
+  }
+  return text;
+}
+
+export function formatThinkingStream(raw: string): string {
+  if (!raw) return "Thinking…";
+  let cleaned = raw
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/`([^`]+)`/g, "$1")
+    .replace(/(\*\*|__)(.*?)\1/g, "$2")
+    .replace(/(\*|_)(.*?)\1/g, "$2")
+    .replace(/^#+\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "Thinking…";
+  // Keep the most recent window so the thought bubble displays the active thinking stream
+  const maxLen = 58;
+  if (cleaned.length > maxLen) {
+    const start = cleaned.length - maxLen;
+    const spaceIdx = cleaned.indexOf(" ", start);
+    if (spaceIdx !== -1 && spaceIdx < start + 12) {
+      cleaned = `…${cleaned.slice(spaceIdx + 1).trim()}`;
+    } else {
+      cleaned = `…${cleaned.slice(start).trim()}`;
+    }
+  }
+  return cleaned;
+}
+
+interface SpeechBubbleLayout {
+  rect: Rect;
+  lines: string[];
+  fs: number;
+  padH: number;
+  padV: number;
+  lineH: number;
+  beakBaseX: number;
+  beakWidth: number;
+  beakTipX: number;
+  beakTipY: number;
 }
 
 export class AgentCharacterController {
@@ -195,10 +266,32 @@ export class AgentCharacterController {
     this.ensureLoop();
   }
 
+  speak(text: string, durationMs?: number, id = "main"): void {
+    const ch = this.chars.get(id);
+    if (!ch) return;
+    this.speakToCharacter(ch, text, durationMs);
+    this.ensureLoop();
+  }
+
+  private speakToCharacter(ch: Character, raw: string, durationMs?: number): void {
+    const clean = cleanSpeechText(raw);
+    if (!clean) {
+      ch.speech = null;
+      return;
+    }
+    const duration = durationMs ?? clamp(clean.length * 75, 7000, 18000);
+    ch.speech = {
+      text: clean,
+      since: performance.now(),
+      duration,
+    };
+    ch.narration = null;
+  }
+
   setNarration(text: string | null): void {
     if (!text || !text.trim()) {
       for (const ch of this.chars.values()) {
-        if (!ch.turnActive && ch.state === "celebrating") continue;
+        if (!ch.turnActive && (ch.state === "celebrating" || ch.speech)) continue;
         ch.narration = null;
       }
       this.ensureLoop();
@@ -208,6 +301,11 @@ export class AgentCharacterController {
     const clean = text.trim();
     let changed = false;
     for (const ch of this.chars.values()) {
+      if (!ch.turnActive && ch.speech) continue;
+      // Do not overwrite live streaming thinking buffer while reasoning deltas are actively streaming
+      if (ch.thinkingBuffer && ch.turnActive && ch.state === "thinking") {
+        continue;
+      }
       let speech = clean;
       if (ch.turnActive) {
         // Prevent premature / deceptive "Done:" messages while agent turn is still running
@@ -255,12 +353,27 @@ export class AgentCharacterController {
 
   private dragId: string | null = null;
   private dragNarration: string | null = null;
+  private dragSpeech: CharacterSpeech | null = null;
   private dragStartPos: { x: number; y: number } | null = null;
   private dragStartTime = 0;
+
+  private hitTestSpeechBubble(ch: Character, world: { x: number; y: number }): boolean {
+    const b = this.speechBubbleFor(ch, null);
+    if (!b) return false;
+    return (
+      world.x >= b.rect.x &&
+      world.x <= b.rect.x + b.rect.w &&
+      world.y >= b.rect.y &&
+      world.y <= b.rect.y + b.rect.h
+    );
+  }
 
   hitTest(world: { x: number; y: number }): boolean {
     for (const ch of this.chars.values()) {
       if (ch.alpha <= 0.1) continue;
+      if (ch.speech && this.hitTestSpeechBubble(ch, world)) {
+        return true;
+      }
       const w = this.charWorldWidth();
       const h = w * (SPRITE_H / SPRITE_W);
       const box = {
@@ -288,6 +401,11 @@ export class AgentCharacterController {
   beginDrag(world: { x: number; y: number }): boolean {
     for (const [id, ch] of this.chars.entries()) {
       if (ch.alpha <= 0.1) continue;
+      if (ch.speech && this.hitTestSpeechBubble(ch, world)) {
+        ch.speech = null;
+        this.ensureLoop();
+        return true;
+      }
       const w = this.charWorldWidth();
       const h = w * (SPRITE_H / SPRITE_W);
       if (
@@ -301,7 +419,9 @@ export class AgentCharacterController {
         this.dragStartTime = performance.now();
         ch.dragging = true;
         this.dragNarration = ch.narration;
+        this.dragSpeech = ch.speech;
         ch.narration = null;
+        ch.speech = null;
         this.setState(ch, "idle");
         this.ensureLoop();
         return true;
@@ -327,6 +447,7 @@ export class AgentCharacterController {
     if (ch) {
       ch.dragging = false;
       ch.narration = this.dragNarration;
+      ch.speech = this.dragSpeech;
       if (this.dragStartPos) {
         const dist = Math.hypot(ch.pos.x - this.dragStartPos.x, ch.pos.y - this.dragStartPos.y);
         const dur = performance.now() - this.dragStartTime;
@@ -334,6 +455,7 @@ export class AgentCharacterController {
           this.poke(ch);
           this.dragStartPos = null;
           this.dragNarration = null;
+          this.dragSpeech = null;
           this.ensureLoop();
           return;
         }
@@ -342,28 +464,31 @@ export class AgentCharacterController {
         const reason = ch.pendingEnd;
         ch.pendingEnd = null;
         this.dragNarration = null;
-        ch.narration = reason === "done" ? "All done! Take a look ✨" : "Hit a snag — try again!";
+        this.dragSpeech = null;
+        const msg = reason === "done" ? "All done! Take a look ✨" : "Hit a snag — try again!";
+        this.speakToCharacter(ch, msg);
         ch.landing = null;
         this.setState(ch, reason === "done" ? "celebrating" : "sad");
       }
     }
     this.dragStartPos = null;
     this.dragNarration = null;
+    this.dragSpeech = null;
     if (ch) this.ensureLoop();
   }
 
   private poke(ch: Character): void {
     if (ch.turnActive) return;
     this.setState(ch, "celebrating");
-    ch.narration = "Hi! 👋 Ready to draw!";
+    this.speakToCharacter(ch, "Hi! 👋 Ready to draw!", 2500);
     ch.stateSince = performance.now();
     setTimeout(() => {
       if (ch.state === "celebrating" && !ch.turnActive) {
-        this.setState(ch, "idle");
+        ch.fadingOut = true;
+        ch.speech = null;
         ch.narration = null;
-        ch.idleSince = performance.now();
       }
-    }, 1800);
+    }, 2200);
   }
 
   onEvent(e: AgentCharacterInput & { agentId?: string }): void {
@@ -375,6 +500,8 @@ export class AgentCharacterController {
         ch = this.spawn(id, target);
         this.chars.set(id, ch);
         ch.turnActive = true;
+        ch.thinkingBuffer = "";
+        ch.speech = null;
         ch.narration = "Taking a look at your board…";
         this.ensureLoop();
         return;
@@ -382,6 +509,8 @@ export class AgentCharacterController {
       ch.fadingOut = false;
       ch.alpha = Math.max(ch.alpha, 0.85);
       ch.turnActive = true;
+      ch.thinkingBuffer = "";
+      ch.speech = null;
       ch.completedCount = 0;
       ch.idleSince = 0;
       ch.narration = "Taking a look at your board…";
@@ -394,14 +523,18 @@ export class AgentCharacterController {
     if (ch.dragging) {
       if (e.kind === "turn_end") {
         ch.turnActive = false;
+        ch.thinkingBuffer = "";
         ch.pendingEnd = e.reason;
         ch.narration = null;
+        ch.speech = null;
       }
       return;
     }
     switch (e.kind) {
       case "tool_start": {
         ch.turnActive = true;
+        ch.thinkingBuffer = "";
+        ch.speech = null;
         const anim = animForTool(e.tool);
         const resolved = this.resolveTarget(e.target);
         if (resolved) ch.lastWorkBox = resolved.box;
@@ -454,7 +587,6 @@ export class AgentCharacterController {
         this.ensureLoop();
         break;
       }
-      case "text_delta":
       case "reasoning_delta": {
         ch.turnActive = true;
         if (ch.state === "walking") {
@@ -462,15 +594,32 @@ export class AgentCharacterController {
         } else if (ch.state !== "celebrating" && ch.state !== "sad" && ch.state !== "stumble") {
           this.setState(ch, "thinking");
         }
-        if (e.kind === "text_delta" && !ch.narration?.startsWith("Writing")) {
+        if (e.text) {
+          ch.thinkingBuffer = (ch.thinkingBuffer + e.text).slice(-400);
+          ch.narration = formatThinkingStream(ch.thinkingBuffer);
+          this.ensureLoop();
+        }
+        break;
+      }
+      case "text_delta": {
+        ch.turnActive = true;
+        if (ch.state === "walking") {
+          ch.queuedState = "thinking";
+        } else if (ch.state !== "celebrating" && ch.state !== "sad" && ch.state !== "stumble") {
+          this.setState(ch, "thinking");
+        }
+        if (!ch.narration?.startsWith("Writing") && !ch.speech) {
           ch.narration = "Writing the answer…";
         }
         break;
       }
       case "turn_end": {
         ch.turnActive = false;
+        ch.thinkingBuffer = "";
+        ch.narration = null;
         if (e.reason === "done") {
-          ch.narration = "All done! Take a look ✨";
+          const msg = e.message?.trim() || "All done! Take a look ✨";
+          this.speakToCharacter(ch, msg);
           if (ch.state === "walking" && ch.landing) {
             ch.queuedState = "celebrating";
           } else {
@@ -478,11 +627,12 @@ export class AgentCharacterController {
             this.setState(ch, "celebrating");
           }
         } else if (e.reason === "error") {
-          ch.narration = "Hit a snag — let's try again!";
+          const msg = e.message?.trim() || "Hit a snag — let's try again!";
+          this.speakToCharacter(ch, msg);
           ch.landing = null;
           this.setState(ch, "sad");
         } else {
-          ch.narration = "Paused.";
+          this.speakToCharacter(ch, "Paused.");
           ch.landing = null;
           this.setState(ch, "idle");
         }
@@ -706,6 +856,8 @@ export class AgentCharacterController {
       alpha: 0,
       fadingOut: false,
       narration: null,
+      thinkingBuffer: "",
+      speech: null,
       dragging: false,
       pendingEnd: null,
       turnActive: true,
@@ -735,7 +887,7 @@ export class AgentCharacterController {
 
   private updateCharacter(ch: Character, dt: number, now: number): void {
     if (ch.fadingOut) {
-      ch.alpha = Math.max(0, ch.alpha - dt / 0.45);
+      ch.alpha = Math.max(0, ch.alpha - dt / 0.3);
       return;
     }
     if (ch.alpha < 1) ch.alpha = Math.min(1, ch.alpha + dt / 0.25);
@@ -744,18 +896,22 @@ export class AgentCharacterController {
     if (ch.state !== "walking") this.faceContent(ch);
 
     const elapsed = now - ch.stateSince;
+    if (ch.speech && now - ch.speech.since > ch.speech.duration) {
+      ch.speech = null;
+    }
     if (ch.state === "stumble" && elapsed > 650) {
       const resume = ch.resumeState ?? (ch.turnActive ? "thinking" : "idle");
       this.setState(ch, resume);
-    } else if (ch.state === "celebrating" && elapsed > 2800) {
-      this.setState(ch, "idle");
-      ch.idleSince = now;
+    } else if (ch.state === "celebrating" && elapsed > 2500) {
+      // Jump yay celebration animation completed: instantly wipe out!
+      ch.fadingOut = true;
+      ch.speech = null;
       ch.narration = null;
-    } else if (ch.state === "sad" && elapsed > 3000) {
-      this.setState(ch, "idle");
-      ch.idleSince = now;
+    } else if (ch.state === "sad" && elapsed > 2500) {
+      ch.fadingOut = true;
+      ch.speech = null;
       ch.narration = null;
-    } else if (ch.state === "idle" && !ch.turnActive && ch.idleSince > 0 && (now - ch.idleSince > 30000)) {
+    } else if (ch.state === "idle" && !ch.turnActive && !ch.speech && ch.idleSince > 0 && (now - ch.idleSince > 600)) {
       ch.fadingOut = true;
     }
 
@@ -886,6 +1042,159 @@ export class AgentCharacterController {
     ctx.closePath();
   }
 
+  private speechBubbleFor(
+    ch: Character,
+    measureCtx: CanvasRenderingContext2D | null
+  ): SpeechBubbleLayout | null {
+    if (!ch.speech || ch.dragging || ch.state === "walking") {
+      return null;
+    }
+    const scale = this.deps.engine.camera.scale || 1;
+    const fs = clamp(13 / scale, 6, 450);
+    const lineH = fs * 1.35;
+    const padH = fs * 0.95;
+    const padV = fs * 0.75;
+    const maxW = clamp(260 / scale, fs * 12, 10000);
+    const font = `600 ${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+    const lines: string[] = [];
+
+    if (measureCtx) {
+      measureCtx.font = font;
+      const words = ch.speech.text.split(" ");
+      let currentLine = "";
+      for (const word of words) {
+        if (!word) continue;
+        const testLine = currentLine ? `${currentLine} ${word}` : word;
+        if (measureCtx.measureText(testLine).width <= maxW) {
+          currentLine = testLine;
+        } else {
+          if (currentLine) lines.push(currentLine);
+          currentLine = word;
+          if (lines.length >= 4) break;
+        }
+      }
+      if (currentLine && lines.length < 4) {
+        lines.push(currentLine);
+      }
+      if (lines.length === 4) {
+        let last = lines[3];
+        while (last.length > 1 && measureCtx.measureText(`${last}…`).width > maxW) {
+          last = last.slice(0, -1).trim();
+        }
+        lines[3] = `${last}…`;
+      }
+    } else {
+      lines.push(ch.speech.text);
+    }
+
+    if (lines.length === 0) return null;
+
+    let maxLineWidth = fs * 6;
+    if (measureCtx) {
+      for (const line of lines) {
+        const lw = measureCtx.measureText(line).width;
+        if (lw > maxLineWidth) maxLineWidth = lw;
+      }
+    }
+
+    const w = maxLineWidth + padH * 2;
+    const h = padV * 2 + lines.length * lineH;
+    const charW = this.charWorldWidth();
+    const charH = charW * (SPRITE_H / SPRITE_W);
+    const gap = fs * 1.8;
+
+    let left =
+      ch.facing === 1
+        ? ch.pos.x + charW * 0.15
+        : ch.pos.x - charW * 0.15 - w;
+    let top = ch.pos.y - charH - gap - h;
+
+    left = clamp(left, 10, SIZE - w - 10);
+    top = clamp(top, 10, SIZE - h - 10);
+
+    const r = fs * 0.55;
+    const beakWidth = fs * 0.9;
+    const beakTipX = ch.pos.x + (ch.facing === 1 ? charW * 0.12 : -charW * 0.12);
+    const beakTipY = ch.pos.y - charH * 0.85;
+    const beakBaseX = clamp(beakTipX, left + r + beakWidth, left + w - r - beakWidth);
+
+    return {
+      rect: { x: left, y: top, w, h },
+      lines,
+      fs,
+      padH,
+      padV,
+      lineH,
+      beakBaseX,
+      beakWidth,
+      beakTipX,
+      beakTipY,
+    };
+  }
+
+  private speechBubblePath(
+    ctx: CanvasRenderingContext2D,
+    b: SpeechBubbleLayout,
+    r: number
+  ): void {
+    const { x, y, w, h } = b.rect;
+    const bw = b.beakWidth;
+    const bx = b.beakBaseX;
+    const tx = b.beakTipX;
+    const ty = b.beakTipY;
+
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+
+    // Bottom edge with beak pointer pointing to character
+    ctx.lineTo(bx + bw / 2, y + h);
+    ctx.lineTo(tx, ty);
+    ctx.lineTo(bx - bw / 2, y + h);
+
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+
+  private drawSpeechBubble(ctx: CanvasRenderingContext2D, ch: Character): void {
+    const b = this.speechBubbleFor(ch, ctx);
+    if (!b) return;
+    const scale = this.deps.engine.camera.scale || 1;
+
+    ctx.save();
+    ctx.globalAlpha = ch.alpha;
+
+    // Drop shadow
+    ctx.shadowColor = "rgba(15, 23, 42, 0.12)";
+    ctx.shadowBlur = b.fs * 0.45;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = b.fs * 0.18;
+
+    ctx.fillStyle = "#ffffff";
+    this.speechBubblePath(ctx, b, b.fs * 0.55);
+    ctx.fill();
+
+    // Solid crisp speech border
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "#0f172a";
+    ctx.lineWidth = Math.max(1.2 / scale, b.fs * 0.09);
+    ctx.stroke();
+
+    // Typography
+    ctx.font = `600 ${b.fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
+    ctx.fillStyle = "#0f172a";
+    ctx.textBaseline = "top";
+    let ty = b.rect.y + b.padV;
+    for (const line of b.lines) {
+      ctx.fillText(line, b.rect.x + b.padH, ty);
+      ty += b.lineH;
+    }
+
+    ctx.restore();
+  }
+
   private bubbleFor(
     ch: Character,
     measureCtx: CanvasRenderingContext2D | null
@@ -945,7 +1254,7 @@ export class AgentCharacterController {
     return { rect: { x: left, y: top, w, h }, lines, fs, pad, lineH };
   }
 
-  private drawBubble(ctx: CanvasRenderingContext2D, ch: Character): void {
+  private drawThoughtBubble(ctx: CanvasRenderingContext2D, ch: Character): void {
     const b = this.bubbleFor(ch, ctx);
     if (!b) return;
     const scale = this.deps.engine.camera.scale || 1;
@@ -1027,7 +1336,11 @@ export class AgentCharacterController {
     else if (ch.state === "working") this.drawGlyph(ctx, ch, "working", now);
     else if (ch.state === "sad" || ch.state === "stumble") this.drawGlyph(ctx, ch, "error", now);
 
-    this.drawBubble(ctx, ch);
+    if (ch.speech && now - ch.speech.since <= ch.speech.duration) {
+      this.drawSpeechBubble(ctx, ch);
+    } else {
+      this.drawThoughtBubble(ctx, ch);
+    }
 
     if (ch.state === "working" && ch.targetBox) {
       const b = ch.targetBox;

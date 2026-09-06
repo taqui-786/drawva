@@ -384,7 +384,7 @@ await test("C1 agent prompt carries safety + discipline rules", () => {
     "UNTRUSTED DATA",
     "canvas_patch_widget",
     "load_plugin",
-    "≤ ~300 words",
+    "≤ ~35 words",
     "baseRevision is REQUIRED",
     "plannedWidget",
     "NEVER re-send a call that just failed unchanged",
@@ -1242,6 +1242,7 @@ await test("D13 DSH decision admission rejects multiple tool calls in one step a
       { type: "tool-call", id: "call-2" as never, name: "canvas_snapshot", arguments: "{}" },
     ],
     availableTools: ["canvas_apply", "canvas_snapshot"],
+    enforceSingleTool: true,
   });
   assert.equal(dec.kind, "feedback");
   if (dec.kind !== "feedback") throw new Error("expected feedback");

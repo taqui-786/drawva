@@ -487,9 +487,13 @@ export function CanvasApp() {
           target: e.target,
         });
       } else if (e.kind === "text_delta" || e.kind === "reasoning_delta") {
-        character.onEvent({ kind: e.kind });
+        character.onEvent({ kind: e.kind, text: e.text });
       } else if (e.kind === "turn_end") {
-        character.onEvent({ kind: "turn_end", reason: e.reason });
+        character.onEvent({
+          kind: "turn_end",
+          reason: e.reason,
+          message: e.message,
+        });
       }
     }
     if (e.kind === "turn_start") {
@@ -667,14 +671,8 @@ export function CanvasApp() {
         ? `${tickerState.currentMessage} · ${tickerState.detail}`
         : tickerState.currentMessage;
       character.setNarration(text);
-    } else if (tickerState.status === "done") {
-      character.setNarration(
-        tickerState.currentMessage || "All done — take a look! ✨",
-      );
-    } else if (tickerState.status === "error") {
-      character.setNarration(
-        tickerState.currentMessage || "Hit a snag — let's try again!",
-      );
+    } else if (tickerState.status === "done" || tickerState.status === "error") {
+      character.setNarration(null);
     } else {
       character.setNarration(null);
     }

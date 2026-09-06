@@ -124,13 +124,16 @@ function validateToolCall(
 export function admitCanvasDecision({
   blocks,
   availableTools = [],
+  enforceSingleTool = false,
 }: {
   blocks: unknown[];
   availableTools: string[];
+  enforceSingleTool?: boolean;
 }):
   | { kind: "feedback"; block: { type: "tool-call"; id: ToolCallId; name: string; arguments: string } }
   | { kind: "final" }
-  | { kind: "tool-call"; block: { type: "tool-call"; id: ToolCallId; name: string; arguments: string } } {
+  | { kind: "tool-call"; block: { type: "tool-call"; id: ToolCallId; name: string; arguments: string } }
+  | { kind: "tool-calls"; blocks: { type: "tool-call"; id: ToolCallId; name: string; arguments: string }[] } {
   const content = Array.isArray(blocks)
     ? (blocks as { type: string; id?: ToolCallId; name?: string; arguments?: string }[])
     : [];
@@ -141,7 +144,7 @@ export function admitCanvasDecision({
     arguments: string;
   }[];
 
-  if (toolCalls.length > 1) {
+  if (enforceSingleTool && toolCalls.length > 1) {
     return {
       kind: "feedback",
       block: stageFeedback(
@@ -159,8 +162,13 @@ export function admitCanvasDecision({
   if (!toolCalls.length) return { kind: "final" };
 
   try {
-    validateToolCall(toolCalls[0], new Set(availableTools));
-    return { kind: "tool-call", block: toolCalls[0] };
+    for (const call of toolCalls) {
+      validateToolCall(call, new Set(availableTools));
+    }
+    if (toolCalls.length === 1) {
+      return { kind: "tool-call", block: toolCalls[0] };
+    }
+    return { kind: "tool-calls", blocks: toolCalls };
   } catch (error) {
     return { kind: "feedback", block: stageFeedback(feedbackFrom(error)) };
   }
@@ -255,8 +263,10 @@ export async function* admitCanvasAgentDecisionStream(
 
   const unchangedSingleTool =
     admission.kind === "tool-call" && toolCalls.length === 1 && admission.block === toolCalls[0];
+  const unchangedMultiTool =
+    admission.kind === "tool-calls" && toolCalls.length > 1;
 
-  if (admission.kind === "final" || unchangedSingleTool) {
+  if (admission.kind === "final" || unchangedSingleTool || unchangedMultiTool) {
     for (const held of heldChunks) yield held;
     for (const usage of heldUsageChunks) yield usage;
     yield terminal;
@@ -267,7 +277,11 @@ export async function* admitCanvasAgentDecisionStream(
     if (chunkBlockType(held) !== "tool-call") yield held;
   }
   const nextIndex = seenIndexes.size ? Math.max(...seenIndexes) + 1 : 0;
-  for (const chunk of canonicalToolChunks(admission.block, nextIndex)) yield chunk;
+  const targetBlock =
+    admission.kind === "feedback" || admission.kind === "tool-call"
+      ? admission.block
+      : admission.blocks[0];
+  for (const chunk of canonicalToolChunks(targetBlock, nextIndex)) yield chunk;
   for (const usage of heldUsageChunks) yield usage;
   yield { type: "finish", reason: { kind: "tool-calls" } };
 }
