@@ -75,7 +75,7 @@ import {
   CloudSavingDone01Icon,
   CloudAlertIcon,
   CloudOffIcon,
-  Cancel01Icon,
+  SquareStopIcon,
   SteeringIcon,
 } from "@hugeicons/core-free-icons";
 import { useSession, signOut } from "@/lib/auth-client";
@@ -807,12 +807,12 @@ export function CanvasHeader({
                         <PopoverTrigger
                           render={
                             <Button
-                              size="icon-sm"
+                              size="icon-lg"
                               variant={isSteerOpen ? "secondary" : "ghost"}
                               data-icon="true"
                               aria-label="Steer agent"
                               className={cn(
-                                "shrink-0 size-7 sm:size-8 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
+                                "shrink-0 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
                                 isSteerOpen && "text-primary bg-primary/10"
                               )}
                             >
@@ -882,14 +882,14 @@ export function CanvasHeader({
                   <TooltipTrigger
                     render={
                       <Button
-                        size="icon-sm"
-                        variant="destructive"
+                        size="icon-lg"
+                        variant="outline"
                         data-icon="true"
                         onClick={onCancelAi}
                         aria-label="Cancel generation"
-                        className="shrink-0 border-2 border-red-700 size-7 sm:size-8 p-0 text-destructive"
+                        className="shrink-0  p-0 text-destructive"
                       >
-                        <HugeiconsIcon icon={Cancel01Icon} className="size-4" />
+                        <HugeiconsIcon icon={SquareStopIcon} className="size-4" />
                       </Button>
                     }
                   />

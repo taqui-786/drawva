@@ -9,7 +9,7 @@ import {
   resolveThoughtText,
   routeAround,
   segmentHitsRect,
-} from "../lib/canvas/agentCharacter.ts";
+} from "../lib/canvas/agentCharacter";
 
 const reasoning = "The user drew a login box. I should inspect the board, then place a flowchart to the right of the ink.";
 
