@@ -713,7 +713,7 @@ export function CanvasApp() {
     }));
 
     const prompt =
-      "Observe the canvas handwriting, formulas, diagrams, questions, and drawings. Provide the appropriate continuation, solution, calculation, diagram, or interactive widget.";
+      "Observe the canvas handwriting, formulas, diagrams, questions, and drawings. Provide the appropriate continuation, solution, calculation, drawing, diagram, or widget.";
     agent.send(prompt).catch((err) => {
       console.error("[Ask AI] Error starting turn:", err);
       toast.error(

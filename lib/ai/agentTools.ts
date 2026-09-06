@@ -103,7 +103,7 @@ const commandItemSpec = {
       type: "array",
       items: { type: "json" },
       description:
-        "animate_scene: scene shapes in coordinates LOCAL to the command box. circle{id,cx,cy,r} | ellipse{id,cx,cy,rx,ry} | rect{id,x,y,w,h} | line{id,x1,y1,x2,y2} | path{id,points:[[x,y],…] or d:'M x y L …'} | text{id,x,y,text,fontSize,align} | group{id,x,y,children:[ids]}. Each needs type and a unique id (letter then [A-Za-z0-9_-]). Overlays on the user's drawing carry only the moving parts — no background walls or rects.",
+        "draw: shape list rasterized to whiteboard ink without calculating manual points (line{x1,y1,x2,y2}, rect{x,y,w,h}, circle{cx,cy,r}, path{d:'M...'}); OR animate_scene: local scene shapes circle|ellipse|rect|line|path|text|group with unique id.",
     },
     motions: {
       type: "array",
