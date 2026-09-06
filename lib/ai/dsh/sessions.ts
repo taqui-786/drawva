@@ -14,6 +14,7 @@ import { buildConnectionProfile } from "./profiles";
 import { credentialRefFor, stageConnectionCredential } from "./credentials";
 import { registerConversationTools } from "./tools";
 import { cancelConversationCalls, setBridgeDispatcher } from "./bridge";
+import { CANVAS_DECISION_FEEDBACK_TOOL, isDecisionFeedbackCall, pruneDecisionFeedback } from "./admission";
 
 export interface TurnImage {
   id: string;
@@ -325,13 +326,28 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
     return;
   }
   if (type === "assistant/message") {
-    const message = payload.message as { content?: { type?: string; text?: string }[] } | undefined;
+    const message = payload.message as
+      | { content?: { type?: string; text?: string; name?: string; id?: unknown }[] }
+      | undefined;
     const usage = payload.usage as { inputTokens?: number; outputTokens?: number } | undefined;
     const blocks = Array.isArray(message?.content) ? message.content : [];
+    const feedbackOnly =
+      blocks.some(
+        (block) =>
+          block?.type === "tool-call" &&
+          (block.name === CANVAS_DECISION_FEEDBACK_TOOL || isDecisionFeedbackCall(String(block.id || "")))
+      ) && !blocks.some((block) => block?.type === "text" && block.text?.trim());
+    if (feedbackOnly) return;
+
     for (const block of blocks) {
-      if (block?.type === "text" && block.text && !conversation.lastText.endsWith(block.text)) {
-        conversation.lastText += block.text;
-        emit({ event: "text_delta", data: { text: block.text } });
+      if (block?.type === "text" && block.text) {
+        if (!conversation.lastText) {
+          conversation.lastText = block.text;
+          emit({ event: "text_delta", data: { text: block.text } });
+        } else if (!conversation.lastText.endsWith(block.text) && !conversation.lastText.includes(block.text)) {
+          conversation.lastText += `\n${block.text}`;
+          emit({ event: "text_delta", data: { text: `\n${block.text}` } });
+        }
       } else if (block?.type === "reasoning" && block.text) {
         conversation.lastReasoning += block.text;
       }
@@ -342,6 +358,9 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
     return;
   }
   if (type === "tool/call") {
+    const callName = (payload as { name?: string }).name;
+    const callId = String((payload as { callId?: unknown }).callId || "");
+    if (callName === CANVAS_DECISION_FEEDBACK_TOOL || isDecisionFeedbackCall(callId)) return;
     conversation.lastText = "";
     conversation.lastReasoning = "";
     return;
@@ -349,6 +368,10 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
   if (type === "tool/result") {
     const message = payload.message as { content?: { toolCallId?: unknown }[] } | undefined;
     const toolCallId = String(message?.content?.[0]?.toolCallId || "");
+    if (isDecisionFeedbackCall(toolCallId)) {
+      pruneDecisionFeedback(toolCallId);
+      return;
+    }
     const failed = payload.error !== undefined && payload.error !== null;
     emit({ event: "tool_end", data: { toolCallId, ok: !failed } });
     return;

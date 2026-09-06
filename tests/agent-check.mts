@@ -1199,6 +1199,110 @@ const SEARCH_TOOL_NAMES = [
   "stock_market_data",
 ];
 
+await test("D11 DSH profile enforces maxTokens = 35_786 and deepseek compat", async () => {
+  const { buildConnectionProfile } = await import("../lib/ai/dsh/profiles");
+  const result = buildConnectionProfile({
+    connectionId: "conn-test",
+    providerType: "custom",
+    baseUrl: "https://integrate.api.nvidia.com/v1",
+    model: "muse-spark-1.2-contributor-free",
+    credential: "CRED_TEST" as never,
+  });
+  assert.equal(result.profile.maxTokens, 35_786);
+  const providers = result.settingsPatch.providers as Record<
+    string,
+    { models: Array<{ maxTokens: number; compat: unknown }> }
+  >;
+  const providerCfg = providers[result.profile.route];
+  assert.equal(providerCfg.models[0].maxTokens, 35_786);
+  assert.deepEqual(providerCfg.models[0].compat, {
+    thinkingFormat: "deepseek",
+    supportsReasoningEffort: false,
+  });
+});
+
+await test("D12 DSH decision admission permits valid single tool call", async () => {
+  const { admitCanvasDecision } = await import("../lib/ai/dsh/admission");
+  const dec = admitCanvasDecision({
+    blocks: [
+      { type: "tool-call", id: "call-1" as never, name: "canvas_apply", arguments: '{"commands":[]}' },
+    ],
+    availableTools: ["canvas_apply"],
+  });
+  assert.equal(dec.kind, "tool-call");
+  if (dec.kind !== "tool-call") throw new Error("expected tool-call");
+  assert.equal(dec.block.name, "canvas_apply");
+});
+
+await test("D13 DSH decision admission rejects multiple tool calls in one step and emits feedback", async () => {
+  const { admitCanvasDecision, canvasDecisionFeedbackResult } = await import("../lib/ai/dsh/admission");
+  const dec = admitCanvasDecision({
+    blocks: [
+      { type: "tool-call", id: "call-1" as never, name: "canvas_apply", arguments: '{"commands":[]}' },
+      { type: "tool-call", id: "call-2" as never, name: "canvas_snapshot", arguments: "{}" },
+    ],
+    availableTools: ["canvas_apply", "canvas_snapshot"],
+  });
+  assert.equal(dec.kind, "feedback");
+  if (dec.kind !== "feedback") throw new Error("expected feedback");
+  assert.equal(dec.block.name, "drawva_canvas_decision_feedback");
+  assert.equal(JSON.parse(dec.block.arguments).code, "CANVAS_ONE_TOOL_PER_STEP");
+  const fb = canvasDecisionFeedbackResult({
+    name: dec.block.name,
+    callId: dec.block.id,
+  });
+  assert.ok(fb?.isError);
+  assert.ok(fb?.error.message.includes("allows at most one tool call per model step"));
+});
+
+await test("D14 DSH decision admission rejects command name called as tool and suggests canvas_apply", async () => {
+  const { admitCanvasDecision, canvasDecisionFeedbackResult } = await import("../lib/ai/dsh/admission");
+  const dec = admitCanvasDecision({
+    blocks: [
+      { type: "tool-call", id: "call-1" as never, name: "html_widget", arguments: "{}" },
+    ],
+    availableTools: ["canvas_apply"],
+  });
+  assert.equal(dec.kind, "feedback");
+  if (dec.kind !== "feedback") throw new Error("expected feedback");
+  assert.equal(JSON.parse(dec.block.arguments).code, "CANVAS_COMMAND_NOT_TOOL");
+  const fb = canvasDecisionFeedbackResult({
+    name: dec.block.name,
+    callId: dec.block.id,
+  });
+  assert.ok(fb?.isError);
+  assert.ok(fb?.error.message.includes("is a canvas command, not a top-level tool"));
+});
+
+await test("D15 DSH decision stream intercepts token limit cutoff and emits feedback", async () => {
+  const { admitCanvasAgentDecisionStream } = await import("../lib/ai/dsh/admission");
+  async function* makeTruncatedStream() {
+    yield { type: "block-start", index: 0, blockType: "tool-call" };
+    yield {
+      type: "tool-call-delta",
+      index: 0,
+      id: "call_1",
+      name: "canvas_apply",
+      argumentsDelta: '{"commands":',
+    };
+    yield { type: "finish", reason: { kind: "max-tokens" } };
+  }
+
+  const emitted: Array<{ type: string; name?: string; argumentsDelta?: string; reason?: { kind: string } }> = [];
+  for await (const chunk of admitCanvasAgentDecisionStream(makeTruncatedStream() as never, {
+    availableTools: ["canvas_apply"],
+  })) {
+    emitted.push(chunk as never);
+  }
+
+  const toolDelta = emitted.find((c) => c.type === "tool-call-delta");
+  assert.ok(toolDelta, "must emit feedback tool call delta");
+  assert.equal(toolDelta.name, "drawva_canvas_decision_feedback");
+  assert.equal(toolDelta.argumentsDelta, '{"code":"CANVAS_TOOL_DECISION_INCOMPLETE"}');
+  const finish = emitted.find((c) => c.type === "finish");
+  assert.deepEqual(finish?.reason, { kind: "tool-calls" });
+});
+
 let conversationSeq = 0;
 const freshConversation = () => `t${Date.now().toString(36)}${(conversationSeq += 1)}`;
 

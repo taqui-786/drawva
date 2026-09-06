@@ -5,6 +5,7 @@ import { AGENT_TOOL_DEFS, enabledToolNames, type AgentToolDef } from "../agentTo
 import { dispatchBridgeCall } from "./bridge";
 import { loadVisualSkillDocument } from "../visualSkills.server";
 import { isVisualSkillId, validateVisualSkillMarkup } from "../visualSkills";
+import { CANVAS_DECISION_FEEDBACK_TOOL, canvasDecisionFeedbackResult } from "./admission";
 
 export const TOOL_TIMEOUT_MS = 45_000;
 const MAX_RESULT_CHARS = 100_000;
@@ -42,6 +43,38 @@ export function registerConversationTools(agentCtx: Context, hooks: Conversation
     schema: { type: "json" } as const,
     render: (_args: never, value: never) => [{ type: "text" as const, text: boundedJson(value) }],
   };
+
+  const feedbackTool: LooseToolDef = {
+    name: CANVAS_DECISION_FEEDBACK_TOOL,
+    description: "Drawva Agent internal decision feedback channel.",
+    parameters: {
+      code: { type: "string", description: "Feedback code" },
+    },
+    output,
+    timeoutMs: 5000,
+    isConcurrencySafe: () => true,
+    execute: (async (_args: never, exec: { callId: unknown }) => {
+      const fbResult = canvasDecisionFeedbackResult({
+        name: CANVAS_DECISION_FEEDBACK_TOOL,
+        callId: exec.callId,
+      });
+      if (fbResult) {
+        const err = new Error(fbResult.error.message);
+        Object.assign(err, fbResult.error.info);
+        throw err;
+      }
+      throw new Error("Decision rejected.");
+    }) as LooseToolDef["execute"],
+  };
+  agentCtx.tools.register(defineTool(feedbackTool as never));
+
+  agentCtx.on("tools/execute", (exec, next) => {
+    if (exec?.name === CANVAS_DECISION_FEEDBACK_TOOL) {
+      const fbResult = canvasDecisionFeedbackResult(exec);
+      if (fbResult) return Promise.resolve(fbResult as never);
+    }
+    return next();
+  });
 
   const execute = (name: string) =>
     name === "load_plugin"

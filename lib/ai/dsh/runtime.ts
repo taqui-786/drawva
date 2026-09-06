@@ -1,6 +1,6 @@
 import { Context, type Plugin } from "@deepseek-ai/cordis";
 import Timer from "@deepseek-ai/cordis-plugin-timer";
-import LlmRuntime from "@deepseek-ai/dsh-llm";
+import LlmRuntime, { isAgentLoopRequest } from "@deepseek-ai/dsh-llm";
 import * as LlmRetry from "@deepseek-ai/dsh-llm-retry";
 import * as PiAi from "@deepseek-ai/dsh-llm-pi-ai";
 import SessionStore from "@deepseek-ai/dsh-session";
@@ -18,6 +18,7 @@ import * as ToolCallTimeoutPolicy from "@deepseek-ai/dsh-tool-call-timeout-polic
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import * as DrawvaCredentials from "./credentials";
+import { admitCanvasAgentDecisionStream } from "./admission";
 
 const PLUGIN_ALLOWLIST = new Set([
   "timer",
@@ -75,6 +76,19 @@ async function boot(): Promise<Context> {
   await mount("tool-result-pruner", ToolResultPruner, { thresholdChars: 8192, headChars: 4096, tailChars: 1024 });
   await mount("compaction-basic", BasicCompaction, { thresholdRatio: 0.625, retainRatio: 0.16, maxTokens: 4096 });
   await mount("tool-call-timeout-policy", ToolCallTimeoutPolicy, { timeoutMs: 45_000 });
+
+  context.on(
+    "llm/stream",
+    (options, next) => {
+      const opts = options as { purpose?: unknown; tools?: { name?: string }[] };
+      if (!isAgentLoopRequest(options as never) || opts.purpose) return next();
+      return admitCanvasAgentDecisionStream(next(), {
+        availableTools: (opts.tools || []).map((tool) => String(tool?.name || "")).filter(Boolean),
+      });
+    },
+    { global: true }
+  );
+
   return context;
 }
 

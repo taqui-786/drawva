@@ -210,6 +210,14 @@ function widgetTitleOf(args: unknown): string {
   return "";
 }
 
+function isPreambleText(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 5) return false;
+  return /^(?:I will|I'll|Let me|I am going to|Now I will|I am building|Let's build|I will build|Here is what I will|I will create)\b/i.test(
+    t
+  );
+}
+
 class TurnAborted extends Error {
   constructor() {
     super("Turn aborted.");
@@ -496,17 +504,22 @@ export class Conductor {
         return;
       }
       finalText = turnResult.text || "";
+      const isUnfulfilledPlan = !policy.mutated && policy.steps > 0 && isPreambleText(finalText);
       if (finalText.trim() && !policy.mutated) {
-        await this.writeAnswerToCanvas(finalText, gen, policy, stepsLog);
-        if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
+        if (!isUnfulfilledPlan) {
+          await this.writeAnswerToCanvas(finalText, gen, policy, stepsLog);
+          if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
+        }
       }
 
-      if (!policy.mutated && !finalText.trim()) {
-          const errorMsg = turnResult.reasoningOnly
-          ? "The model finished thinking but never wrote an answer or called a tool. Retry, or pick a model with stronger tool-calling support in Settings."
-          : policy.steps > 0
-            ? "The model ran tools but never produced a final answer. Retry — the canvas is unchanged."
-            : "The AI model returned an empty response with no output. Please try again or switch model in Settings.";
+      if (!policy.mutated && (!finalText.trim() || isUnfulfilledPlan)) {
+        const errorMsg = isUnfulfilledPlan
+          ? "The model planned canvas actions but finished prematurely before applying them. Please retry."
+          : turnResult.reasoningOnly
+            ? "The model finished thinking but never wrote an answer or called a tool. Retry, or pick a model with stronger tool-calling support in Settings."
+            : policy.steps > 0
+              ? "The model ran tools but never produced a final answer. Retry — the canvas is unchanged."
+              : "The AI model returned an empty response with no output. Please try again or switch model in Settings.";
         this.emit({ kind: "turn_end", reason: "error", error: errorMsg });
 
         const config = this.deps.provider() ?? getProviderConfig();

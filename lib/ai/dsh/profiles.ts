@@ -65,7 +65,7 @@ export function buildConnectionProfile(options: {
         route: "anthropic",
         model,
         reasoningEffort: piAiReasoningEffort(model, true, options.effort),
-        maxTokens: 8192,
+        maxTokens: 35_786,
       },
     };
   }
@@ -77,6 +77,11 @@ export function buildConnectionProfile(options: {
     headers["HTTP-Referer"] = "https://drawva.app";
     headers["X-Title"] = "Drawva";
   }
+  const hasReasoningEffort = Boolean(piAiReasoningEffort(model, false, options.effort));
+  const compat = hasReasoningEffort
+    ? { supportsReasoningEffort: true }
+    : { thinkingFormat: "deepseek", supportsReasoningEffort: false };
+
   return {
     settingsPatch: {
       providers: {
@@ -90,7 +95,8 @@ export function buildConnectionProfile(options: {
               id: model,
               input: ["text", "image"],
               contextWindow: 160_000,
-              maxTokens: 8192,
+              maxTokens: 35_786,
+              compat,
             },
           ],
           defaultInput: ["text", "image"],
@@ -102,7 +108,7 @@ export function buildConnectionProfile(options: {
       route,
       model,
       reasoningEffort: piAiReasoningEffort(model, false, options.effort),
-      maxTokens: 8192,
+      maxTokens: 35_786,
     },
   };
 }
