@@ -257,6 +257,69 @@ export const AGENT_TOOL_DEFS: AgentToolDef[] = [
     },
   },
   {
+    name: "sketchnote",
+    description:
+      "Create a hand-drawn visual sketchnote using native ink and text on the whiteboard (no HTML widgets). " +
+      "Use when the user requests a sketchnote, visual note-taking, concept doodles, or whiteboard summary. " +
+      "Provide semantic sections, optional icons (lightbulb, brain, gear, person, star, book, rocket, target, check, magnifier, heart, cloud, bolt, database, lock), containers (box, cloud, bubble, banner, underline), and optional connectors.",
+    parameters: {
+      baseRevision: baseRevisionSpec,
+      title: { type: "string", required: true, description: "Main title (max 80 chars)" },
+      subtitle: { type: "string", description: "Subtitle or topic attribution" },
+      layout: {
+        type: "string",
+        enum: ["modular", "flowing", "radial", "columns", "timeline"],
+        description: "Layout mode (default: modular)",
+      },
+      palette: {
+        type: "string",
+        enum: ["mono", "cool", "warm", "vibrant", "pastel"],
+        description: "Color palette (default: cool)",
+      },
+      visualDiagram: {
+        type: "object",
+        additionalProperties: true,
+        description:
+          "Hero visual diagram. For math/physics/ML/systems topics, specify diagram type: 'surface_3d' | 'loss_surface' | 'complex_plane' | 'unit_circle' | 'network' | 'neural_network' | 'cycle' | 'flow' | 'custom'.",
+        properties: {
+          type: {
+            type: "string",
+            enum: [
+              "surface_3d",
+              "loss_surface",
+              "complex_plane",
+              "unit_circle",
+              "network",
+              "neural_network",
+              "cycle",
+              "flow",
+              "custom",
+            ],
+            description: "Diagram type",
+          },
+          title: { type: "string", description: "Diagram caption" },
+          annotation: { type: "string", description: "Formula or takeaway note" },
+        },
+      },
+      sections: {
+        type: "array",
+        required: true,
+        items: { type: "json" },
+        description:
+          "Sections: { id: string, heading: string, bullets?: string[], icon?: string, container?: 'box'|'cloud'|'bracket'|'burst'|'underline'|'none', accentColor?: 'red'|'yellow'|'blue'|'green'|'black', highlightWord?: string, listStyle?: 'bullet'|'number' }",
+      },
+      connectors: {
+        type: "array",
+        items: { type: "json" },
+        description: "Connectors: { from: string, to: string, label?: string, style?: 'arrow'|'dashed' }",
+      },
+      placement: { type: "string", enum: [...PLACEMENTS], description: "Placement hint relative to handwriting" },
+      x: { type: "number", description: "World X" },
+      y: { type: "number", description: "World Y" },
+      w: { type: "number", description: "Width in world units (default: 2400)" },
+    },
+  },
+  {
     name: "load_visual_skill",
     description:
       "Load one scientific visualization contract (math-2d, physics-2d, or math-3d) into the durable system prompt before authoring a matching Visual Explainer. Required before a manim-web Visual Explainer. Do not load for unrelated subjects.",

@@ -5,10 +5,12 @@
 import assert from "node:assert";
 import {
   formatThinkingStream,
+  isStreamingThought,
   pickStandPoint,
   resolveThoughtText,
   routeAround,
   segmentHitsRect,
+  wrapThoughtLines,
 } from "../lib/canvas/agentCharacter";
 
 const reasoning = "The user drew a login box. I should inspect the board, then place a flowchart to the right of the ink.";
@@ -61,6 +63,14 @@ const spoken = formatThinkingStream(longReasoning, 160);
 assert.ok(spoken.startsWith("…"), "speech window should keep the tail of a long reasoning stream");
 assert.ok(spoken.includes("step39"), "newest reasoning tokens must remain visible on the bubble");
 assert.ok(!spoken.includes("step0"), "oldest reasoning tokens should fall off the bubble window");
+
+assert.equal(isStreamingThought({ turnActive: true, thinkingBuffer: "evaluating coords" }), true);
+assert.equal(isStreamingThought({ turnActive: false, thinkingBuffer: "evaluating coords" }), false);
+assert.equal(isStreamingThought({ turnActive: true, thinkingBuffer: "   " }), false);
+
+const wrapped = wrapThoughtLines("first second third fourth fifth sixth seventh eighth ninth tenth", 100, 3, null);
+assert.ok(wrapped.length <= 3, "wrapped lines should not exceed maxLines");
+assert.ok(wrapped[wrapped.length - 1].includes("tenth"), "tail line must include newest token");
 
 const box = { x: 100, y: 100, w: 100, h: 100 };
 const leftStand = pickStandPoint({ x: 40, y: 150 }, box, 24);

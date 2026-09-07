@@ -27,6 +27,13 @@ import {
   VISUAL_EXPLAINER_FRAMEWORK_VERSION,
   VISUAL_EXPLAINER_SOURCE_FORMAT,
 } from "./visualExplainer";
+import {
+  renderSketchnote,
+  type SketchnoteSpec,
+  type SketchnoteSection,
+  type SketchnoteConnector,
+  type SketchnoteVisualDiagram,
+} from "@/lib/canvas/sketchnoteRenderer";
 
 export interface ActiveImage {
   id: string;
@@ -607,6 +614,91 @@ async function execVisualExplainer(args: Record<string, unknown>, deps: Conducto
   );
 }
 
+async function execSketchnote(args: Record<string, unknown>, deps: ConductorToolDeps) {
+  const title = typeof args.title === "string" ? args.title.trim().slice(0, 120) : "";
+  if (!title) return toolError("INVALID_ARGUMENT", "sketchnote.title is required.");
+  const rawSections = Array.isArray(args.sections) ? (args.sections as unknown[]) : [];
+  if (!rawSections.length) return toolError("INVALID_ARGUMENT", "sketchnote.sections[] is required.");
+  const sections: SketchnoteSection[] = [];
+  for (const entry of rawSections.slice(0, 10)) {
+    if (!entry || typeof entry !== "object") continue;
+    const rec = entry as Record<string, unknown>;
+    const heading = typeof rec.heading === "string" ? rec.heading.trim() : "";
+    if (!heading) continue;
+    sections.push({
+      id: typeof rec.id === "string" && rec.id.trim() ? rec.id.trim() : `sec-${sections.length + 1}`,
+      heading,
+      bullets: Array.isArray(rec.bullets)
+        ? rec.bullets.filter((b): b is string => typeof b === "string" && b.trim().length > 0).slice(0, 8)
+        : undefined,
+      icon: typeof rec.icon === "string" ? rec.icon : undefined,
+      container: typeof rec.container === "string" ? rec.container : undefined,
+      emphasis: typeof rec.emphasis === "string" ? (rec.emphasis as SketchnoteSection["emphasis"]) : undefined,
+      accentColor: typeof rec.accentColor === "string" ? rec.accentColor : undefined,
+      highlightWord: typeof rec.highlightWord === "string" ? rec.highlightWord : undefined,
+      listStyle: typeof rec.listStyle === "string" ? (rec.listStyle as SketchnoteSection["listStyle"]) : undefined,
+    });
+  }
+  if (!sections.length) return toolError("INVALID_ARGUMENT", "sketchnote.sections[] needs at least one entry with a heading.");
+
+  let x = Number(args.x);
+  let y = Number(args.y);
+  const inkBox = deps.getInkBox?.();
+  if (inkBox) {
+    if (!Number.isFinite(x) || x < inkBox.x - 400 || x > inkBox.x + inkBox.w + 400) {
+      x = inkBox.x;
+    }
+    if (!Number.isFinite(y) || y < inkBox.y + inkBox.h + 40) {
+      y = Math.round(inkBox.y + inkBox.h + 80);
+    }
+  } else if (!Number.isFinite(x) || !Number.isFinite(y)) {
+    const view = deps.camera.viewportRect;
+    x = Math.round(view.x + 80);
+    y = Math.round(view.y + 80);
+  }
+  x = Math.max(0, Math.min(18000, Math.round(x)));
+  y = Math.max(0, Math.min(18000, Math.round(y)));
+
+  const w = Number.isFinite(Number(args.w)) ? Math.max(1200, Math.min(6000, Number(args.w))) : 2400;
+
+  const spec: SketchnoteSpec = {
+    title,
+    subtitle: typeof args.subtitle === "string" ? args.subtitle.slice(0, 200) : undefined,
+    layout: typeof args.layout === "string" ? args.layout : undefined,
+    palette: typeof args.palette === "string" ? args.palette : undefined,
+    visualDiagram: args.visualDiagram && typeof args.visualDiagram === "object" ? (args.visualDiagram as SketchnoteVisualDiagram) : undefined,
+    sections,
+    connectors: Array.isArray(args.connectors) ? (args.connectors as SketchnoteConnector[]) : undefined,
+    x,
+    y,
+    w,
+  };
+
+  const commands = renderSketchnote(spec);
+  const MAX_SKETCH_COMMANDS = 220;
+  const trimmed = commands.length > MAX_SKETCH_COMMANDS ? commands.slice(0, MAX_SKETCH_COMMANDS) : commands;
+  const BATCH_SIZE = 14;
+  let totalApplied = 0;
+  for (let i = 0; i < trimmed.length; i += BATCH_SIZE) {
+    const batch = trimmed.slice(i, i + BATCH_SIZE);
+    const res = await execApply(
+      {
+        baseRevision: deps.getRevision(),
+        commands: batch,
+      },
+      deps
+    );
+    if (res && typeof res === "object" && "code" in res) {
+      return res;
+    }
+    if (res && typeof res === "object" && Array.isArray((res as { applied?: unknown[] }).applied)) {
+      totalApplied += (res as { applied: unknown[] }).applied.length;
+    }
+  }
+
+  return { ok: true, revision: deps.getRevision(), appliedCount: totalApplied, message: `Rendered sketchnote with ${totalApplied} elements.` };
+}
+
 function canonicalEditOp(rec: Record<string, unknown>): string {
   const raw = String(rec.op ?? rec.kind ?? rec.type ?? rec.operation ?? rec.action ?? "")
     .trim()
@@ -972,6 +1064,8 @@ export async function executeTool(
       return execApply(rec, deps);
     case "visual_explainer":
       return execVisualExplainer(rec, deps);
+    case "sketchnote":
+      return execSketchnote(rec, deps);
     case "canvas_edit":
       return execEdit(rec, deps);
     case "load_plugin":

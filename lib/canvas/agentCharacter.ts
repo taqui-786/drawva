@@ -68,6 +68,8 @@ interface Character {
   turnActive: boolean;
   completedCount: number;
   idleSince: number;
+  lastFollowPos: { x: number; y: number } | null;
+  followGlide: boolean;
 }
 
 const READ_TOOLS = new Set(["canvas_scan", "canvas_snapshot", "canvas_read", "canvas_focus"]);
@@ -271,7 +273,7 @@ export function cleanSpeechText(raw: string): string {
   return text;
 }
 
-export function formatThinkingStream(raw: string, maxLen = 58): string {
+export function formatThinkingStream(raw: string, maxLen = 140): string {
   if (!raw) return "Thinking…";
   let cleaned = raw
     .replace(/```[\s\S]*?```/g, "")
@@ -286,7 +288,7 @@ export function formatThinkingStream(raw: string, maxLen = 58): string {
   if (cleaned.length > maxLen) {
     const start = cleaned.length - maxLen;
     const spaceIdx = cleaned.indexOf(" ", start);
-    if (spaceIdx !== -1 && spaceIdx < start + 12) {
+    if (spaceIdx !== -1 && spaceIdx < start + 16) {
       cleaned = `…${cleaned.slice(spaceIdx + 1).trim()}`;
     } else {
       cleaned = `…${cleaned.slice(start).trim()}`;
@@ -295,7 +297,63 @@ export function formatThinkingStream(raw: string, maxLen = 58): string {
   return cleaned;
 }
 
-function isStreamingThought(ch: { turnActive: boolean; thinkingBuffer: string }): boolean {
+export function wrapThoughtLines(
+  text: string,
+  maxW: number,
+  maxLines: number,
+  measureCtx: CanvasRenderingContext2D | null,
+  font?: string
+): string[] {
+  if (!text) return [];
+  if (measureCtx && font) measureCtx.font = font;
+
+  const words = text.replace(/\s+/g, " ").trim().split(" ");
+  const allLines: string[] = [];
+  let current = "";
+
+  for (const word of words) {
+    if (!word) continue;
+    let remWord = word;
+    if (measureCtx) {
+      while (measureCtx.measureText(remWord).width > maxW && remWord.length > 1) {
+        let cut = remWord.length - 1;
+        while (cut > 1 && measureCtx.measureText(remWord.slice(0, cut)).width > maxW) {
+          cut--;
+        }
+        const part = remWord.slice(0, cut);
+        remWord = remWord.slice(cut);
+        if (current) {
+          allLines.push(current);
+          current = "";
+        }
+        allLines.push(part);
+      }
+    }
+
+    const test = current ? `${current} ${remWord}` : remWord;
+    const fits = measureCtx ? measureCtx.measureText(test).width <= maxW : test.length <= 32;
+    if (fits) {
+      current = test;
+    } else {
+      if (current) allLines.push(current);
+      current = remWord;
+    }
+  }
+  if (current) allLines.push(current);
+
+  if (allLines.length <= maxLines) {
+    return allLines;
+  }
+
+  // To display live streaming chunks, show the most recent lines (the tail)
+  const visible = allLines.slice(-maxLines);
+  if (!visible[0].startsWith("…") && !visible[0].startsWith("...")) {
+    visible[0] = `…${visible[0]}`;
+  }
+  return visible;
+}
+
+export function isStreamingThought(ch: { turnActive: boolean; thinkingBuffer: string }): boolean {
   return ch.turnActive && Boolean(ch.thinkingBuffer.trim());
 }
 
@@ -382,22 +440,26 @@ export class AgentCharacterController {
         const dt = clamp((now - this.lastT) / 1000, 0, 0.05);
         this.lastT = now;
         const cam = engine.camera;
-        ctx.setTransform(1, 0, 0, 1, 0, 0);
-        ctx.clearRect(0, 0, w, h);
-        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        ctx.save();
-        ctx.translate(cam.panX, cam.panY);
-        ctx.scale(cam.scale, cam.scale);
         const dead: string[] = [];
+        let cameraFollowed = false;
         for (const ch of this.chars.values()) {
           this.updateCharacter(ch, dt, now);
           if (ch.fadingOut && ch.alpha <= 0) {
             dead.push(ch.id);
             continue;
           }
-          this.drawCharacter(ctx, ch, now);
+          if (!cameraFollowed) cameraFollowed = this.followWithCamera(ch, dt);
         }
         for (const id of dead) this.chars.delete(id);
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.save();
+        ctx.translate(cam.panX, cam.panY);
+        ctx.scale(cam.scale, cam.scale);
+        for (const ch of this.chars.values()) {
+          this.drawCharacter(ctx, ch, now);
+        }
         ctx.restore();
       }
     }
@@ -590,6 +652,9 @@ export class AgentCharacterController {
       ch.dragging = false;
       ch.narration = this.dragNarration;
       ch.speech = this.dragSpeech;
+      // A user drag is camera input, not character motion — never chase it.
+      ch.lastFollowPos = { x: ch.pos.x, y: ch.pos.y };
+      ch.followGlide = false;
       if (this.dragStartPos) {
         const dist = Math.hypot(ch.pos.x - this.dragStartPos.x, ch.pos.y - this.dragStartPos.y);
         const dur = performance.now() - this.dragStartTime;
@@ -1035,6 +1100,8 @@ export class AgentCharacterController {
       turnActive: true,
       completedCount: 0,
       idleSince: 0,
+      lastFollowPos: null,
+      followGlide: false,
     };
     this.dispatchToTarget(ch, target, "thinking");
     return ch;
@@ -1051,6 +1118,54 @@ export class AgentCharacterController {
     const engine = this.deps.engine;
     const target = engine.cssWidth > 0 && engine.cssWidth < 640 ? SPRITE_W * 2 : SPRITE_W * 3;
     return clamp(target / (engine.camera.scale || 1), SPRITE_W, 6000);
+  }
+
+  /**
+   * Auto camera follow: when a character moves outside the user's view, glide
+   * the camera (pan only, zoom untouched) so the character stays on screen.
+   * Follows only while the character itself moves or a glide is still settling;
+   * if the user pans or zooms away from a stationary character, the camera
+   * stays under their control.
+   */
+  private followWithCamera(ch: Character, dt: number): boolean {
+    if (ch.dragging || ch.fadingOut) return false;
+    const cam = this.deps.engine.camera;
+    const view = cam.visibleWorldRect();
+    if (view.w <= 0 || view.h <= 0) return false;
+
+    const prev = ch.lastFollowPos;
+    const moved = prev ? Math.hypot(ch.pos.x - prev.x, ch.pos.y - prev.y) : 0;
+    const stationary = prev ? moved < 1.5 : false;
+    ch.lastFollowPos = { x: ch.pos.x, y: ch.pos.y };
+
+    const charW = this.charWorldWidth();
+    const charH = charW * (SPRITE_H / SPRITE_W);
+    // Margin keeps the sprite plus its bubble comfortably inside the frame.
+    const marginX = charW * 0.8;
+    const marginY = charH * 1.6;
+    // Below this much residual shift the glide is considered settled.
+    const settleX = Math.max(1, charW * 0.02);
+    const settleY = Math.max(1, charH * 0.02);
+
+    let shiftX = 0;
+    let shiftY = 0;
+    if (ch.pos.x < view.x + marginX) shiftX = ch.pos.x - (view.x + marginX);
+    else if (ch.pos.x > view.x + view.w - marginX) shiftX = ch.pos.x - (view.x + view.w - marginX);
+    if (ch.pos.y - charH < view.y + marginY) shiftY = ch.pos.y - charH - (view.y + marginY);
+    else if (ch.pos.y > view.y + view.h - charH * 0.3) shiftY = ch.pos.y - (view.y + view.h - charH * 0.3);
+
+    const settling = Math.abs(shiftX) > settleX || Math.abs(shiftY) > settleY;
+    if (!settling) return false;
+    // A stationary out-of-view character is never chased — the user controls the camera.
+    if (stationary && ch.state !== "walking" && !ch.followGlide) return false;
+    ch.followGlide = settling;
+
+    // Convert the world shift to CSS pixels and ease toward it.
+    const scale = cam.scale || 1;
+    const k = this.reduced ? 1 : clamp(dt * 6, 0, 1);
+    cam.panBy(-shiftX * scale * k, -shiftY * scale * k);
+    this.deps.engine.requestRender();
+    return true;
   }
 
   private updateCharacter(ch: Character, dt: number, now: number): void {
@@ -1131,14 +1246,9 @@ export class AgentCharacterController {
   }
 
   private streamThoughtToBubble(ch: Character): void {
+    ch.speech = null;
     const thought = formatThinkingStream(ch.thinkingBuffer);
-    const spoken = formatThinkingStream(ch.thinkingBuffer, 160);
     ch.narration = thought;
-    ch.speech = {
-      text: spoken,
-      since: performance.now(),
-      duration: 20000,
-    };
   }
 
   private standsBesideBoard(ch: Character): boolean {
@@ -1421,38 +1531,23 @@ export class AgentCharacterController {
     }
     const scale = this.deps.engine.camera.scale || 1;
     const fs = clamp(11 / scale, 4, 400);
-    const lineH = fs * 1.3;
-    const pad = fs * 0.6;
-    const maxW = clamp(185 / scale, fs * 8, 8000);
+    const lineH = fs * 1.35;
+    const pad = fs * 0.65;
+    const maxW = clamp(230 / scale, fs * 10, 6000);
     const font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    const lines: string[] = [];
+    const lines = wrapThoughtLines(thought, maxW, 3, measureCtx, font);
+    if (lines.length === 0) return null;
+
+    let maxLineWidth = fs * 4;
     if (measureCtx) {
       measureCtx.font = font;
-      let rest = thought.replace(/\s+/g, " ").trim();
-      while (rest && lines.length < 2) {
-        let take = rest;
-        while (take.length > 1 && measureCtx.measureText(take).width > maxW) {
-          take = take.slice(0, -1);
-        }
-        if (take.length > 1) {
-          const sp = take.lastIndexOf(" ");
-          if (sp > 0) take = take.slice(0, sp);
-        }
-        lines.push(take);
-        rest = rest.slice(take.length).trim();
+      for (const line of lines) {
+        const lw = measureCtx.measureText(line).width;
+        if (lw > maxLineWidth) maxLineWidth = lw;
       }
-      if (rest) {
-        const last = lines[lines.length - 1] || "";
-        let candidate = `${last.slice(0, Math.max(0, last.length - 1))}…`;
-        while (candidate.length > 1 && measureCtx.measureText(candidate).width > maxW) {
-          candidate = `${candidate.slice(0, Math.max(0, candidate.length - 2))}…`;
-        }
-        lines[lines.length - 1] = candidate;
-      }
-    } else {
-      lines.push("", "");
     }
-    const w = Math.max(fs * 3, maxW) + pad * 2;
+
+    const w = Math.min(maxW, maxLineWidth) + pad * 2;
     const charW = this.charWorldWidth();
     const charH = charW * (SPRITE_H / SPRITE_W);
     const hasGlyph = ch.state === "celebrating" || ch.state === "working" || ch.state === "sad" || ch.state === "stumble";
@@ -1549,7 +1644,9 @@ export class AgentCharacterController {
     else if (ch.state === "working") this.drawGlyph(ctx, ch, "working", now);
     else if (ch.state === "sad" || ch.state === "stumble") this.drawGlyph(ctx, ch, "error", now);
 
-    if (ch.speech && now - ch.speech.since <= ch.speech.duration) {
+    if (isStreamingThought(ch)) {
+      this.drawThoughtBubble(ctx, ch);
+    } else if (ch.speech && now - ch.speech.since <= ch.speech.duration) {
       this.drawSpeechBubble(ctx, ch);
     } else {
       this.drawThoughtBubble(ctx, ch);

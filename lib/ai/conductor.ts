@@ -504,13 +504,9 @@ export class Conductor {
         return;
       }
       finalText = turnResult.text || "";
+      // The final agent message is shown only via the agent character speech bubble
+      // (turn_end event) — it is never written onto the canvas by this client loop.
       const isUnfulfilledPlan = !policy.mutated && policy.steps > 0 && isPreambleText(finalText);
-      if (finalText.trim() && !policy.mutated) {
-        if (!isUnfulfilledPlan) {
-          await this.writeAnswerToCanvas(finalText, gen, policy, stepsLog);
-          if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
-        }
-      }
 
       if (!policy.mutated && (!finalText.trim() || isUnfulfilledPlan)) {
         const errorMsg = isUnfulfilledPlan
@@ -884,54 +880,6 @@ export class Conductor {
     return out;
   }
 
-  private async writeAnswerToCanvas(
-    text: string,
-    gen: number,
-    policy: TurnPolicy,
-    stepsLog: AiLogStep[]
-  ): Promise<void> {
-    const ink = this.deps.getInkBox?.() ?? null;
-    const view = this.deps.camera.visibleWorldRect();
-    const anchor = ink && ink.w > 4 && ink.h > 4 ? ink : null;
-    const args = {
-      baseRevision: this.deps.getRevision(),
-      commands: [
-        {
-          tool: "write_text",
-          text: text.trim().slice(0, 800),
-          x: Math.round(anchor ? anchor.x : view.x + view.w * 0.1),
-          y: Math.round(anchor ? anchor.y + anchor.h + 60 : view.y + view.h * 0.25),
-          maxWidth: Math.round(Math.max(600, Math.min(2000, view.w * 0.5))),
-          placement: "below",
-        },
-      ],
-      note: "canvas-only reply",
-    };
-    try {
-      const result = await executeTool("canvas_apply", args, this.toolDeps());
-      if (gen !== this.currentGeneration || this.abort?.signal.aborted) return;
-      const ok = !isFailedResult(result);
-      if (ok) policy.applies += 1;
-      stepsLog.push({
-        stepNumber: policy.steps + 1,
-        tool: "canvas_apply",
-        args,
-        result,
-        isError: !ok,
-        summary: ok ? "wrote the reply to the canvas" : summarizeResult(result),
-      });
-      this.emit({
-        kind: "tool_end",
-        name: "canvas_apply",
-        ok,
-        summary: summarizeResult(result),
-        target: extractToolResultTarget(result),
-      });
-    } catch (err) {
-      console.warn("[Conductor] canvas-only reply failed:", err);
-    }
-  }
-
   private async answerToolRequest(
     name: string,
     args: unknown,
@@ -1019,7 +967,7 @@ export class Conductor {
               }
               if (result && typeof result === "object") {
                 const rec = result as Record<string, unknown>;
-                if (rec.ok === true && (name === "canvas_apply" || name === "visual_explainer" || name === "canvas_patch_widget" || name === "canvas_edit" || name === "canvas_undo")) {
+                if (rec.ok === true && (name === "canvas_apply" || name === "visual_explainer" || name === "sketchnote" || name === "canvas_patch_widget" || name === "canvas_edit" || name === "canvas_undo")) {
                   policy.mutated = true;
                 }
                 if ((name === "canvas_apply" || name === "visual_explainer") && rec.ok === true) {

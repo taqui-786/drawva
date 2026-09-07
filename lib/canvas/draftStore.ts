@@ -28,6 +28,10 @@ export class DraftManager {
     return this.pending.length > 0;
   }
 
+  get pendingCount(): number {
+    return this.pending.length;
+  }
+
   getPending(): CanvasCommand[] {
     return this.pending;
   }

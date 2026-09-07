@@ -119,6 +119,9 @@ importers:
       react-dom:
         specifier: 19.2.8
         version: 19.2.8(react@19.2.8)
+      roughjs:
+        specifier: ^4.6.6
+        version: 4.6.6
       shadcn:
         specifier: ^4.17.0
         version: 4.17.0(@cfworker/json-schema@4.1.1)(typescript@5.9.3)

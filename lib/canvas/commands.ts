@@ -1176,7 +1176,7 @@ export function validateCommand(
         fontSize: Math.round(fontSize),
         maxWidth: Math.round(maxWidth),
         lineHeight,
-        color: ctx.aiColor,
+        color: typeof c.color === "string" && c.color.trim() ? c.color.trim() : ctx.aiColor,
       };
     }
     case "draw_formula": {
@@ -1200,7 +1200,7 @@ export function validateCommand(
         y,
         latex,
         fontSize: Math.round(fontSize),
-        color: ctx.aiColor,
+        color: typeof c.color === "string" && c.color.trim() ? c.color.trim() : ctx.aiColor,
       };
     }
     case "plot_function": {
@@ -1218,7 +1218,7 @@ export function validateCommand(
         w: geom.w,
         h: geom.h,
         expression: rawExpr.trim(),
-        color: ctx.aiColor,
+        color: typeof c.color === "string" && c.color.trim() ? c.color.trim() : ctx.aiColor,
       };
     }
     case "animate_scene": {
@@ -1462,7 +1462,7 @@ export function validateCommand(
         tool: "draw",
         points,
         size: Number(c.size),
-        color: ctx.aiColor,
+        color: typeof c.color === "string" && c.color.trim() ? c.color.trim() : ctx.aiColor,
       };
     }
     default:

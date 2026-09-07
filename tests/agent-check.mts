@@ -188,16 +188,17 @@ const toolDef = (name: string): AgentToolDef => {
 const accepts = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args).length === 0;
 const violations = (name: string, args: unknown) => validateArgs(toolDef(name).parameters, args);
 
-await test("B1 exactly 18 tools with unique names", () => {
-  assert.equal(AGENT_TOOL_DEFS.length, 18);
+await test("B1 exactly 19 tools with unique names", () => {
+  assert.equal(AGENT_TOOL_DEFS.length, 19);
   const names = AGENT_TOOL_DEFS.map((t) => t.name);
-  assert.equal(new Set(names).size, 18);
+  assert.equal(new Set(names).size, 19);
   for (const expected of [
     "canvas_scan",
     "canvas_snapshot",
     "canvas_apply",
     "canvas_edit",
     "visual_explainer",
+    "sketchnote",
     "load_visual_skill",
     "load_plugin",
     "canvas_read",
@@ -319,7 +320,7 @@ await test("B9 web tool names stay consistent and are all declared", () => {
 await test("B10 web tools register only behind their capability gate", () => {
   const names = (flags: WebToolFlags) => enabledToolNames(flags);
   const canvasOnly = names({});
-  assert.equal(canvasOnly.length, 11);
+  assert.equal(canvasOnly.length, 12);
   assert.ok(!canvasOnly.some((n) => isWebToolName(n)), `canvas-only set leaked: ${canvasOnly.join(", ")}`);
 
   const searchOnly = names({ search: true });
@@ -334,7 +335,7 @@ await test("B10 web tools register only behind their capability gate", () => {
   assert.ok(!readOnly.includes("web_search"));
   assert.ok(!readOnly.includes("research_search"));
 
-  assert.equal(names({ tinyfish: true, search: true }).length, 18);
+  assert.equal(names({ tinyfish: true, search: true }).length, 19);
 });
 
 await test("B11 fetch selection takes the Wikipedia hit, otherwise the top 2", () => {
@@ -723,16 +724,18 @@ await test("D17 a second create of the same widget title is refused, not cleaned
   );
 });
 
-await test("D18 a text-only turn still lands its answer on the canvas", () => {
+await test("D18 a text-only turn speaks its answer via the character bubble, never write_text on the canvas", () => {
   const src = fs.readFileSync(path.join(ROOT, "lib/ai/conductor.ts"), "utf8");
-  assert.ok(src.includes("private async writeAnswerToCanvas"), "a canvas fallback for text-only turns must exist");
-  assert.ok(/if \(finalText\.trim\(\) && !policy\.mutated\)/.test(src), "the fallback must trigger only when nothing was mutated");
-  assert.ok(src.includes("policy.mutated = true"), "successful mutations must clear the fallback");
-  const fallback = src.slice(src.indexOf("private async writeAnswerToCanvas"), src.indexOf("Answer one server-requested tool call"));
-  assert.ok(fallback.includes('tool: "write_text"'), "the fallback must write native text, not a widget");
-  assert.ok(fallback.includes("getInkBox"), "the fallback must anchor near the newest ink");
-  for (const needle of ["THE CANVAS IS THE ONLY OUTPUT SURFACE", "answer it with ONE short write_text"]) {
+  assert.ok(!src.includes("writeAnswerToCanvas"), "the harness must not write the final message onto the canvas itself");
+  assert.ok(!src.includes("canvas-only reply"), "the canvas-only reply fallback must be gone");
+  assert.ok(src.includes('this.emit({ kind: "turn_end", reason: "done", message: finalText || undefined })'), "the final message must be emitted to the character speech bubble");
+  assert.ok(src.includes('name === "canvas_apply" || name === "visual_explainer" || name === "sketchnote"'), "successful sketchnote mutations must count as board mutations");
+  assert.ok(src.includes("policy.mutated = true"), "successful mutations must be tracked");
+  for (const needle of ["SPOKEN by the character in its speech bubble", "do NOT write it on the canvas"]) {
     assert.ok(AGENT_SYSTEM_PROMPT.includes(needle), `prompt missing: ${needle}`);
+  }
+  for (const banned of ["THE CANVAS IS THE ONLY OUTPUT SURFACE", "answer it with ONE short write_text"]) {
+    assert.ok(!AGENT_SYSTEM_PROMPT.includes(banned), `prompt must no longer contain: ${banned}`);
   }
 });
 

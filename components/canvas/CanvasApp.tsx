@@ -101,6 +101,12 @@ import { buildAtlas } from "@/lib/canvas/atlas";
 import { resolveThemeColor } from "@/lib/canvas/theme";
 import type { RefinementManifest } from "@/lib/canvas/refinement";
 
+let localObjectSeq = 0;
+function nextLocalObjectId(prefix: string): string {
+  localObjectSeq += 1;
+  return `${prefix}-${Date.now()}-${localObjectSeq}`;
+}
+
 function findInPlaceWidget(
   wm: WidgetManager,
   opts: {
@@ -1942,7 +1948,7 @@ export function CanvasApp() {
       const initialH = oldWidget ? oldWidget.h : Math.round(cmd.h || 420);
 
       const item: WidgetItem = {
-        id: oldWidget?.id || `widget-${Date.now()}`,
+        id: oldWidget?.id || nextLocalObjectId("widget"),
         kind: "html",
         pluginId: cmd.pluginId,
         sourceFormat: cmd.sourceFormat,
@@ -1980,7 +1986,7 @@ export function CanvasApp() {
         cmd.maxWidth,
         cmd.lineHeight,
       );
-      const textId = `text-${Date.now()}`;
+      const textId = nextLocalObjectId("text");
       addObjectRef.current({
         id: textId,
         kind: "text",
@@ -1997,16 +2003,17 @@ export function CanvasApp() {
         status: "draft",
         image: block.canvas,
       });
-      wm.setSelected(null);
-      om.setSelected(textId);
-
-      setMode("select");
+      if (draft.pendingCount <= 1) {
+        wm.setSelected(null);
+        om.setSelected(textId);
+        setMode("select");
+      }
     });
     draft.setRenderer("draw_formula", async (_eng, cmd) => {
       if (cmd.tool !== "draw_formula") return;
       const rendered = await renderFormula(cmd.latex, cmd.fontSize, cmd.color);
       if (rendered.canvas.width > 0 && rendered.canvas.height > 0) {
-        const formulaId = `formula-${Date.now()}`;
+        const formulaId = nextLocalObjectId("formula");
         addObjectRef.current({
           id: formulaId,
           kind: "formula",
@@ -2032,7 +2039,7 @@ export function CanvasApp() {
       if (cmd.tool !== "plot_function") return;
       const canvas = bakePlotObject(cmd);
       if (canvas.width > 0 && canvas.height > 0) {
-        const plotId = `plot-${Date.now()}`;
+        const plotId = nextLocalObjectId("plot");
         addObjectRef.current({
           id: plotId,
           kind: "plot",
@@ -2059,7 +2066,7 @@ export function CanvasApp() {
       const scene = (
         cmd as { scene?: import("@/lib/canvas/animation").AnimationScene }
       ).scene;
-      const animId = `animation-${Date.now()}`;
+      const animId = nextLocalObjectId("animation");
       addObjectRef.current({
         id: animId,
         kind: "animation",
@@ -2119,7 +2126,7 @@ export function CanvasApp() {
         : Math.round(fromDoc?.height || cmd.h || 360);
 
       const item: WidgetItem = {
-        id: oldWidget?.id || `diagram-${Date.now()}`,
+        id: oldWidget?.id || nextLocalObjectId("diagram"),
         kind: "diagram",
         pluginId: cmd.pluginId || cmd.sourceFormat || "diagram",
         sourceFormat: cmd.sourceFormat,
@@ -2684,7 +2691,7 @@ export function CanvasApp() {
       );
       const block = renderTextBlock(textValue, color, fontSize, maxWidth);
       addObjectRef.current({
-        id: `obj-text-${Date.now()}`,
+        id: `obj-text-${Date.now()}-${++localObjectSeq}`,
         kind: "text",
         x: textAnchor.x,
         y: textAnchor.y,
