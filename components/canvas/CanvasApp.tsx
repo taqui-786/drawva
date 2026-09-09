@@ -3001,6 +3001,7 @@ export function CanvasApp() {
     const middle = e.button === 1;
     if (middle || mode === "hand") {
       e.preventDefault();
+      agentCharacterRef.current?.pauseCameraFollow();
       widgets.current?.setSelected(null);
       objects.current?.setSelected(null);
       tm.begin(gestureEvent(e));
@@ -3043,6 +3044,7 @@ export function CanvasApp() {
     }
 
     if (activePointersRef.current.size >= 2 && pinchRef.current) {
+      agentCharacterRef.current?.pauseCameraFollow();
       const pts = Array.from(activePointersRef.current.values());
       const target =
         gestureOverlayRef.current || (e.currentTarget as HTMLElement);
@@ -3065,6 +3067,11 @@ export function CanvasApp() {
       );
       engine.requestRender();
       return;
+    }
+
+    const middle = (e.buttons & 4) !== 0;
+    if (middle || mode === "hand") {
+      agentCharacterRef.current?.pauseCameraFollow();
     }
 
     const agentChar = agentCharacterRef.current;
@@ -3163,6 +3170,7 @@ export function CanvasApp() {
   const onWheel = (e: React.WheelEvent) => {
     if (!engine) return;
     e.preventDefault();
+    agentCharacterRef.current?.pauseCameraFollow();
     engine.camera.handleWheel(e.nativeEvent);
     engine.requestRender();
   };
@@ -3203,11 +3211,13 @@ export function CanvasApp() {
 
   const zoomBy = (delta: number) => {
     if (!engine) return;
+    agentCharacterRef.current?.pauseCameraFollow();
     engine.camera.zoomAt(engine.cssWidth / 2, engine.cssHeight / 2, delta);
     engine.requestRender();
   };
   const resetView = () => {
     if (!engine) return;
+    agentCharacterRef.current?.pauseCameraFollow();
     engine.camera.reset();
     engine.requestRender();
   };

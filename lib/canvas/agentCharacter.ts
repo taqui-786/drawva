@@ -389,6 +389,9 @@ export class AgentCharacterController {
   private overlay: HTMLCanvasElement;
   private overlayCtx: CanvasRenderingContext2D | null;
   private rafId: number | null = null;
+  private lastCamState: { panX: number; panY: number; scale: number } | null = null;
+  private isProgrammaticPan = false;
+  private userInteractingUntil = 0;
 
   constructor(private deps: AgentCharacterDeps) {
     this.overlay = document.createElement("canvas");
@@ -416,6 +419,22 @@ export class AgentCharacterController {
     return this.chars.size;
   }
 
+  pauseCameraFollow(durationMs = 1500): void {
+    this.userInteractingUntil = performance.now() + durationMs;
+    for (const ch of this.chars.values()) {
+      ch.followGlide = false;
+    }
+  }
+
+  focusCamera(id = "main"): void {
+    const ch = this.chars.get(id);
+    if (!ch) return;
+    this.userInteractingUntil = 0;
+    ch.followGlide = true;
+    ch.lastFollowPos = null;
+    this.ensureLoop();
+  }
+
   private ensureLoop(): void {
     if (this.rafId !== null || this.chars.size === 0) return;
     this.rafId = requestAnimationFrame(() => this.paintOverlay());
@@ -440,6 +459,20 @@ export class AgentCharacterController {
         const dt = clamp((now - this.lastT) / 1000, 0, 0.05);
         this.lastT = now;
         const cam = engine.camera;
+
+        // Detect external camera motion (user mouse wheel, trackpad scroll, pan, zoom)
+        if (this.lastCamState) {
+          if (
+            !this.isProgrammaticPan &&
+            (Math.abs(cam.panX - this.lastCamState.panX) > 0.5 ||
+              Math.abs(cam.panY - this.lastCamState.panY) > 0.5 ||
+              Math.abs(cam.scale - this.lastCamState.scale) > 0.001)
+          ) {
+            this.pauseCameraFollow(1500);
+          }
+        }
+        this.lastCamState = { panX: cam.panX, panY: cam.panY, scale: cam.scale };
+
         const dead: string[] = [];
         let cameraFollowed = false;
         for (const ch of this.chars.values()) {
@@ -1026,6 +1059,9 @@ export class AgentCharacterController {
     if (dist > Math.max(8 / scale, 12)) {
       this.setRoute(ch, landing, target.box);
       if (ch.state !== "walking") this.setState(ch, "walking");
+      this.userInteractingUntil = 0;
+      ch.followGlide = true;
+      ch.lastFollowPos = null;
     } else {
       ch.landing = null;
       ch.waypoints = [];
@@ -1065,6 +1101,9 @@ export class AgentCharacterController {
       this.setRoute(ch, { x: v.x + v.w * 0.55, y: v.y + v.h * 0.62 }, null);
       this.setState(ch, "walking");
       ch.facing = -1;
+      this.userInteractingUntil = 0;
+      ch.followGlide = true;
+      ch.lastFollowPos = null;
       return;
     }
     ch.targetBox = target.box;
@@ -1074,6 +1113,9 @@ export class AgentCharacterController {
     this.setRoute(ch, landing, obstacle);
     this.setState(ch, "walking");
     ch.facing = landing.x < ch.pos.x ? -1 : 1;
+    this.userInteractingUntil = 0;
+    ch.followGlide = true;
+    ch.lastFollowPos = null;
   }
 
   private spawn(id: string, target: { box: Rect; source: string } | null): Character {
@@ -1123,12 +1165,14 @@ export class AgentCharacterController {
   /**
    * Auto camera follow: when a character moves outside the user's view, glide
    * the camera (pan only, zoom untouched) so the character stays on screen.
-   * Follows only while the character itself moves or a glide is still settling;
-   * if the user pans or zooms away from a stationary character, the camera
-   * stays under their control.
+   * Yields completely to user interactions (scrolling the ground, panning, zooming).
    */
   private followWithCamera(ch: Character, dt: number): boolean {
     if (ch.dragging || ch.fadingOut) return false;
+    if (performance.now() < this.userInteractingUntil) {
+      ch.followGlide = false;
+      return false;
+    }
     const cam = this.deps.engine.camera;
     const view = cam.visibleWorldRect();
     if (view.w <= 0 || view.h <= 0) return false;
@@ -1155,15 +1199,24 @@ export class AgentCharacterController {
     else if (ch.pos.y > view.y + view.h - charH * 0.3) shiftY = ch.pos.y - (view.y + view.h - charH * 0.3);
 
     const settling = Math.abs(shiftX) > settleX || Math.abs(shiftY) > settleY;
-    if (!settling) return false;
-    // A stationary out-of-view character is never chased — the user controls the camera.
-    if (stationary && ch.state !== "walking" && !ch.followGlide) return false;
-    ch.followGlide = settling;
+    if (!settling) {
+      ch.followGlide = false;
+      return false;
+    }
+    // A stationary character never chases camera when user scrolls or pans away
+    if (stationary && ch.state !== "walking") {
+      ch.followGlide = false;
+      return false;
+    }
+    if (ch.state !== "walking" && !ch.followGlide) return false;
 
     // Convert the world shift to CSS pixels and ease toward it.
     const scale = cam.scale || 1;
     const k = this.reduced ? 1 : clamp(dt * 6, 0, 1);
+    this.isProgrammaticPan = true;
     cam.panBy(-shiftX * scale * k, -shiftY * scale * k);
+    this.isProgrammaticPan = false;
+    this.lastCamState = { panX: cam.panX, panY: cam.panY, scale: cam.scale };
     this.deps.engine.requestRender();
     return true;
   }
