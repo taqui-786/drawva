@@ -1,13 +1,14 @@
 import type { Rect } from "./types";
 
-export type LayerName = "screen" | "ink" | "interaction";
+export type LayerName = "screen" | "ink" | "liveInk" | "interaction";
 
-const LAYER_ORDER: LayerName[] = ["screen", "ink", "interaction"];
+const LAYER_ORDER: LayerName[] = ["screen", "ink", "liveInk", "interaction"];
 
 const LAYER_Z: Record<LayerName, number> = {
   screen: 0,
   ink: 1,
-  interaction: 2,
+  liveInk: 2,
+  interaction: 3,
 };
 
 export class LayerStack {

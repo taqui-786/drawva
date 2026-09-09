@@ -70,7 +70,7 @@ import {
   setReasoningEffort,
   type ReasoningEffort,
 } from "@/lib/ai/provider";
-import { Textarea } from "@/components/ui/textarea";
+import { TextEditor } from "./TextEditor";
 import {
   SyncManager,
   type SyncStatus,
@@ -2000,14 +2000,9 @@ export function CanvasApp() {
         color: cmd.color,
         fontSize: cmd.fontSize,
         maxWidth: cmd.maxWidth,
-        status: "draft",
+        status: "accepted",
         image: block.canvas,
       });
-      if (draft.pendingCount <= 1) {
-        wm.setSelected(null);
-        om.setSelected(textId);
-        setMode("select");
-      }
     });
     draft.setRenderer("draw_formula", async (_eng, cmd) => {
       if (cmd.tool !== "draw_formula") return;
@@ -2677,7 +2672,12 @@ export function CanvasApp() {
   const [textOpen, setTextOpen] = useState(false);
   const [textAnchor, setTextAnchor] = useState<Point | null>(null);
   const [textValue, setTextValue] = useState("");
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const cancelText = useCallback(() => {
+    setTextOpen(false);
+    setTextValue("");
+    setTextAnchor(null);
+  }, []);
 
   const commitText = useCallback(() => {
     if (engine && textAnchor && textValue.trim()) {
@@ -2690,8 +2690,9 @@ export function CanvasApp() {
         Math.round(screenMaxWidth / scale),
       );
       const block = renderTextBlock(textValue, color, fontSize, maxWidth);
+      const textId = `obj-text-${Date.now()}-${++localObjectSeq}`;
       addObjectRef.current({
-        id: `obj-text-${Date.now()}-${++localObjectSeq}`,
+        id: textId,
         kind: "text",
         x: textAnchor.x,
         y: textAnchor.y,
@@ -2724,6 +2725,8 @@ export function CanvasApp() {
       lastStrokeTimeRef.current = now;
       afterBoardChangeRef.current();
       if (appState.autoOn) scheduleAi(inkBoxRef.current);
+      objects.current?.setSelected(textId);
+      setMode("select");
     }
     setTextOpen(false);
     setTextValue("");
@@ -2911,12 +2914,12 @@ export function CanvasApp() {
         widgets.current?.setSelected(null);
         objects.current?.setSelected(null);
 
-        setTextOpen(false);
+        cancelText();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [cancelText]);
 
   const screenToWorld = (e: React.PointerEvent): Point => {
     const rect = engine!.canvas("screen").getBoundingClientRect();
@@ -2938,7 +2941,15 @@ export function CanvasApp() {
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
-    if (!engine || textOpen) return;
+    if (!engine) return;
+    if (textOpen) {
+      if (textValue.trim()) {
+        commitText();
+      } else {
+        cancelText();
+      }
+      return;
+    }
 
     activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
@@ -3016,7 +3027,6 @@ export function CanvasApp() {
       setTextAnchor(world);
       setTextValue("");
       setTextOpen(true);
-      requestAnimationFrame(() => textareaRef.current?.focus());
       return;
     }
     tm.begin(gestureEvent(e));
@@ -3405,27 +3415,14 @@ export function CanvasApp() {
         )}
 
         {textOpen && anchorCss && (
-          <Textarea
-            ref={textareaRef}
+          <TextEditor
+            screenX={anchorCss.x}
+            screenY={anchorCss.y}
+            color={color}
             value={textValue}
-            onChange={(e) => setTextValue(e.target.value)}
-            onBlur={commitText}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                setTextOpen(false);
-                setTextValue("");
-                setTextAnchor(null);
-              }
-            }}
-            placeholder="Type text…"
-            className="absolute z-30 min-w-72 max-w-xl resize border-2 border-primary/60 bg-background/95 shadow-lg rounded-lg p-3"
-            style={{
-              left: anchorCss.x,
-              top: anchorCss.y,
-              fontSize: 18,
-              lineHeight: 1.4,
-              color,
-            }}
+            onChange={setTextValue}
+            onCommit={commitText}
+            onCancel={cancelText}
           />
         )}
       </div>

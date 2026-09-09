@@ -122,12 +122,59 @@ export class CanvasEngine {
     return this.layers.ctx(name);
   }
 
+  warmLiveInkLayer(): void {
+    const c = this.canvas("liveInk");
+    if (!c.width || !c.height) return;
+    const ctx = this.ctx("liveInk");
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.fillStyle = "rgba(0, 0, 0, 0.004)";
+    ctx.fillRect(0, 0, 1, 1);
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.restore();
+  }
+
+  clearLiveInkLayer(): void {
+    const c = this.canvas("liveInk");
+    const ctx = this.ctx("liveInk");
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, c.width, c.height);
+  }
+
+  paintLiveInkSegment(
+    a: Point,
+    b: Point,
+    opts: { erase: boolean; size: number; color: string }
+  ): void {
+    const d = this.dpr;
+    const cam = this.camera;
+    const ctx = this.ctx(opts.erase ? "ink" : "liveInk");
+    ctx.save();
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    ctx.translate(cam.panX, cam.panY);
+    ctx.scale(cam.scale, cam.scale);
+    ctx.beginPath();
+    ctx.rect(0, 0, SIZE, SIZE);
+    ctx.clip();
+    ctx.globalCompositeOperation = opts.erase ? "destination-out" : "source-over";
+    ctx.strokeStyle = opts.color;
+    ctx.lineWidth = opts.size;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   fit(): void {
     const rect = this.root.getBoundingClientRect();
     if (rect.width <= 0 || rect.height <= 0) return;
     this.dpr = window.devicePixelRatio || 1;
     this.layers.resize(rect.width, rect.height, this.dpr);
     this.camera.setViewport(rect.width, rect.height);
+    this.warmLiveInkLayer();
     this.requestRender();
   }
 

@@ -116,6 +116,7 @@ export class StrokeController {
     erase: boolean;
     size: number;
     color: string;
+    samples: Point[];
   } | null = null;
   private eraserPreview: { point: Point; size: number } | null = null;
 
@@ -134,6 +135,15 @@ export class StrokeController {
 
   get drawing(): boolean {
     return this.active !== null;
+  }
+
+  private commitBatch(d: NonNullable<typeof this.active>): void {
+    if (d.samples.length < 2) return;
+    for (let i = 1; i < d.samples.length; i++) {
+      strokeSegment(this.engine, d.samples[i - 1], d.samples[i], { erase: d.erase, size: d.size, color: d.color });
+    }
+    const last = d.samples[d.samples.length - 1];
+    d.samples = [last];
   }
 
   begin(
@@ -156,12 +166,15 @@ export class StrokeController {
       erase: erasing,
       size,
       color: mode === "highlighter" ? "#fbbf2473" : o.color,
+      samples: [world],
     };
     if (erasing) {
       this.eraserPreview = { point: world, size };
       this.engine.requestInteractionRender(eraserRect(world, size));
+      dotStroke(this.engine, world, { erase: true, size, color: this.active.color });
+    } else {
+      this.engine.paintLiveInkSegment(world, { x: world.x + 0.01, y: world.y + 0.01 }, { erase: false, size, color: this.active.color });
     }
-    dotStroke(this.engine, world, { erase: erasing, size, color: this.active.color });
   }
 
   move(pointerId: number, world: Point, pressure: number): void {
@@ -172,22 +185,40 @@ export class StrokeController {
     const erasing = d.erase;
     const cssWidth = erasing ? o.eraser : o.pen;
     const size = logicalWidth(cssWidth, this.engine.camera.scale, erasing);
-    strokeSegment(this.engine, d.last, world, { erase: erasing, size, color: d.color });
-    d.last = world;
-    d.size = size;
+
     if (erasing) {
+      strokeSegment(this.engine, d.last, world, { erase: true, size, color: d.color });
+      d.last = world;
+      d.size = size;
       const prev = this.eraserPreview;
       const r = prev
         ? unionRect(eraserRect(prev.point, prev.size), eraserRect(world, size))
         : eraserRect(world, size);
       this.eraserPreview = { point: world, size };
       this.engine.requestInteractionRender(r);
+    } else {
+      this.engine.paintLiveInkSegment(d.last, world, { erase: false, size, color: d.color });
+      d.samples.push(world);
+      d.last = world;
+      d.size = size;
+      if (d.samples.length >= 16) {
+        this.commitBatch(d);
+      }
     }
   }
 
   end(pointerId: number): void {
     if (this.active?.id === pointerId) {
+      const d = this.active;
       this.active = null;
+      if (!d.erase) {
+        this.commitBatch(d);
+        if (d.samples.length === 1) {
+          dotStroke(this.engine, d.samples[0], { erase: false, size: d.size, color: d.color });
+        }
+        this.engine.clearLiveInkLayer();
+        this.engine.requestRender();
+      }
       const prev = this.eraserPreview;
       if (prev) {
         this.eraserPreview = null;

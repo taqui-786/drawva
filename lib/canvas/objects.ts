@@ -80,7 +80,7 @@ export class ObjectManager {
       resizeWidth: HTMLElement;
       resizeHeight: HTMLElement;
       sideActions?: HTMLElement;
-      acceptBtn: HTMLElement;
+      acceptBtn?: HTMLElement;
       playPauseBtn?: HTMLElement;
       restartBtn?: HTMLElement;
       mergeBtn?: HTMLElement;
@@ -326,6 +326,9 @@ export class ObjectManager {
     if (this.shells.has(item.id)) {
       this.unmount(item.id);
     }
+    if (item.kind === "text") {
+      item.status = "accepted";
+    }
     const min = minimumObjectSize(item.kind);
     item.w = Math.max(min.w, Math.min(SIZE, item.w));
     item.h = Math.max(min.h, Math.min(SIZE, item.h));
@@ -391,9 +394,9 @@ export class ObjectManager {
   setStatus(id: string, status: ObjectStatus): void {
     const item = this.items.get(id);
     if (!item) return;
-    item.status = status;
+    item.status = item.kind === "text" ? "accepted" : status;
     const shell = this.shells.get(id);
-    if (shell) shell.dataset.status = status;
+    if (shell) shell.dataset.status = item.status;
     this.applyMode(id);
   }
 
@@ -484,6 +487,9 @@ export class ObjectManager {
 
   private mount(item: ObjectItem): void {
     if (this.shells.has(item.id)) return;
+    if (item.kind === "text") {
+      item.status = "accepted";
+    }
 
     const shell = document.createElement("section");
     shell.dataset.objectId = item.id;
@@ -594,7 +600,7 @@ export class ObjectManager {
       });
 
       leftGroup.append(playPauseBtn, restartBtn);
-    } else {
+    } else if (item.kind !== "text") {
       mergeBtn = document.createElement("button");
       mergeBtn.type = "button";
       mergeBtn.className = "drawva-object-btn";
@@ -620,53 +626,60 @@ export class ObjectManager {
     rightGroup.className = "drawva-object-right-group";
     rightGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
-    const kindLabel = item.kind === "text" ? "Text" : item.kind === "formula" ? "LaTeX" : item.kind === "plot" ? "Plot" : "Source";
+    const isText = item.kind === "text";
+    let acceptBtn: HTMLButtonElement | undefined;
+    let sideActions: HTMLDivElement | undefined;
 
-    const createCopyButton = (isTop: boolean) => {
-      const copyBtn = document.createElement("button");
-      copyBtn.type = "button";
-      copyBtn.className = `drawva-object-btn drawva-object-btn-copy ${isTop ? "drawva-object-top-copy" : "drawva-object-side-copy"}`;
-      copyBtn.innerHTML = `${COPY_SVG}<span>Copy ${kindLabel}</span>`;
-      copyBtn.title = `Copy ${kindLabel} to clipboard`;
-      copyBtn.style.cssText = "pointer-events:auto;user-select:none;touch-action:none;";
-      copyBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
-      copyBtn.addEventListener("click", async (e) => {
+    if (!isText) {
+      const kindLabel = item.kind === "formula" ? "LaTeX" : item.kind === "plot" ? "Plot" : "Source";
+
+      const createCopyButton = (isTop: boolean) => {
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = `drawva-object-btn drawva-object-btn-copy ${isTop ? "drawva-object-top-copy" : "drawva-object-side-copy"}`;
+        copyBtn.innerHTML = `${COPY_SVG}<span>Copy ${kindLabel}</span>`;
+        copyBtn.title = `Copy ${kindLabel} to clipboard`;
+        copyBtn.style.cssText = "pointer-events:auto;user-select:none;touch-action:none;";
+        copyBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+        copyBtn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          await navigator.clipboard?.writeText(item.source);
+          const span = copyBtn.querySelector("span");
+          if (span) {
+            const original = span.textContent;
+            span.textContent = "Copied!";
+            setTimeout(() => {
+              span.textContent = original;
+            }, 1500);
+          }
+        });
+        return copyBtn;
+      };
+
+      const copyBtnTop = createCopyButton(true);
+
+      acceptBtn = document.createElement("button");
+      acceptBtn.type = "button";
+      acceptBtn.className = "drawva-object-btn drawva-object-accept";
+      acceptBtn.innerHTML = ACCEPT_SVG;
+      acceptBtn.title = `Accept & keep ${item.kind}`;
+      acceptBtn.style.cssText = "pointer-events:auto;user-select:none;touch-action:none;";
+      acceptBtn.style.display = item.status === "draft" ? "inline-flex" : "none";
+      acceptBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+      acceptBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        await navigator.clipboard?.writeText(item.source);
-        const span = copyBtn.querySelector("span");
-        if (span) {
-          const original = span.textContent;
-          span.textContent = "Copied!";
-          setTimeout(() => {
-            span.textContent = original;
-          }, 1500);
-        }
+        (this.opts.callbacks ?? {}).onAccept?.(item.id);
       });
-      return copyBtn;
-    };
 
-    const copyBtnTop = createCopyButton(true);
+      rightGroup.append(copyBtnTop, acceptBtn);
 
-    const acceptBtn = document.createElement("button");
-    acceptBtn.type = "button";
-    acceptBtn.className = "drawva-object-btn drawva-object-accept";
-    acceptBtn.innerHTML = ACCEPT_SVG;
-    acceptBtn.title = `Accept & keep ${item.kind}`;
-    acceptBtn.style.cssText = "pointer-events:auto;user-select:none;touch-action:none;";
-    acceptBtn.style.display = item.status === "draft" ? "inline-flex" : "none";
-    acceptBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
-    acceptBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      (this.opts.callbacks ?? {}).onAccept?.(item.id);
-    });
+      sideActions = document.createElement("div");
+      sideActions.className = "drawva-object-side-actions";
+      const copyBtnSide = createCopyButton(false);
+      sideActions.append(copyBtnSide);
+    }
 
-    rightGroup.append(copyBtnTop, acceptBtn);
     chrome.append(leftGroup, dragBar, rightGroup);
-
-    const sideActions = document.createElement("div");
-    sideActions.className = "drawva-object-side-actions";
-    const copyBtnSide = createCopyButton(false);
-    sideActions.append(copyBtnSide);
 
     const resizeHandle = document.createElement("div");
     resizeHandle.className = "drawva-object-resize";
@@ -689,7 +702,8 @@ export class ObjectManager {
     resizeHeight.style.cssText =
       "width:24px;height:24px;cursor:ns-resize;z-index:10;display:none;pointer-events:auto;user-select:none;touch-action:none;transform-origin:0 0;";
 
-    shell.append(body, chrome, sideActions, resizeHandle, resizeWidth, resizeHeight);
+    shell.append(body, chrome, resizeHandle, resizeWidth, resizeHeight);
+    if (sideActions) shell.append(sideActions);
 
     shell.addEventListener("pointerenter", () => {
       shell.dataset.hovered = "true";
@@ -814,7 +828,7 @@ export class ObjectManager {
     const tb = this.toolbars.get(item.id);
     if (tb) {
       const { chrome, sideActions, resizeHandle, resizeWidth, resizeHeight } = tb;
-      const chromeW = Math.max(110, renderedW);
+      const chromeW = item.kind === "text" ? Math.max(68, renderedW) : Math.max(110, renderedW);
       const chromeLeftScreen = (renderedW - chromeW) / 2;
       chrome.style.width = `${chromeW}px`;
       chrome.style.transform = `translate3d(${chromeLeftScreen * invScaleX}px,${-38 * invScaleY}px,0) scale(${invScaleX},${invScaleY})`;

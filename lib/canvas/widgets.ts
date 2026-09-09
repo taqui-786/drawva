@@ -204,10 +204,11 @@ export class WidgetManager {
         pointer-events: auto !important;
       }
       .drawva-widget-shell[data-status="draft"] iframe {
-        filter: grayscale(0.15) brightness(0.98);
+        filter: none;
       }
       .drawva-widget-shell[data-status="draft"] .drawva-widget-draft-overlay {
-        display: block !important;
+        display: none !important;
+        background: transparent !important;
       }
       .drawva-widget-btn,
       .drawva-widget-drag {
@@ -765,7 +766,7 @@ export class WidgetManager {
     const overlay = document.createElement("div");
     overlay.className = "drawva-widget-draft-overlay";
     overlay.style.cssText =
-      "position:absolute;inset:0;display:none;pointer-events:none;background:repeating-linear-gradient(45deg,rgba(59,130,246,0.03) 0 8px,transparent 8px 16px);border-radius:inherit;";
+      "position:absolute;inset:0;display:none;pointer-events:none;background:transparent;border-radius:inherit;";
 
     body.append(frame, overlay);
 

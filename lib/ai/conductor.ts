@@ -230,6 +230,8 @@ export class Conductor {
   private running = false;
   private currentGeneration = 0;
   private abort: AbortController | null = null;
+  private activeToolCallId: string | null = null;
+  private ignoredToolCallIds = new Set<string>();
   private sendQueue: { text: string; attachments?: File[]; options?: { headless?: boolean } }[] = [];
   private images = new Map<string, ActiveImage>();
   private latestSnapshotId: string | null = null;
@@ -320,6 +322,14 @@ export class Conductor {
   cancel(dispose = false): void {
     this.currentGeneration++;
     this.sendQueue = [];
+    if (this.activeToolCallId) {
+      this.ignoredToolCallIds.add(this.activeToolCallId);
+      this.activeToolCallId = null;
+      if (this.ignoredToolCallIds.size > 256) {
+        const oldest = this.ignoredToolCallIds.values().next().value;
+        if (oldest) this.ignoredToolCallIds.delete(oldest);
+      }
+    }
     this.abort?.abort();
     this.postCancel(dispose);
     if (!this.running) return;
@@ -777,8 +787,13 @@ export class Conductor {
       // never the answer, so it is dropped rather than concatenated onto the reply.
       sink.text = "";
       const toolCallId = String(rec.toolCallId || `call-${Date.now()}`);
+      this.activeToolCallId = toolCallId;
       const answer = await this.answerToolRequest(String(rec.name), rec.args, toolCallId, gen, policy, stepsLog);
-      if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
+      this.activeToolCallId = null;
+      if (gen !== this.currentGeneration || this.abort?.signal.aborted) {
+        this.ignoredToolCallIds.add(toolCallId);
+        throw new TurnAborted();
+      }
       await this.postToolResult(toolCallId, answer.result, answer.isError);
     } else if (eventName === "tool_end") {
     } else if (eventName === "agent_status") {
@@ -805,7 +820,12 @@ export class Conductor {
   private turnErrorMessage = "";
 
   private async postToolResult(toolCallId: string, result: unknown, isError: boolean): Promise<void> {
+    if (this.ignoredToolCallIds.delete(toolCallId)) return;
     const signal = this.abort?.signal;
+    if (signal?.aborted) {
+      this.ignoredToolCallIds.add(toolCallId);
+      return;
+    }
     try {
       await fetch("/api/canvas/agent/tool-result", {
         method: "POST",
