@@ -55,7 +55,11 @@ import {
 import { useSession } from "@/lib/auth-client";
 import { BoardHistory } from "@/lib/canvas/history";
 import { boardFingerprint } from "@/lib/canvas/fingerprint";
-import { AgentCharacterController } from "@/lib/canvas/agentCharacter";
+import {
+  AgentCharacterController,
+  getToolStartNarration,
+  getToolEndNarration,
+} from "@/lib/canvas/agentCharacter";
 import { computeTidyMoves } from "@/lib/canvas/tidy";
 import { resizeWidgetGeometry } from "@/lib/canvas/widgetGeometry";
 import type { AiLogEntry } from "@/lib/ai/types";
@@ -482,12 +486,14 @@ export function CanvasApp() {
         character.onEvent({
           kind: "tool_start",
           tool: e.name,
+          command: e.command,
           target: e.target,
         });
       } else if (e.kind === "tool_end") {
         character.onEvent({
           kind: "tool_end",
           tool: e.name,
+          command: e.command,
           ok: e.ok,
           summary: e.summary,
           target: e.target,
@@ -533,53 +539,15 @@ export function CanvasApp() {
       }));
     } else if (e.kind === "tool_start") {
       setAiStatus("thinking");
-      let label = `Executing ${e.name}…`;
-      if (e.name === "canvas_apply") {
-        label = e.argsSummary
-          ? `Placing on canvas: ${e.argsSummary}`
-          : "Drawing it onto the board…";
-      } else if (e.name === "canvas_snapshot") {
-        label = "Zooming in to inspect the board…";
-      } else if (e.name === "canvas_read") {
-        label = e.argsSummary
-          ? `Reading closely: ${e.argsSummary}`
-          : "Reading the fine print…";
-      } else if (e.name === "canvas_patch_widget") {
-        label = "Fine-tuning the details…";
-      } else if (e.name === "canvas_scan") {
-        label = "Surveying the whole canvas…";
-      } else if (e.name === "load_plugin") {
-        label = e.argsSummary
-          ? `Picking up a tool: ${e.argsSummary}`
-          : "Grabbing a new tool…";
-      }
+      const label = getToolStartNarration(e.name, e.command);
       setTickerState((prev) => ({
         status: "running",
         currentMessage: label,
         messageId: prev.messageId + 1,
-        detail: e.argsSummary ? tickerTail(e.argsSummary) : undefined,
+        detail: undefined,
       }));
     } else if (e.kind === "tool_end") {
-      let summaryText = e.ok
-        ? `Done: ${e.summary || e.name}`
-        : `Hit a snag: ${e.name}`;
-      if (e.ok) {
-        if (e.name === "canvas_apply") {
-          summaryText = e.summary
-            ? `Placed on canvas: ${e.summary}`
-            : "Placed on canvas ✓";
-        } else if (e.name === "canvas_snapshot") {
-          summaryText = "Inspecting layout…";
-        } else if (e.name === "canvas_edit") {
-          summaryText = "Updated layout ✓";
-        } else if (e.name === "canvas_scan") {
-          summaryText = "Surveyed canvas ✓";
-        } else if (e.name === "canvas_read") {
-          summaryText = "Checked details ✓";
-        } else if (e.summary) {
-          summaryText = e.summary.replace(/^Done:\s*/i, "");
-        }
-      }
+      const summaryText = getToolEndNarration(e.name, e.command, e.ok);
       setTickerState((prev) => ({
         status: "running",
         currentMessage: summaryText,

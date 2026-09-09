@@ -11,6 +11,8 @@ import {
   routeAround,
   segmentHitsRect,
   wrapThoughtLines,
+  getToolStartNarration,
+  getToolEndNarration,
 } from "../lib/canvas/agentCharacter";
 
 const reasoning = "The user drew a login box. I should inspect the board, then place a flowchart to the right of the ink.";
@@ -92,5 +94,20 @@ assert.equal(segmentHitsRect({ x: 20, y: 150 }, { x: 280, y: 150 }, box), true);
 assert.equal(segmentHitsRect({ x: 20, y: 40 }, { x: 280, y: 40 }, box), false);
 const clear = routeAround({ x: 20, y: 40 }, { x: 280, y: 40 }, box, 8);
 assert.equal(clear.length, 1, "clear line of sight should walk straight");
+
+// Verify tool calling narration (no raw parameters or cryptic summaries)
+assert.equal(getToolStartNarration("canvas_apply", "write_text"), "Let me write something here…");
+assert.equal(getToolStartNarration("canvas_apply", "draw"), "Drawing this onto the board…");
+assert.equal(getToolStartNarration("canvas_apply", "html_widget"), "Building an interactive widget…");
+assert.equal(getToolStartNarration("canvas_apply", "diagram_source"), "Generating a diagram for this…");
+assert.equal(getToolStartNarration("canvas_snapshot"), "Taking a quick look at the board…");
+assert.equal(getToolStartNarration("canvas_scan"), "Scanning the canvas layout…");
+assert.equal(getToolStartNarration("custom_xyz"), "Lemme run the custom xyz tool…");
+assert.equal(getToolStartNarration("xyz"), "Lemme run the xyz tool…");
+
+assert.equal(getToolEndNarration("canvas_apply", "write_text", true), "Okay, written! Now next…");
+assert.equal(getToolEndNarration("canvas_apply", "html_widget", true), "Widget ready! Now next…");
+assert.equal(getToolEndNarration("custom_xyz", undefined, true), "Okay, done! Now next…");
+assert.equal(getToolEndNarration("custom_xyz", undefined, false), "Hit a small snag… let me fix that.");
 
 console.log("character-bubble-check: ok");
