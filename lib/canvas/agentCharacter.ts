@@ -15,8 +15,8 @@ export interface ToolTargetHint {
 
 export type AgentCharacterInput =
   | { kind: "turn_start" }
-  | { kind: "tool_start"; tool: string; target?: ToolTargetHint }
-  | { kind: "tool_end"; tool: string; ok: boolean; summary?: string; target?: ToolTargetHint }
+  | { kind: "tool_start"; tool: string; command?: string; target?: ToolTargetHint }
+  | { kind: "tool_end"; tool: string; command?: string; ok: boolean; summary?: string; target?: ToolTargetHint }
   | { kind: "text_delta"; text?: string }
   | { kind: "reasoning_delta"; text?: string }
   | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; message?: string };
@@ -118,6 +118,62 @@ function animForTool(tool: string): CharState {
   if (READ_TOOLS.has(tool)) return "reading";
   if (WORK_TOOLS.has(tool)) return "working";
   return "thinking";
+}
+
+/** Human-friendly, realistic narrative copy for tool execution start. */
+export function getToolStartNarration(tool: string, command?: string): string {
+  const effective = (command || tool).toLowerCase().trim();
+
+  // Primary Canvas commands
+  if (effective === "write_text") return "Let me write something here…";
+  if (effective === "draw") return "Drawing this onto the board…";
+  if (effective === "draw_formula") return "Writing out the math formula…";
+  if (effective === "plot_function") return "Plotting this function on the canvas…";
+  if (effective === "html_widget") return "Building an interactive widget…";
+  if (effective === "diagram_source") return "Generating a diagram for this…";
+  if (effective === "erase") return "Cleaning up those strokes…";
+  if (effective === "animate_scene") return "Setting up the animation scene…";
+
+  // Canvas edit / manipulation operations
+  if (effective === "move") return "Repositioning elements…";
+  if (effective === "resize") return "Resizing elements to fit…";
+  if (effective === "delete") return "Clearing that from the board…";
+  if (effective === "canvas_edit") return "Adjusting elements on the canvas…";
+  if (effective === "canvas_patch_widget") return "Updating the widget code…";
+  if (effective === "visual_explainer") return "Designing a visual explainer…";
+
+  // Canvas inspection / survey tools
+  if (effective === "canvas_snapshot") return "Taking a quick look at the board…";
+  if (effective === "canvas_scan") return "Scanning the canvas layout…";
+  if (effective === "canvas_read") return "Reading the details closely…";
+  if (effective === "canvas_focus") return "Focusing on that area…";
+
+  // Web & search tools
+  if (effective === "web_search") return "Looking that up online…";
+  if (effective === "web_read") return "Reading through the webpage…";
+  if (effective === "stock_query") return "Checking latest market data…";
+  if (effective === "load_plugin") return "Loading up an extra tool…";
+  if (effective === "load_visual_skill") return "Loading visual style guidelines…";
+
+  // Default canvas_apply if sub-command was not provided
+  if (tool === "canvas_apply") return "Placing this onto the board…";
+
+  // Fallback for custom or unknown tools: "Lemme run the xyz tool…"
+  const cleanName = tool.replace(/^(canvas_|web_|agent_)/, "").replace(/_/g, " ");
+  return `Lemme run the ${cleanName || tool} tool…`;
+}
+
+/** Realistic completion copy when a tool call ends. */
+export function getToolEndNarration(tool: string, command?: string, ok = true): string {
+  if (!ok) {
+    return "Hit a small snag… let me fix that.";
+  }
+  const effective = (command || tool).toLowerCase().trim();
+  if (effective === "write_text") return "Okay, written! Now next…";
+  if (effective === "draw" || effective === "diagram_source") return "Okay, drawn! Now next…";
+  if (effective === "html_widget") return "Widget ready! Now next…";
+  if (effective === "canvas_snapshot" || effective === "canvas_scan") return "Got the layout! Now next…";
+  return "Okay, done! Now next…";
 }
 
 export type BoardSide = "l" | "r" | "t" | "b";
@@ -780,17 +836,7 @@ export class AgentCharacterController {
         const resolved = this.resolveTarget(e.target);
         if (resolved) ch.lastWorkBox = resolved.box;
         this.retarget(ch, resolved, anim);
-        if (e.tool === "canvas_apply" || e.tool === "visual_explainer") {
-          ch.narration = "Drawing onto the board…";
-        } else if (e.tool === "canvas_snapshot") {
-          ch.narration = "Inspecting board layout…";
-        } else if (e.tool === "canvas_edit" || e.tool === "canvas_patch_widget") {
-          ch.narration = "Adjusting elements…";
-        } else if (e.tool === "canvas_scan") {
-          ch.narration = "Surveying the canvas…";
-        } else if (e.tool === "canvas_read") {
-          ch.narration = "Reading closely…";
-        }
+        ch.narration = getToolStartNarration(e.tool, e.command);
         this.ensureLoop();
         break;
       }
@@ -798,21 +844,9 @@ export class AgentCharacterController {
         ch.completedCount = (ch.completedCount || 0) + 1;
         if (!e.ok) {
           this.stumble(ch);
-          ch.narration = e.tool === "canvas_edit" ? "Syncing canvas updates…" : "Hit a slight snag…";
+          ch.narration = getToolEndNarration(e.tool, e.command, false);
         } else {
-          // Tool finished! Turn is still running, so provide informative step progress
-          if (e.summary) {
-            ch.narration = this.formatIntermediateStep(e.summary);
-          } else if (e.tool === "canvas_apply" || e.tool === "visual_explainer") {
-            ch.narration = "Placed on canvas ✓";
-          } else if (e.tool === "canvas_snapshot") {
-            ch.narration = "Layout looking good…";
-          } else if (e.tool === "canvas_edit") {
-            ch.narration = "Updated layout ✓";
-          } else if (e.tool === "canvas_scan") {
-            ch.narration = "Surveyed canvas ✓";
-          }
-
+          ch.narration = getToolEndNarration(e.tool, e.command, true);
           if (e.target) {
             const resolved = this.resolveTarget(e.target);
             if (resolved) {
@@ -1579,7 +1613,7 @@ export class AgentCharacterController {
   ): { rect: Rect; lines: string[]; fs: number; pad: number; lineH: number } | null {
     const thought = resolveThoughtText(ch);
     const streamingThought = isStreamingThought(ch);
-    if (!thought || ch.dragging || (ch.state === "walking" && !streamingThought)) {
+    if (!thought || ch.dragging || (ch.state === "walking" && !streamingThought && !ch.turnActive)) {
       return null;
     }
     const scale = this.deps.engine.camera.scale || 1;

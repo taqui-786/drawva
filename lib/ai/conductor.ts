@@ -59,8 +59,8 @@ export type StepMessage =
 export type ConductorEvent =
   | { kind: "turn_start" }
   | { kind: "step_start"; stepNumber?: number }
-  | { kind: "tool_start"; name: string; argsSummary: string; target?: ToolTargetHint }
-  | { kind: "tool_end"; name: string; ok: boolean; summary: string; target?: ToolTargetHint }
+  | { kind: "tool_start"; name: string; command?: string; argsSummary: string; target?: ToolTargetHint }
+  | { kind: "tool_end"; name: string; command?: string; ok: boolean; summary: string; target?: ToolTargetHint }
   | { kind: "text_delta"; text: string }
   | { kind: "reasoning_delta"; text: string }
   | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string; message?: string }
@@ -152,6 +152,23 @@ export function extractToolTarget(name: string, args: unknown): ToolTargetHint |
   }
   void name;
   return hint;
+}
+
+export function extractCommand(name: string, args: unknown): string | undefined {
+  if (!args || typeof args !== "object") return undefined;
+  const a = args as Record<string, unknown>;
+  if (name === "canvas_apply" && Array.isArray(a.commands) && a.commands.length > 0) {
+    const first = a.commands[0] as Record<string, unknown>;
+    if (typeof first?.tool === "string" && first.tool) return first.tool;
+  }
+  if (name === "canvas_edit") {
+    if (typeof a.op === "string" && a.op) return a.op;
+    if (Array.isArray(a.operations) && a.operations.length > 0) {
+      const first = a.operations[0] as Record<string, unknown>;
+      if (typeof first?.op === "string" && first.op) return first.op;
+    }
+  }
+  return undefined;
 }
 
 export function extractToolResultTarget(result: unknown): ToolTargetHint | undefined {
@@ -774,6 +791,7 @@ export class Conductor {
     }
     if (!data || typeof data !== "object") return "continue";
     const rec = data as Record<string, unknown>;
+    console.log(`%c[SSE: ${eventName}]`, "color: #38bdf8; font-weight: bold;", rec);
     if (eventName === "text_delta" && typeof rec.text === "string") {
       sink.text += rec.text;
       this.emit({ kind: "text_delta", text: rec.text });
@@ -917,7 +935,8 @@ export class Conductor {
       policy.stopped = `Step limit reached (${AGENT_MAX_STEPS_PER_TURN}). Tool use is closed for this turn: keep the best valid result and reply with a final answer now.`;
       return { result: { ok: true, code: "STEP_LIMIT_REACHED", message: policy.stopped }, isError: false };
     }
-    this.emit({ kind: "tool_start", name, argsSummary: summarizeArgs(args), target: extractToolTarget(name, args) });
+    const command = extractCommand(name, args);
+    this.emit({ kind: "tool_start", name, command, argsSummary: summarizeArgs(args), target: extractToolTarget(name, args) });
 
     let result: unknown;
     let isError = false;
@@ -1083,6 +1102,7 @@ export class Conductor {
         this.emit({
           kind: "tool_end",
           name,
+          command,
           ok: !isError,
           summary: summarizeResult(result),
           target: extractToolResultTarget(result),

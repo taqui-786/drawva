@@ -199,9 +199,10 @@ export async function* admitCanvasAgentDecisionStream(
   { availableTools = [] }: { availableTools?: string[] } = {}
 ): AsyncIterable<StreamChunk> {
   const assembler = new BlockAssembler();
-  const heldChunks: StreamChunk[] = [];
+  const heldToolChunks: StreamChunk[] = [];
   const heldUsageChunks: StreamChunk[] = [];
   const seenIndexes = new Set<number>();
+  const toolBlockIndexes = new Set<number>();
   let finish: StreamChunk | null = null;
 
   for await (const chunk of upstream) {
@@ -217,7 +218,20 @@ export async function* admitCanvasAgentDecisionStream(
       heldUsageChunks.push(chunk);
       continue;
     }
-    heldChunks.push(chunk);
+    if (chunk.type === "block-start" && chunk.blockType === "tool-call") {
+      toolBlockIndexes.add(chunk.index);
+    }
+    const isToolChunk =
+      chunkBlockType(chunk) === "tool-call" ||
+      ("index" in chunk && typeof chunk.index === "number" && toolBlockIndexes.has(chunk.index));
+
+    if (isToolChunk) {
+      heldToolChunks.push(chunk);
+    } else {
+      // Non-tool chunks (reasoning-delta, text-delta, block-start/end for text or reasoning)
+      // must stream immediately in real time rather than waiting for finish.
+      yield chunk;
+    }
   }
 
   const terminal = (finish || { type: "finish", reason: { kind: "stop" } }) as StreamChunk & {
@@ -225,7 +239,7 @@ export async function* admitCanvasAgentDecisionStream(
   };
   const terminalKind = terminal.reason?.kind;
   const assembledBlocks = assembler.blocks() as { type: string; id?: ToolCallId; name?: string; arguments?: string }[];
-  const heldToolCalls = heldChunks
+  const heldToolCalls = heldToolChunks
     .filter((chunk) => chunk.type === "block-end" && (chunk.block as { type?: string })?.type === "tool-call")
     .map((chunk) => (chunk as { block: { type: "tool-call"; id: ToolCallId; name: string; arguments: string } }).block);
   const assembledToolCalls = assembledBlocks.filter((block) => block?.type === "tool-call") as {
@@ -234,12 +248,12 @@ export async function* admitCanvasAgentDecisionStream(
     name: string;
     arguments: string;
   }[];
-  const hasPartialToolCall = heldChunks.some((c) => chunkBlockType(c) === "tool-call");
+  const hasPartialToolCall = heldToolChunks.some((c) => chunkBlockType(c) === "tool-call");
   const toolCalls = assembledToolCalls.length ? assembledToolCalls : heldToolCalls;
   const blocks = assembledToolCalls.length || !heldToolCalls.length ? assembledBlocks : [...assembledBlocks, ...heldToolCalls];
 
   if (terminalKind === "error" || terminalKind === "aborted") {
-    for (const held of heldChunks) yield held;
+    for (const held of heldToolChunks) yield held;
     for (const usage of heldUsageChunks) yield usage;
     yield terminal;
     return;
@@ -267,15 +281,12 @@ export async function* admitCanvasAgentDecisionStream(
     admission.kind === "tool-calls" && toolCalls.length > 1;
 
   if (admission.kind === "final" || unchangedSingleTool || unchangedMultiTool) {
-    for (const held of heldChunks) yield held;
+    for (const held of heldToolChunks) yield held;
     for (const usage of heldUsageChunks) yield usage;
     yield terminal;
     return;
   }
 
-  for (const held of heldChunks) {
-    if (chunkBlockType(held) !== "tool-call") yield held;
-  }
   const nextIndex = seenIndexes.size ? Math.max(...seenIndexes) + 1 : 0;
   const targetBlock =
     admission.kind === "feedback" || admission.kind === "tool-call"
