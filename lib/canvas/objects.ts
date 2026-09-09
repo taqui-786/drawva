@@ -627,37 +627,35 @@ export class ObjectManager {
     rightGroup.style.cssText = "display:flex;align-items:center;gap:6px;pointer-events:auto;";
 
     const isText = item.kind === "text";
+    const kindLabel = isText ? "Text" : item.kind === "formula" ? "LaTeX" : item.kind === "plot" ? "Plot" : "Source";
+
+    const createCopyButton = (isTop: boolean) => {
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = `drawva-object-btn drawva-object-btn-copy ${isTop ? "drawva-object-top-copy" : "drawva-object-side-copy"}`;
+      copyBtn.innerHTML = `${COPY_SVG}<span>Copy ${kindLabel}</span>`;
+      copyBtn.title = `Copy ${kindLabel} to clipboard`;
+      copyBtn.style.cssText = "pointer-events:auto;user-select:none;touch-action:none;";
+      copyBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
+      copyBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        await navigator.clipboard?.writeText(item.source);
+        const span = copyBtn.querySelector("span");
+        if (span) {
+          const original = span.textContent;
+          span.textContent = "Copied!";
+          setTimeout(() => {
+            span.textContent = original;
+          }, 1500);
+        }
+      });
+      return copyBtn;
+    };
+
+    const copyBtnTop = createCopyButton(true);
+
     let acceptBtn: HTMLButtonElement | undefined;
-    let sideActions: HTMLDivElement | undefined;
-
     if (!isText) {
-      const kindLabel = item.kind === "formula" ? "LaTeX" : item.kind === "plot" ? "Plot" : "Source";
-
-      const createCopyButton = (isTop: boolean) => {
-        const copyBtn = document.createElement("button");
-        copyBtn.type = "button";
-        copyBtn.className = `drawva-object-btn drawva-object-btn-copy ${isTop ? "drawva-object-top-copy" : "drawva-object-side-copy"}`;
-        copyBtn.innerHTML = `${COPY_SVG}<span>Copy ${kindLabel}</span>`;
-        copyBtn.title = `Copy ${kindLabel} to clipboard`;
-        copyBtn.style.cssText = "pointer-events:auto;user-select:none;touch-action:none;";
-        copyBtn.addEventListener("pointerdown", (e) => e.stopPropagation());
-        copyBtn.addEventListener("click", async (e) => {
-          e.stopPropagation();
-          await navigator.clipboard?.writeText(item.source);
-          const span = copyBtn.querySelector("span");
-          if (span) {
-            const original = span.textContent;
-            span.textContent = "Copied!";
-            setTimeout(() => {
-              span.textContent = original;
-            }, 1500);
-          }
-        });
-        return copyBtn;
-      };
-
-      const copyBtnTop = createCopyButton(true);
-
       acceptBtn = document.createElement("button");
       acceptBtn.type = "button";
       acceptBtn.className = "drawva-object-btn drawva-object-accept";
@@ -672,12 +670,14 @@ export class ObjectManager {
       });
 
       rightGroup.append(copyBtnTop, acceptBtn);
-
-      sideActions = document.createElement("div");
-      sideActions.className = "drawva-object-side-actions";
-      const copyBtnSide = createCopyButton(false);
-      sideActions.append(copyBtnSide);
+    } else {
+      rightGroup.append(copyBtnTop);
     }
+
+    const sideActions = document.createElement("div");
+    sideActions.className = "drawva-object-side-actions";
+    const copyBtnSide = createCopyButton(false);
+    sideActions.append(copyBtnSide);
 
     chrome.append(leftGroup, dragBar, rightGroup);
 
@@ -828,7 +828,7 @@ export class ObjectManager {
     const tb = this.toolbars.get(item.id);
     if (tb) {
       const { chrome, sideActions, resizeHandle, resizeWidth, resizeHeight } = tb;
-      const chromeW = item.kind === "text" ? Math.max(68, renderedW) : Math.max(110, renderedW);
+      const chromeW = Math.max(110, renderedW);
       const chromeLeftScreen = (renderedW - chromeW) / 2;
       chrome.style.width = `${chromeW}px`;
       chrome.style.transform = `translate3d(${chromeLeftScreen * invScaleX}px,${-38 * invScaleY}px,0) scale(${invScaleX},${invScaleY})`;
