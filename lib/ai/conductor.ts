@@ -68,7 +68,7 @@ export type ConductorEvent =
   | { kind: "tool_end"; name: string; command?: string; ok: boolean; summary: string; target?: ToolTargetHint }
   | { kind: "text_delta"; text: string }
   | { kind: "reasoning_delta"; text: string }
-  | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string; message?: string }
+  | { kind: "turn_end"; reason: "done" | "cancelled" | "error"; error?: string; message?: string; isTimeout?: boolean }
   | { kind: "usage"; usage: { inputTokens: number; outputTokens: number } }
   | { kind: "log"; entry: AiLogEntry };
 
@@ -303,6 +303,12 @@ export class Conductor {
     return this.messages;
   }
 
+  private lastPromptText = "";
+
+  getLastPrompt(): string {
+    return this.lastPromptText;
+  }
+
   isRunning(): boolean {
     return this.running;
   }
@@ -460,6 +466,8 @@ export class Conductor {
     this.revisionAtTurnStart = this.toolCacheRevision;
     this.emit({ kind: "turn_start" });
 
+    this.lastPromptText = text.trim();
+    const turnStartedAt = Date.now();
     let userText = text.trim();
     let finished = false;
     let finalText = "";
@@ -534,7 +542,13 @@ export class Conductor {
       const turnResult = await this.postTurn(userText, images, gen, policy, stepsLog);
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
       if (turnResult.kind === "error") {
-        this.emit({ kind: "turn_end", reason: "error", error: turnResult.message || "Agent turn failed." });
+        const elapsed = Date.now() - turnStartedAt;
+        const isTimeout =
+          Boolean(turnResult.isTimeout) ||
+          elapsed >= 240_000 ||
+          /connection to the agent closed/i.test(turnResult.message || "") ||
+          /timeout|timed out|504|gateway/i.test(turnResult.message || "");
+        this.emit({ kind: "turn_end", reason: "error", error: turnResult.message || "Agent turn failed.", isTimeout });
         return;
       }
       finalText = turnResult.text || "";
@@ -641,7 +655,12 @@ export class Conductor {
     } catch (err) {
       if (gen !== this.currentGeneration || this.abort.signal.aborted) return;
       const message = err instanceof Error ? err.message : "Agent turn failed.";
-      this.emit({ kind: "turn_end", reason: "error", error: message });
+      const elapsed = Date.now() - turnStartedAt;
+      const isTimeout =
+        elapsed >= 240_000 ||
+        /connection to the agent closed/i.test(message) ||
+        /timeout|timed out|504|gateway/i.test(message);
+      this.emit({ kind: "turn_end", reason: "error", error: message, isTimeout });
     } finally {
       if (gen === this.currentGeneration) {
         this.running = false;
@@ -662,7 +681,7 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[]
-  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean }> {
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> {
     const config = this.deps.provider() ?? getProviderConfig();
     const model = getActiveModel();
     if (!config || !model) {
@@ -684,7 +703,7 @@ export class Conductor {
       webSearch: getWebSearchEnabled(),
     };
 
-    const attempt = async (): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean }> => {
+    const attempt = async (): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> => {
       const res = await fetch("/api/canvas/agent/step", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -718,10 +737,12 @@ export class Conductor {
           if (retryErr instanceof TurnAborted || this.abort?.signal.aborted || gen !== this.currentGeneration) {
             return { kind: "cancelled" };
           }
-          return { kind: "error", message: retryErr instanceof Error ? retryErr.message : "Agent turn failed." };
+          const msg = retryErr instanceof Error ? retryErr.message : "Agent turn failed.";
+          return { kind: "error", message: msg, isTimeout: (retryErr as { status?: number }).status === 504 || /timeout|timed out/i.test(msg) };
         }
       }
-      return { kind: "error", message: err instanceof Error ? err.message : "Agent turn failed." };
+      const msg = err instanceof Error ? err.message : "Agent turn failed.";
+      return { kind: "error", message: msg, isTimeout: (err as { status?: number }).status === 504 || /timeout|timed out/i.test(msg) };
     }
   }
 
@@ -730,7 +751,7 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[]
-  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean }> {
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
@@ -775,6 +796,7 @@ export class Conductor {
         message:
           this.turnErrorMessage ||
           "The connection to the agent closed before it finished. Nothing was lost on the canvas — ask again to continue.",
+        isTimeout: true,
       };
     }
     return { kind: "final", text: sink.text, reasoningOnly: sink.reasoningOnly };

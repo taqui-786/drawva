@@ -373,6 +373,7 @@ export function CanvasApp() {
   );
   const inkSnapshotRef = useRef<HTMLCanvasElement | null>(null);
   const refreshRefineRectRef = useRef<() => void>(() => {});
+  const handleContinueAiRef = useRef<() => void>(() => {});
   const inkBoxRef = useRef<Rect | null>(null);
   // The arrow carries its OWN timestamp. Deriving its lifetime from
   // lastStrokeTimeRef would be wrong: that ref is also refreshed by the text
@@ -619,13 +620,27 @@ export function CanvasApp() {
         });
         setTickerState((prev) => ({
           status: "error",
-          currentMessage: e.error
-            ? `Hit a wall: ${tickerTail(e.error, 80)}`
-            : "Something went wrong — try again",
+          currentMessage: e.isTimeout
+            ? "5-minute duration reached"
+            : e.error
+              ? `Hit a wall: ${tickerTail(e.error, 80)}`
+              : "Something went wrong — try again",
           messageId: prev.messageId + 1,
           detail: undefined,
         }));
-        toast.error(e.error || "Agent turn failed.");
+        if (e.isTimeout) {
+          toast("5-minute duration reached. You can continue from where it stopped.", {
+            action: {
+              label: "Continue it",
+              onClick: () => {
+                handleContinueAiRef.current();
+              },
+            },
+            duration: 25000,
+          });
+        } else {
+          toast.error(e.error || "Agent turn failed.");
+        }
         setTimeout(() => {
           setAiStatus("idle");
           setAiRun((prev) =>
@@ -711,6 +726,64 @@ export function CanvasApp() {
       );
     });
   }, []);
+
+  const handleContinueAi = useCallback(() => {
+    const agent = conductorRef.current;
+    if (!agent) {
+      toast.error("AI Conductor is initializing, please wait a moment.");
+      return;
+    }
+    if (agent.isRunning()) {
+      toast.info("AI is already working on your canvas…");
+      return;
+    }
+    cloudSync.current?.cancel();
+    const config = getProviderConfig();
+    const model = getActiveModel();
+    if (!config || !model || !config.apiKey) {
+      setSettingsOpen(true);
+      toast.info("Please configure an AI provider and select a model.");
+      return;
+    }
+
+    setAgentRunning(true);
+    setAiStatus("thinking");
+    setAiRun({
+      phase: "running",
+      activeProvider: model,
+      doneProvider: null,
+      durationStage: "normal",
+    });
+    setTickerState((prev) => ({
+      status: "running",
+      currentMessage: "Continuing from where we left off…",
+      messageId: prev.messageId + 1,
+      detail: undefined,
+    }));
+
+    const lastPrompt = agent.getLastPrompt();
+    const continuePrompt = lastPrompt
+      ? `Continue the previous task from where you left off: "${lastPrompt.slice(0, 500)}". Continue applying remaining canvas updates.`
+      : "Continue from where you left off and complete the task.";
+    agent.send(continuePrompt).catch((err) => {
+      console.error("[Continue AI] Error continuing turn:", err);
+      toast.error(
+        err instanceof Error ? err.message : "Failed to continue AI turn.",
+      );
+      setAgentRunning(false);
+      setAiStatus("idle");
+      setAiRun((prev) =>
+        prev.phase === "running" ? { ...prev, phase: "idle" } : prev,
+      );
+      setTickerState((prev) =>
+        prev.status === "running" ? { ...prev, status: "idle" } : prev,
+      );
+    });
+  }, []);
+
+  useEffect(() => {
+    handleContinueAiRef.current = handleContinueAi;
+  });
 
   const captureRegionForRefine = useCallback(
     (rect: Rect): HTMLCanvasElement | null => {

@@ -141,12 +141,15 @@ async function ensureConversation(opts: OpenTurnOptions): Promise<{ ctx: Context
     existing.effort = opts.effort;
     existing.route = profile.route;
     if (existing.handle?.agent) {
-      Object.assign((existing.handle.agent as unknown as { options: Record<string, unknown> }).options, {
-        provider: profile.route,
-        model: profile.model,
-        ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort } : {}),
-        maxTokens: profile.maxTokens,
-      });
+      const agentOpts = (existing.handle.agent as unknown as { options: Record<string, unknown> }).options;
+      agentOpts.provider = profile.route;
+      agentOpts.model = profile.model;
+      agentOpts.maxTokens = profile.maxTokens;
+      if (profile.reasoningEffort) {
+        agentOpts.reasoningEffort = profile.reasoningEffort;
+      } else {
+        delete agentOpts.reasoningEffort;
+      }
     }
     return { ctx, conversation: existing, agent: existing.handle.agent, priorSeed: "" };
   }
@@ -171,12 +174,15 @@ async function ensureConversation(opts: OpenTurnOptions): Promise<{ ctx: Context
     conversation.effort = opts.effort;
     conversation.route = profile.route;
     if (conversation.handle?.agent) {
-      Object.assign((conversation.handle.agent as unknown as { options: Record<string, unknown> }).options, {
-        provider: profile.route,
-        model: profile.model,
-        ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort } : {}),
-        maxTokens: profile.maxTokens,
-      });
+      const agentOpts = (conversation.handle.agent as unknown as { options: Record<string, unknown> }).options;
+      agentOpts.provider = profile.route;
+      agentOpts.model = profile.model;
+      agentOpts.maxTokens = profile.maxTokens;
+      if (profile.reasoningEffort) {
+        agentOpts.reasoningEffort = profile.reasoningEffort;
+      } else {
+        delete agentOpts.reasoningEffort;
+      }
     }
     return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
   }
@@ -251,17 +257,6 @@ async function createConversation(
         return "registered";
       },
       loadedVisualSkills: () => visualSkillsLoaded,
-    });
-    agentCtx.on("agent/request", async (_payload, next) => {
-      const config = await next();
-      const current = conversations.get(opts.conversationId);
-      if (!current) return config;
-      return {
-        ...config,
-        provider: current.route,
-        model: current.model,
-        ...(current.effort !== undefined ? { reasoningEffort: current.effort as never } : {}),
-      };
     });
   };
 

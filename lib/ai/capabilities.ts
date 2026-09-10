@@ -153,6 +153,9 @@ export function isReasoningModel(
 
   if (
     id.includes("deepseek-r1") ||
+    id.includes("-r1") ||
+    id.includes("r1-") ||
+    id.includes("/r1") ||
     id.includes("qwq") ||
     id.includes("reasoning") ||
     id.includes("reasoner")

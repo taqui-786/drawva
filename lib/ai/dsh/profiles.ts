@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import type { CredentialRef } from "@deepseek-ai/dsh-credentials";
 import { PROVIDER_INFOS, type ProviderType, type ReasoningEffort } from "../provider";
+import { isReasoningModel } from "../capabilities";
 
 export interface ConnectionProfile {
   route: string;
@@ -25,13 +26,7 @@ function effectiveBaseUrl(providerType: ProviderType, baseUrl?: string): string 
 
 function piAiReasoningEffort(model: string, isAnthropicRoute: boolean, effort: ReasoningEffort | undefined): string | undefined {
   if (!effort || effort === "default") return undefined;
-  const lower = model.toLowerCase();
-  // Standard legacy OpenAI completion models (e.g. gpt-4o, gpt-4-turbo, gpt-3.5) reject reasoning_effort with HTTP 400.
-  const isLegacyOpenAiChat =
-    (lower.startsWith("gpt-4") && !lower.includes("o1") && !lower.includes("o3")) ||
-    lower.startsWith("gpt-3") ||
-    lower.startsWith("chatgpt");
-  if (!isAnthropicRoute && isLegacyOpenAiChat) return undefined;
+  if (!isReasoningModel(model)) return undefined;
   return effort;
 }
 
@@ -95,6 +90,15 @@ export function buildConnectionProfile(options: {
               contextWindow: 160_000,
               maxTokens: 35_786,
               compat,
+              ...(hasReasoningEffort
+                ? {
+                    reasoningEfforts: {
+                      low: "low",
+                      medium: "medium",
+                      high: "high",
+                    },
+                  }
+                : {}),
             },
           ],
           defaultInput: ["text", "image"],
