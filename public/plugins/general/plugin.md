@@ -37,6 +37,8 @@ Place the widget where it solves the problem. Overlay a transparent SVG on exist
 
 Keep `html`, `body`, the outer layout, and the SVG root completely transparent. NEVER add an outer card background, window border, or box-shadow. Modules use clean vector borders and subtle translucent fills, but the infinite canvas grid must always show through. Use readable canvas-scale typography (titles 52–64px, section headers 34–42px, body 24–28px, diagram labels 20–26px). Structure visual explainers using the 6 infographic layout archetypes (Useful Bait, Versus/Comparison, Heavy Data, Road Map, Timeline, Visualized Article) like a masterclass technical notebook page with theory + diagrams and zero useless empty space.
 
+Establish our config `--color-primary` (Lime: `oklch(0.841 0.238 128.85)` / `#9ae600` in light mode, `oklch(0.768 0.233 130.85)` / `#7ccf00` in dark mode) as the primary brand/accent color. Use a predominantly monochromatic palette derived from this color, with neutral whites/grays for backgrounds and typography, and minimal secondary colors reserved for semantic states such as success, warning, and error in the html_widget.
+
 Prefer compact inline SVG. Use canvas or a third-party library only when SVG cannot do the job. For motion, prefer SVG with CSS, SMIL, or JavaScript.
 
 ## Runtime rules
