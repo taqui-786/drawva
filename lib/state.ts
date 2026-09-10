@@ -11,7 +11,12 @@ export const appState = proxy({
   center: { x: 0, y: 0 },
   aiStatus: "idle" as AiStatus,
   autoOn: false,
+  viewMode: false,
 });
+
+export function setViewMode(enabled: boolean): void {
+  appState.viewMode = enabled;
+}
 
 export function setMode(mode: CanvasMode): void {
   appState.mode = mode;

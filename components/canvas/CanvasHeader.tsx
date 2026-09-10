@@ -77,6 +77,7 @@ import {
   CloudOffIcon,
   SquareStopIcon,
   SteeringIcon,
+  ViewIcon,
 } from "@hugeicons/core-free-icons";
 import { useSession, signOut } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
@@ -222,10 +223,14 @@ export function CanvasHeader({
   cloudStatus = "idle",
   onTriggerCloudSync,
   toolsLocked = false,
+  viewMode = false,
+  onToggleViewMode,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
   toolsLocked?: boolean;
+  viewMode?: boolean;
+  onToggleViewMode?: () => void;
   color: string;
   onColor: (c: string) => void;
   pen: number;
@@ -499,7 +504,32 @@ export function CanvasHeader({
       <Separator orientation="vertical" className="mx-1 h-5 hidden sm:block self-center" />
 
       <div className="flex items-center gap-0.5 sm:gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5 px-0.5">
-        {PRIMARY_TOOLS.slice(0, 5).map((t) => (
+        <ToolButton mode={mode} tool={PRIMARY_TOOLS[0]} onMode={onMode} disabled={toolsLocked} />
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="icon-sm"
+                variant={viewMode ? "secondaryPrimary" : "ghost"}
+                onClick={onToggleViewMode}
+                data-icon="true"
+                aria-label="View canvas"
+                aria-pressed={viewMode}
+                disabled={toolsLocked}
+                className={cn(
+                  "shrink-0 size-7 sm:size-8 p-0",
+                  toolsLocked && "opacity-50 pointer-events-none",
+                )}
+              >
+                <HugeiconsIcon icon={ViewIcon} className="size-4" />
+              </Button>
+            }
+          />
+          <TooltipContent>
+            {viewMode ? "Exit view canvas (Esc)" : "View canvas"}
+          </TooltipContent>
+        </Tooltip>
+        {PRIMARY_TOOLS.slice(1, 5).map((t) => (
           <ToolButton key={t.mode} mode={mode} tool={t} onMode={onMode} disabled={toolsLocked} />
         ))}
 

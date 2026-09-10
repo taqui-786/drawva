@@ -6,9 +6,9 @@ const LAYER_ORDER: LayerName[] = ["screen", "ink", "liveInk", "interaction"];
 
 const LAYER_Z: Record<LayerName, number> = {
   screen: 0,
-  ink: 1,
-  liveInk: 2,
-  interaction: 3,
+  ink: 25,
+  liveInk: 26,
+  interaction: 27,
 };
 
 export class LayerStack {
@@ -32,6 +32,7 @@ export class LayerStack {
       canvas.style.width = "100%";
       canvas.style.height = "100%";
       canvas.style.zIndex = String(LAYER_Z[name]);
+      canvas.style.pointerEvents = "none";
       this.root.appendChild(canvas);
       this.layers.set(name, canvas);
       const ctx = canvas.getContext("2d");

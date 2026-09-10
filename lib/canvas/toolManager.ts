@@ -36,6 +36,7 @@ export class ToolManager {
   readonly selection: SelectionController;
 
   mode: CanvasMode;
+  viewMode = false;
 
   private pan: { pointerId: number; last: Point } | null = null;
   private nodeDrag: { pointerId: number; node: PickedNode; last: Point; moved: boolean } | null = null;
@@ -84,12 +85,23 @@ export class ToolManager {
     this.updateCursor();
   }
 
+  setViewMode(enabled: boolean): void {
+    this.viewMode = enabled;
+    if (enabled) {
+      this.shapes.cancel();
+      this.selection.clearSelection();
+    }
+    this.pan = null;
+    this.nodeDrag = null;
+    this.updateCursor();
+  }
+
   getCursor(world?: Point): string {
     if (this.pan) return "grabbing";
     if (this.nodeDrag) return "grabbing";
     if (this.selection.isMoving) return "grabbing";
 
-    if (this.mode === "hand") return "grab";
+    if (this.viewMode || this.mode === "hand") return "grab";
 
     if (this.mode === "select") {
       if (world && this.selection.hitTest(world)) return "grab";
@@ -118,7 +130,7 @@ export class ToolManager {
   }
 
   begin(ev: ToolGestureEvent): void {
-    if (ev.button === 1 || this.mode === "hand") {
+    if (ev.button === 1 || this.mode === "hand" || this.viewMode) {
       this.pan = { pointerId: ev.pointerId, last: ev.screen };
       this.updateCursor(ev.world);
       return;

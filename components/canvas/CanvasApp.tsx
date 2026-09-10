@@ -12,7 +12,13 @@ import {
   setMode,
   setPen,
   setZoom,
+  setViewMode,
 } from "@/lib/state";
+import { Button } from "@/components/ui/button";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
+import { HugeiconsIcon } from "@hugeicons/react";
+import { Cancel01Icon, Download01Icon } from "@hugeicons/core-free-icons";
+import { cn } from "@/lib/utils";
 import { useCanvas } from "./CanvasProvider";
 import { ToolManager, type ToolGestureEvent } from "@/lib/canvas/toolManager";
 import { DraftManager } from "@/lib/canvas/draftStore";
@@ -209,7 +215,7 @@ const INK_COALESCE_MS = 25_000;
 
 export function CanvasApp() {
   const { engine, mountRef } = useCanvas();
-  const { mode, color, pen, aiStatus, autoOn } = useSnapshot(appState);
+  const { mode, color, pen, aiStatus, autoOn, viewMode } = useSnapshot(appState);
   const eraser = 18;
 
   const tools = useRef<ToolManager | null>(null);
@@ -2672,9 +2678,17 @@ export function CanvasApp() {
   }, [mode, engine]);
 
   useEffect(() => {
+    tools.current?.setViewMode(viewMode);
+    if (viewMode) {
+      widgets.current?.setSelected(null);
+      objects.current?.setSelected(null);
+    }
+  }, [viewMode]);
+
+  useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (e.data?.type !== "drawva-widget-wheel") return;
-      if (appState.mode !== "hand") return;
+      if (appState.mode !== "hand" && !appState.viewMode) return;
       if (!engine) return;
 
       let screenX = window.innerWidth / 2;
@@ -2931,6 +2945,13 @@ export function CanvasApp() {
       if (t === "TEXTAREA" || t === "INPUT") return;
       if (refineStateRef.current === "loading") return;
       const k = e.key.toLowerCase();
+      if (appState.viewMode) {
+        if (k === "escape") {
+          setViewMode(false);
+          e.preventDefault();
+        }
+        return;
+      }
       if (e.shiftKey && k === "h") setMode("highlighter");
       else if (k === "v") setMode("select");
       else if (k === "h") setMode("hand");
@@ -3064,7 +3085,7 @@ export function CanvasApp() {
     const tm = tools.current;
     if (!tm) return;
     const middle = e.button === 1;
-    if (middle || mode === "hand") {
+    if (middle || mode === "hand" || viewMode) {
       e.preventDefault();
       agentCharacterRef.current?.pauseCameraFollow();
       widgets.current?.setSelected(null);
@@ -3337,68 +3358,72 @@ export function CanvasApp() {
 
   return (
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
-      <CanvasHeader
-        mode={mode}
-        onMode={handleModeChange}
-        toolsLocked={refineState === "loading"}
-        color={color}
-        onColor={setColor}
-        pen={pen}
-        onPen={setPen}
-        onImportImage={importImage}
-        onUndo={() => undoRef.current?.()}
-        onRedo={() => redoRef.current?.()}
-        onClear={clearBoard}
-        canUndo={canUndoState}
-        canRedo={canRedoState}
-        onExportPng={doExportPng}
-        onExportJson={doExportJson}
-        onImportJson={() => jsonFileRef.current?.click()}
-        aiStatus={aiStatus}
-        aiRun={aiRun}
-        autoOn={autoOn}
-        onAutoChange={setAutoOn}
-        onAskAi={handleAskAi}
-        agentRunning={agentRunning}
-        onCancelAi={() => {
-          conductorRef.current?.cancel();
-          toast.info("Agent generation cancelled.");
-        }}
-        onSteerAi={(guidance) => {
-          conductorRef.current?.steer(guidance);
-          toast.success("Guidance sent to agent.");
-        }}
-        models={models}
-        activeModel={activeModel}
-        onModelChange={handleModelChange}
-        reasoningEffort={reasoningEffort}
-        onReasoningEffortChange={handleReasoningEffortChange}
-        onOpenModelSelect={() => setModelSelectOpen(true)}
-        onOpenSettings={() => setSettingsOpen(true)}
-        syncStatus={syncState.status}
-        syncRoomCode={syncState.roomCode}
-        syncPeerCount={syncState.peerCount}
-        onOpenConnect={() => setConnectOpen(true)}
-        onOpenLogs={() => setLogsOpen(true)}
-        onOpenManual={() => setManualOpen(true)}
-        onTidy={handleTidy}
-        cloudStatus={cloudStatus}
-        onTriggerCloudSync={() => {
-          const sync = cloudSync.current;
-          if (!engine || !isAuthenticated || !sync) {
-            toast.info("Sign in to sync this canvas to the cloud.");
-            return;
-          }
-          const snapshot = serializeSnapshot(
-            engine,
-            widgets.current,
-            objects.current,
-          );
-          void sync.syncNow(snapshot).then((synced) => {
-            if (!synced) toast.error("Cloud sync failed. Please try again.");
-          });
-        }}
-      />
+      <div className={cn("shrink-0", viewMode && "hidden")}>
+        <CanvasHeader
+          mode={mode}
+          onMode={handleModeChange}
+          toolsLocked={refineState === "loading"}
+          viewMode={viewMode}
+          onToggleViewMode={() => setViewMode(!viewMode)}
+          color={color}
+          onColor={setColor}
+          pen={pen}
+          onPen={setPen}
+          onImportImage={importImage}
+          onUndo={() => undoRef.current?.()}
+          onRedo={() => redoRef.current?.()}
+          onClear={clearBoard}
+          canUndo={canUndoState}
+          canRedo={canRedoState}
+          onExportPng={doExportPng}
+          onExportJson={doExportJson}
+          onImportJson={() => jsonFileRef.current?.click()}
+          aiStatus={aiStatus}
+          aiRun={aiRun}
+          autoOn={autoOn}
+          onAutoChange={setAutoOn}
+          onAskAi={handleAskAi}
+          agentRunning={agentRunning}
+          onCancelAi={() => {
+            conductorRef.current?.cancel();
+            toast.info("Agent generation cancelled.");
+          }}
+          onSteerAi={(guidance) => {
+            conductorRef.current?.steer(guidance);
+            toast.success("Guidance sent to agent.");
+          }}
+          models={models}
+          activeModel={activeModel}
+          onModelChange={handleModelChange}
+          reasoningEffort={reasoningEffort}
+          onReasoningEffortChange={handleReasoningEffortChange}
+          onOpenModelSelect={() => setModelSelectOpen(true)}
+          onOpenSettings={() => setSettingsOpen(true)}
+          syncStatus={syncState.status}
+          syncRoomCode={syncState.roomCode}
+          syncPeerCount={syncState.peerCount}
+          onOpenConnect={() => setConnectOpen(true)}
+          onOpenLogs={() => setLogsOpen(true)}
+          onOpenManual={() => setManualOpen(true)}
+          onTidy={handleTidy}
+          cloudStatus={cloudStatus}
+          onTriggerCloudSync={() => {
+            const sync = cloudSync.current;
+            if (!engine || !isAuthenticated || !sync) {
+              toast.info("Sign in to sync this canvas to the cloud.");
+              return;
+            }
+            const snapshot = serializeSnapshot(
+              engine,
+              widgets.current,
+              objects.current,
+            );
+            void sync.syncNow(snapshot).then((synced) => {
+              if (!synced) toast.error("Cloud sync failed. Please try again.");
+            });
+          }}
+        />
+      </div>
 
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <div ref={mountRef} className="absolute inset-0" />
@@ -3412,21 +3437,64 @@ export function CanvasApp() {
           style={{
             position: "absolute",
             inset: 0,
-            zIndex: 10,
+            zIndex: viewMode ? 50 : ["select", "hand"].includes(mode) ? 10 : 30,
             pointerEvents: "auto",
             userSelect: "none",
             touchAction: "none",
             cursor:
               agentCharCursor ??
-              (mode === "select"
-                ? "default"
-                : mode === "hand"
-                  ? "grab"
+              (viewMode || mode === "hand"
+                ? "grab"
+                : mode === "select"
+                  ? "default"
                   : mode === "text"
                     ? "text"
                     : "crosshair"),
           }}
         />
+
+        {viewMode && (
+          <div
+            className="absolute top-3 right-3 z-50 flex items-center gap-1 rounded-xl border border-border/40 bg-background/80 p-1.5 shadow-lg backdrop-blur-md transition-opacity"
+            role="toolbar"
+            aria-label="View mode actions"
+          >
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={doExportPng}
+                    data-icon="true"
+                    aria-label="Export PNG"
+                    className="size-8 p-0"
+                  >
+                    <HugeiconsIcon icon={Download01Icon} className="size-4" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Export PNG</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    size="icon-sm"
+                    variant="ghost"
+                    onClick={() => setViewMode(false)}
+                    data-icon="true"
+                    aria-label="Exit view mode"
+                    className="size-8 p-0"
+                  >
+                    <HugeiconsIcon icon={Cancel01Icon} className="size-4" />
+                  </Button>
+                }
+              />
+              <TooltipContent>Exit view mode (Esc)</TooltipContent>
+            </Tooltip>
+          </div>
+        )}
 
         {refineRect && mode === "select" && refineBtnPos && (
           <div
@@ -3502,11 +3570,13 @@ export function CanvasApp() {
         )}
       </div>
 
-      <CanvasFooter
-        onZoomIn={() => zoomBy(-100)}
-        onZoomOut={() => zoomBy(100)}
-        onReset={resetView}
-      />
+      {!viewMode && (
+        <CanvasFooter
+          onZoomIn={() => zoomBy(-100)}
+          onZoomOut={() => zoomBy(100)}
+          onReset={resetView}
+        />
+      )}
 
       <input
         ref={fileRef}
