@@ -14,7 +14,7 @@ import { recordAiUsage } from "@/lib/actions/usage";
 import { type ProviderType, type ReasoningEffort, PROVIDER_INFOS } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
-export const maxDuration = 480; // 8 minutes (requires Vercel Pro/Enterprise Fluid Compute; max 300 on Hobby)
+export const maxDuration = 300; // 5 minutes (maximum allowed limit on standard Vercel plans)
 
 interface TurnRequest {
   conversation?: unknown;
