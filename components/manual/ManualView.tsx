@@ -76,7 +76,6 @@ const TOOLS = [
   { name: "Select", key: "V", desc: "Click to select an ink cluster, drag a marquee on empty canvas, then move, lift, or erase the selection." },
   { name: "Hand", key: "H", desc: "Pan around the infinite canvas. Middle-mouse drag pans from any tool." },
   { name: "Pen", key: "P", desc: "Draw smooth vector ink strokes. The primary way to sketch ideas for the AI to perceive." },
-  { name: "Highlighter", key: "Shift+H", desc: "Semi-transparent marker strokes for emphasizing existing ink." },
   { name: "Eraser", key: "E", desc: "Precision stroke eraser — removes whole intersecting strokes." },
   { name: "Text", key: "T", desc: "Insert an editable text box. Double-click existing text to edit." },
   { name: "Rectangle", key: "R", desc: "Draw a vector rectangle shape." },

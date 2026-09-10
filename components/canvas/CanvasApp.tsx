@@ -2976,8 +2976,7 @@ export function CanvasApp() {
         }
         return;
       }
-      if (e.shiftKey && k === "h") setMode("highlighter");
-      else if (k === "v") setMode("select");
+      if (k === "v") setMode("select");
       else if (k === "h") setMode("hand");
       else if (k === "p") setMode("pen");
       else if (k === "e") setMode("eraser");
@@ -3604,6 +3603,7 @@ export function CanvasApp() {
         onMode={handleModeChange}
         toolsLocked={refineState === "loading"}
         viewMode={viewMode}
+        onToggleViewMode={() => setViewMode(!viewMode)}
         color={color}
         onColor={setColor}
         pen={pen}

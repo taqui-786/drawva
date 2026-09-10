@@ -25,7 +25,6 @@ import {
   CursorIcon,
   HandIcon,
   PencilIcon,
-  HighlighterIcon,
   EraserIcon,
   TextIcon,
   SquareIcon,
@@ -39,6 +38,7 @@ import {
   MagicWand01Icon,
   ImageAdd01Icon,
   MoreHorizontalIcon,
+  ViewIcon,
 } from "@hugeicons/core-free-icons";
 
 export const PALETTE = [
@@ -60,12 +60,6 @@ const PRIMARY_TOOLS: {
   { mode: "select", label: "Select", kbd: "V", icon: CursorIcon },
   { mode: "hand", label: "Hand", kbd: "H", icon: HandIcon },
   { mode: "pen", label: "Pen", kbd: "P", icon: PencilIcon },
-  {
-    mode: "highlighter",
-    label: "Highlighter",
-    kbd: "⇧H",
-    icon: HighlighterIcon,
-  },
   { mode: "eraser", label: "Eraser", kbd: "E", icon: EraserIcon },
   { mode: "text", label: "Text", kbd: "T", icon: TextIcon },
 ];
@@ -139,6 +133,7 @@ export interface CanvasToolbarProps {
   onMode: (m: CanvasMode) => void;
   toolsLocked?: boolean;
   viewMode?: boolean;
+  onToggleViewMode?: () => void;
   color: string;
   onColor: (c: string) => void;
   pen: number;
@@ -161,6 +156,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   onMode,
   toolsLocked = false,
   viewMode = false,
+  onToggleViewMode,
   color,
   onColor,
   pen,
@@ -195,13 +191,44 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       )}
     >
       <div className="flex items-center gap-0.5 sm:gap-1 rounded-2xl border border-border/80 bg-background/95 dark:bg-zinc-950/90 backdrop-blur-md px-1.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
-        {/* Select & Hand */}
+        {/* Select */}
         <ToolButton
           mode={mode}
           tool={PRIMARY_TOOLS[0]}
           onMode={onMode}
           disabled={toolsLocked}
         />
+
+        {/* View Canvas (Eye icon) */}
+        {onToggleViewMode && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant={viewMode ? "secondaryPrimary" : "ghost"}
+                  onClick={onToggleViewMode}
+                  data-icon="true"
+                  aria-label="View canvas"
+                  aria-pressed={viewMode}
+                  disabled={toolsLocked}
+                  className={cn(
+                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl",
+                    viewMode && "shadow-xs",
+                    toolsLocked && "opacity-50 pointer-events-none"
+                  )}
+                >
+                  <HugeiconsIcon icon={ViewIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">
+              {viewMode ? "Exit view canvas (Esc)" : "View canvas"}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {/* Hand */}
         <ToolButton
           mode={mode}
           tool={PRIMARY_TOOLS[1]}
@@ -211,7 +238,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
 
         <Separator orientation="vertical" className="mx-0.5 h-5 self-center" />
 
-        {/* Drawing Tools: Pen, Highlighter, Eraser */}
+        {/* Drawing Tools: Pen, Eraser */}
         <ToolButton
           mode={mode}
           tool={PRIMARY_TOOLS[2]}
@@ -221,12 +248,6 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
         <ToolButton
           mode={mode}
           tool={PRIMARY_TOOLS[3]}
-          onMode={onMode}
-          disabled={toolsLocked}
-        />
-        <ToolButton
-          mode={mode}
-          tool={PRIMARY_TOOLS[4]}
           onMode={onMode}
           disabled={toolsLocked}
         />
@@ -272,7 +293,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
         {/* Text Tool */}
         <ToolButton
           mode={mode}
-          tool={PRIMARY_TOOLS[5]}
+          tool={PRIMARY_TOOLS[4]}
           onMode={onMode}
           disabled={toolsLocked}
         />
