@@ -14,7 +14,7 @@ import { recordAiUsage } from "@/lib/actions/usage";
 import { type ProviderType, type ReasoningEffort, PROVIDER_INFOS } from "@/lib/ai/provider";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+export const maxDuration = 480; // 8 minutes (requires Vercel Pro/Enterprise Fluid Compute; max 300 on Hobby)
 
 interface TurnRequest {
   conversation?: unknown;
@@ -128,6 +128,7 @@ export async function POST(req: Request) {
         }
       };
       const finish = () => {
+        clearInterval(pingTimer);
         if (!closed) {
           closed = true;
           try {
@@ -141,6 +142,18 @@ export async function POST(req: Request) {
       }
       const onAbort = () => finish();
       req.signal.addEventListener("abort", onAbort, { once: true });
+      const pingTimer = setInterval(() => {
+        if (closed) {
+          clearInterval(pingTimer);
+          return;
+        }
+        try {
+          controller.enqueue(encoder.encode(": ping\n\n"));
+        } catch {
+          closed = true;
+          clearInterval(pingTimer);
+        }
+      }, 15_000);
       let accumulatedResponse = "";
       try {
         await runConversationTurn(turnOptions, (e) => {
@@ -181,6 +194,7 @@ export async function POST(req: Request) {
         }
       } finally {
         req.signal.removeEventListener("abort", onAbort);
+        clearInterval(pingTimer);
         finish();
       }
     },
