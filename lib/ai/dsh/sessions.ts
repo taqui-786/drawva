@@ -15,6 +15,7 @@ import { credentialRefFor, stageConnectionCredential } from "./credentials";
 import { registerConversationTools } from "./tools";
 import { cancelConversationCalls, setBridgeDispatcher } from "./bridge";
 import { CANVAS_DECISION_FEEDBACK_TOOL, isDecisionFeedbackCall, pruneDecisionFeedback } from "./admission";
+import { generateSessionId, isValidSessionId } from "../sessionManager";
 
 export interface TurnImage {
   id: string;
@@ -133,7 +134,21 @@ async function ensureConversation(opts: OpenTurnOptions): Promise<{ ctx: Context
   }
 
   if (existing) {
-    await disposeConversation(opts.conversationId).catch(() => {});
+    existing.connectionId = opts.connectionId;
+    existing.model = opts.model;
+    existing.providerType = opts.providerType;
+    existing.baseUrl = opts.baseUrl;
+    existing.effort = opts.effort;
+    existing.route = profile.route;
+    if (existing.handle?.agent) {
+      Object.assign((existing.handle.agent as unknown as { options: Record<string, unknown> }).options, {
+        provider: profile.route,
+        model: profile.model,
+        ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort } : {}),
+        maxTokens: profile.maxTokens,
+      });
+    }
+    return { ctx, conversation: existing, agent: existing.handle.agent, priorSeed: "" };
   }
 
   const priorSeed = opts.priorTurns?.length ? priorTurnsText(opts.priorTurns) : "";
@@ -149,7 +164,21 @@ async function ensureConversation(opts: OpenTurnOptions): Promise<{ ctx: Context
     ) {
       return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
     }
-    await disposeConversation(opts.conversationId).catch(() => {});
+    conversation.connectionId = opts.connectionId;
+    conversation.model = opts.model;
+    conversation.providerType = opts.providerType;
+    conversation.baseUrl = opts.baseUrl;
+    conversation.effort = opts.effort;
+    conversation.route = profile.route;
+    if (conversation.handle?.agent) {
+      Object.assign((conversation.handle.agent as unknown as { options: Record<string, unknown> }).options, {
+        provider: profile.route,
+        model: profile.model,
+        ...(profile.reasoningEffort ? { reasoningEffort: profile.reasoningEffort } : {}),
+        maxTokens: profile.maxTokens,
+      });
+    }
+    return { ctx, conversation, agent: conversation.handle.agent, priorSeed };
   }
   const creating = createConversation(ctx, opts, profile);
   opening.set(opts.conversationId, creating);
@@ -223,6 +252,17 @@ async function createConversation(
       },
       loadedVisualSkills: () => visualSkillsLoaded,
     });
+    agentCtx.on("agent/request", async (_payload, next) => {
+      const config = await next();
+      const current = conversations.get(opts.conversationId);
+      if (!current) return config;
+      return {
+        ...config,
+        provider: current.route,
+        model: current.model,
+        ...(current.effort !== undefined ? { reasoningEffort: current.effort as never } : {}),
+      };
+    });
   };
 
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -285,9 +325,18 @@ async function createConversation(
 }
 
 export function conversationIdFor(userId: string, suffix: unknown): string {
-  const clean =
-    typeof suffix === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(suffix) ? suffix : "default";
-  return `user:${userId}:${clean}`;
+  if (isValidSessionId(suffix)) {
+    return suffix;
+  }
+  const cleanUser =
+    (userId && typeof userId === "string" ? userId.trim() : "anon")
+      .replace(/[^A-Za-z0-9_-]/g, "")
+      .slice(0, 32) || "anon";
+  if (typeof suffix === "string" && /^[A-Za-z0-9_-]{1,64}$/.test(suffix)) {
+    if (suffix.startsWith("taqui-")) return suffix;
+    return `taqui-${cleanUser}-${suffix}`;
+  }
+  return generateSessionId(userId);
 }
 
 export function hasOpenTurn(conversationId: string): boolean {

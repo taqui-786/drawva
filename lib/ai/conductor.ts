@@ -42,6 +42,11 @@ import {
 } from "./agentTools";
 import { executeTool, fnv1a, type ActiveImage, type ConductorToolDeps } from "./conductorTools";
 import type { ToolTargetHint } from "@/lib/canvas/agentCharacter";
+import {
+  ensureActiveSessionId,
+  getActiveSessionId,
+  isValidSessionId,
+} from "./sessionManager";
 
 export type StepMessage =
   | { role: "user"; text: string; images?: { id: string; dataUrl: string }[] }
@@ -83,6 +88,8 @@ export interface ConductorDeps {
   getInkBox?: () => Rect | null;
   getInkIntent?: () => { x: number; y: number } | null;
   canvasId?: () => string | undefined;
+  getSessionId?: () => string | undefined;
+  getUserId?: () => string | undefined;
 }
 
 interface TurnPolicy {
@@ -896,9 +903,33 @@ export class Conductor {
     }).catch(() => {});
   }
 
+  private currentSessionId: string | null = null;
+
+  setSessionId(id: string): void {
+    this.currentSessionId = id;
+  }
+
+  getSessionId(): string {
+    if (this.currentSessionId && isValidSessionId(this.currentSessionId)) {
+      return this.currentSessionId;
+    }
+    const fromDeps = this.deps.getSessionId?.();
+    if (fromDeps && isValidSessionId(fromDeps)) {
+      this.currentSessionId = fromDeps;
+      return fromDeps;
+    }
+    const stored = getActiveSessionId();
+    if (stored) {
+      this.currentSessionId = stored;
+      return stored;
+    }
+    const created = ensureActiveSessionId(this.deps.getUserId?.());
+    this.currentSessionId = created;
+    return created;
+  }
+
   private conversationSuffix(): string {
-    const raw = this.deps.canvasId?.() || "default";
-    return /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(raw) ? raw : "default";
+    return this.getSessionId();
   }
 
   private seedHistory(): { role: string; text: string }[] {

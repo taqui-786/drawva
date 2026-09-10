@@ -56,6 +56,10 @@ import { useSession } from "@/lib/auth-client";
 import { BoardHistory } from "@/lib/canvas/history";
 import { boardFingerprint } from "@/lib/canvas/fingerprint";
 import {
+  createAndStoreSession,
+  ensureActiveSessionId,
+} from "@/lib/ai/sessionManager";
+import {
   AgentCharacterController,
   getToolStartNarration,
   getToolEndNarration,
@@ -263,6 +267,18 @@ export function CanvasApp() {
     const name = session?.user?.name;
     if (name) syncManager.current?.setLocalName(name);
   }, [isAuthenticated, session?.user?.name]);
+
+  const lastUserIdRef = useRef<string | null>(null);
+  const userIdRef = useRef<string | undefined>(session?.user?.id);
+  useEffect(() => {
+    const currentUserId = session?.user?.id ?? null;
+    userIdRef.current = session?.user?.id;
+    if (currentUserId && currentUserId !== lastUserIdRef.current) {
+      const newSessionId = createAndStoreSession(currentUserId);
+      conductorRef.current?.setSessionId(newSessionId);
+    }
+    lastUserIdRef.current = currentUserId;
+  }, [session?.user?.id]);
 
   const lastMoveSyncRef = useRef<Record<string, number>>({});
   function broadcastMove(
@@ -1334,6 +1350,11 @@ export function CanvasApp() {
 
   function clearBoard() {
     if (!engine) return;
+    const newSessionId = createAndStoreSession(session?.user?.id);
+    conductorRef.current?.setSessionId(newSessionId);
+    conductorRef.current?.cancel();
+    conductorRef.current?.clearHistory();
+    toast.success("created new session boss! 🚀");
     history.current?.captureWholeBoard();
     engine.tiles.clear();
     engine.requestRender();
@@ -1341,8 +1362,6 @@ export function CanvasApp() {
     objects.current?.clear();
     inkBoxRef.current = null;
     lastArrowRef.current = null;
-    conductorRef.current?.cancel();
-    conductorRef.current?.clearHistory();
     setAiStatus("idle");
     setAiRun({
       phase: "idle",
@@ -1366,9 +1385,12 @@ export function CanvasApp() {
   async function doImportJson(file: File) {
     if (!engine) return;
     try {
-      history.current?.reset();
+      const newSessionId = createAndStoreSession(session?.user?.id);
+      conductorRef.current?.setSessionId(newSessionId);
       conductorRef.current?.cancel();
       conductorRef.current?.clearHistory();
+      toast.success("created new session boss! 🚀");
+      history.current?.reset();
       await importJson(engine, widgets.current, objects.current, file);
       afterBoardChange();
       if (syncManager.current) {
@@ -2148,6 +2170,8 @@ export function CanvasApp() {
         const len = Math.hypot(dx, dy);
         return len > 1e-4 ? { x: dx / len, y: dy / len } : null;
       },
+      getSessionId: () => ensureActiveSessionId(userIdRef.current),
+      getUserId: () => userIdRef.current,
     });
     conductorRef.current = agent;
 
