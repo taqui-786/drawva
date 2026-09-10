@@ -142,7 +142,12 @@ export function isReasoningModel(
     return true;
   }
 
-  if (id.includes("thinking") || id.includes("gemini-2.5-pro")) {
+  if (
+    id.includes("thinking") ||
+    id.includes("gemini-2") ||
+    id.includes("gemini-3") ||
+    id.includes("gemini-1.5-pro")
+  ) {
     return true;
   }
 

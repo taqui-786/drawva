@@ -26,14 +26,12 @@ function effectiveBaseUrl(providerType: ProviderType, baseUrl?: string): string 
 function piAiReasoningEffort(model: string, isAnthropicRoute: boolean, effort: ReasoningEffort | undefined): string | undefined {
   if (!effort || effort === "default") return undefined;
   const lower = model.toLowerCase();
-  const reasoningModel =
-    lower.startsWith("o1") ||
-    lower.startsWith("o3") ||
-    lower.startsWith("o4") ||
-    lower.includes("deepseek-r1") ||
-    lower.includes("qwq") ||
-    (lower.startsWith("gpt-5") && !lower.includes("chat"));
-  if (!isAnthropicRoute && !reasoningModel) return undefined;
+  // Standard legacy OpenAI completion models (e.g. gpt-4o, gpt-4-turbo, gpt-3.5) reject reasoning_effort with HTTP 400.
+  const isLegacyOpenAiChat =
+    (lower.startsWith("gpt-4") && !lower.includes("o1") && !lower.includes("o3")) ||
+    lower.startsWith("gpt-3") ||
+    lower.startsWith("chatgpt");
+  if (!isAnthropicRoute && isLegacyOpenAiChat) return undefined;
   return effort;
 }
 

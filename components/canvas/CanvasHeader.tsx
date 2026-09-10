@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "motion/react";
 import { Button } from "@/components/ui/button";
@@ -85,7 +85,6 @@ import type { CanvasMode } from "@/lib/canvas/types";
 import {
   type ReasoningEffort,
   REASONING_EFFORT_OPTIONS,
-  getModelCapabilitiesCached,
 } from "@/lib/ai/provider";
 import { requestFullscreenLandscape } from "@/lib/canvas/orientation";
 
@@ -293,19 +292,7 @@ export function CanvasHeader({
   const activeShapeTool =
     SHAPE_TOOLS.find((s) => s.mode === mode) || SHAPE_TOOLS[0];
 
-  const [capabilitiesVersion, setCapabilitiesVersion] = useState(0);
   const [styleOpen, setStyleOpen] = useState(false);
-  useEffect(() => {
-    const onStorage = () => setCapabilitiesVersion((v) => v + 1);
-    window.addEventListener("storage", onStorage);
-    return () => window.removeEventListener("storage", onStorage);
-  }, []);
-
-  const supportsReasoning = useMemo(() => {
-    void capabilitiesVersion;
-    if (!activeModel) return false;
-    return getModelCapabilitiesCached(activeModel).reasoning;
-  }, [activeModel, capabilitiesVersion]);
 
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-1.5 sm:px-3 w-full max-w-full overflow-hidden">
@@ -950,35 +937,33 @@ export function CanvasHeader({
                 <TooltipContent>AI Model: {activeModel || "None selected"} (Click to browse & change)</TooltipContent>
               </Tooltip>
 
-              {supportsReasoning && (
-                <div className="hidden sm:block shrink-0">
-                  <Select
-                    value={reasoningEffort}
-                    onValueChange={(val) => onReasoningEffortChange((val as ReasoningEffort) || "default")}
-                    items={REASONING_EFFORT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+              <div className="hidden sm:block shrink-0">
+                <Select
+                  value={reasoningEffort}
+                  onValueChange={(val) => onReasoningEffortChange((val as ReasoningEffort) || "default")}
+                  items={REASONING_EFFORT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className="h-7 w-auto gap-1 px-2 text-xs font-medium shrink-0"
+                    title="Reasoning / Thinking Depth"
                   >
-                    <SelectTrigger
-                      size="sm"
-                      className="h-7 w-auto gap-1 px-2 text-xs font-medium shrink-0"
-                      title="Reasoning / Thinking Depth"
-                    >
-                      <HugeiconsIcon icon={AiBrain01Icon} className="size-3.5 shrink-0 text-primary" />
-                      <span className="hidden lg:inline text-muted-foreground mr-0.5">Thinking:</span>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent align="end" alignItemWithTrigger={false} className="w-56 text-xs">
-                      {REASONING_EFFORT_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value} className="text-xs cursor-pointer">
-                          <div className="flex flex-col py-0.5">
-                            <span className="font-medium">{opt.label}</span>
-                            <span className="text-[10px] text-muted-foreground">{opt.description}</span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
+                    <HugeiconsIcon icon={AiBrain01Icon} className="size-3.5 shrink-0 text-primary" />
+                    <span className="hidden lg:inline text-muted-foreground mr-0.5">Thinking:</span>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent align="end" alignItemWithTrigger={false} className="w-56 text-xs">
+                    {REASONING_EFFORT_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value} className="text-xs cursor-pointer">
+                        <div className="flex flex-col py-0.5">
+                          <span className="font-medium">{opt.label}</span>
+                          <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <label className="hidden md:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none shrink-0">
                 <Switch
