@@ -2,7 +2,10 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useSnapshot } from "valtio";
 import { motion, AnimatePresence } from "motion/react";
+import { appState } from "@/lib/state";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -10,11 +13,8 @@ import { Switch } from "@/components/ui/switch";
 import {
   Popover,
   PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Slider } from "@/components/ui/slider";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -41,32 +41,17 @@ import {
   ArrowRight01Icon,
   BookOpen01Icon,
   ChevronDownIcon,
-  CursorIcon,
-  ColorsIcon,
   Delete02Icon,
   Download01Icon,
-  EllipseIcon,
-  EraserIcon,
   GridTableIcon,
-  HandIcon,
-  HighlighterIcon,
-  ImageAdd01Icon,
   Image01Icon,
   Maximize01Icon,
-  MagicWand01Icon,
   Menu01Icon,
-  MoreHorizontalIcon,
-  MoreIcon,
-  PencilIcon,
-  RedoIcon,
   Settings01Icon,
   AiBrain01Icon,
   AiChipIcon,
   SparklesIcon,
-  SquareIcon,
-  TextIcon,
   TerminalIcon,
-  UndoIcon,
   Upload01Icon,
   PeerToPeer01Icon,
   Wifi01Icon,
@@ -78,7 +63,10 @@ import {
   CloudOffIcon,
   SquareStopIcon,
   SteeringIcon,
-  ViewIcon,
+  ZoomInAreaIcon,
+  ZoomOutAreaIcon,
+  Refresh01Icon,
+  Shield01Icon,
 } from "@hugeicons/core-free-icons";
 import { useSession, signOut } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
@@ -97,158 +85,11 @@ export interface AiRunState {
   durationStage?: "normal" | "slow" | "critical";
 }
 
-const PALETTE = [
-  "#111111",
-  "#2563eb",
-  "#dc2626",
-  "#16a34a",
-  "#f59e0b",
-  "#9333ea",
-  "#fbbf24",
-];
-
-const PRIMARY_TOOLS: {
-  mode: CanvasMode;
-  label: string;
-  kbd: string;
-  icon: typeof CursorIcon;
-}[] = [
-  { mode: "select", label: "Select", kbd: "V", icon: CursorIcon },
-  { mode: "hand", label: "Hand", kbd: "H", icon: HandIcon },
-  { mode: "pen", label: "Pen", kbd: "P", icon: PencilIcon },
-  {
-    mode: "highlighter",
-    label: "Highlighter",
-    kbd: "⇧H",
-    icon: HighlighterIcon,
-  },
-  { mode: "eraser", label: "Eraser", kbd: "E", icon: EraserIcon },
-  { mode: "text", label: "Text", kbd: "T", icon: TextIcon },
-];
-
-const SHAPE_TOOLS: {
-  mode: CanvasMode;
-  label: string;
-  kbd: string;
-  icon: typeof SquareIcon;
-}[] = [
-  { mode: "rect", label: "Rectangle", kbd: "R", icon: SquareIcon },
-  { mode: "ellipse", label: "Ellipse", kbd: "O", icon: EllipseIcon },
-  { mode: "arrow", label: "Arrow", kbd: "A", icon: ArrowRight01Icon },
-];
-
-function ToolButton({
-  mode,
-  tool,
-  onMode,
-  disabled = false,
-}: {
-  mode: CanvasMode;
-  tool: {
-    mode: CanvasMode;
-    label: string;
-    kbd: string;
-    icon: typeof CursorIcon;
-  };
-  onMode: (m: CanvasMode) => void;
-  disabled?: boolean;
-}) {
-  const active = mode === tool.mode;
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            size="icon-sm"
-            variant={active ? "secondaryPrimary" : "ghost"}
-            aria-pressed={active}
-            disabled={disabled}
-            onClick={() => {
-              if (!disabled) onMode(tool.mode);
-            }}
-            data-icon="true"
-            className={cn("shrink-0 size-7 sm:size-8 p-0", disabled && "opacity-50 pointer-events-none")}
-          >
-            <HugeiconsIcon icon={tool.icon} className="size-4" />
-          </Button>
-        }
-      />
-      <TooltipContent>
-        {disabled ? "Tools locked during refinement" : (
-          <>
-            {tool.label} <span className="kbd">{tool.kbd}</span>
-          </>
-        )}
-      </TooltipContent>
-    </Tooltip>
-  );
-}
-
-export function CanvasHeader({
-  mode,
-  onMode,
-  color,
-  onColor,
-  pen,
-  onPen,
-  onImportImage,
-  onUndo,
-  onRedo,
-  onClear,
-  canUndo,
-  canRedo,
-  onExportPng,
-  onExportJson,
-  onImportJson,
-  aiStatus,
-  aiRun,
-  autoOn,
-  onAutoChange,
-  onAskAi,
-  onCancelAi,
-  onSteerAi,
-  agentRunning = false,
-  models,
-  activeModel,
-  reasoningEffort = "default",
-  onReasoningEffortChange,
-  onOpenModelSelect,
-  onOpenSettings,
-  syncStatus,
-  syncRoomCode,
-  syncPeerCount,
-  onOpenConnect,
-  onOpenLogs,
-  onOpenManual,
-  onTidy,
-  cloudStatus = "idle",
-  onTriggerCloudSync,
-  toolsLocked = false,
-  viewMode = false,
-  onToggleViewMode,
-  gridVisible = true,
-  onToggleGrid,
-}: {
-  mode: CanvasMode;
-  onMode: (m: CanvasMode) => void;
-  toolsLocked?: boolean;
-  viewMode?: boolean;
-  onToggleViewMode?: () => void;
-  gridVisible?: boolean;
-  onToggleGrid?: () => void;
-  color: string;
-  onColor: (c: string) => void;
-  pen: number;
-  onPen: (p: number) => void;
-  onImportImage: () => void;
-  onUndo: () => void;
-  onRedo: () => void;
-  onClear: () => void;
-  canUndo: boolean;
-  canRedo: boolean;
+export interface CanvasHeaderProps {
   onExportPng: () => void;
   onExportJson: () => void;
   onImportJson: () => void;
+  onClear?: () => void;
   aiStatus: "idle" | "thinking" | "done" | "error";
   aiRun: AiRunState;
   autoOn: boolean;
@@ -270,12 +111,67 @@ export function CanvasHeader({
   onOpenConnect: () => void;
   onOpenLogs?: () => void;
   onOpenManual?: () => void;
-  onTidy?: () => void;
   cloudStatus?: CloudSyncStatus;
   onTriggerCloudSync?: () => void;
-}) {
+  viewMode?: boolean;
+  onToggleViewMode?: () => void;
+  gridVisible?: boolean;
+  onToggleGrid?: () => void;
+  onZoomIn?: () => void;
+  onZoomOut?: () => void;
+  onReset?: () => void;
+  // Legacy optional props to prevent regressions
+  mode?: CanvasMode;
+  onMode?: (m: CanvasMode) => void;
+  toolsLocked?: boolean;
+  color?: string;
+  onColor?: (c: string) => void;
+  pen?: number;
+  onPen?: (p: number) => void;
+  onImportImage?: () => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onTidy?: () => void;
+}
+
+export function CanvasHeader({
+  onExportPng,
+  onExportJson,
+  onImportJson,
+  onClear,
+  aiStatus,
+  aiRun,
+  autoOn,
+  onAutoChange,
+  onAskAi,
+  onCancelAi,
+  onSteerAi,
+  agentRunning = false,
+  models,
+  activeModel,
+  reasoningEffort = "default",
+  onReasoningEffortChange,
+  onOpenModelSelect,
+  onOpenSettings,
+  syncStatus,
+  syncRoomCode,
+  syncPeerCount,
+  onOpenConnect,
+  onOpenLogs,
+  onOpenManual,
+  cloudStatus = "idle",
+  onTriggerCloudSync,
+  gridVisible = true,
+  onToggleGrid,
+  onZoomIn,
+  onZoomOut,
+  onReset,
+}: CanvasHeaderProps) {
   const router = useRouter();
   const { data: session } = useSession();
+  const { zoom, center } = useSnapshot(appState);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const isGenerating = agentRunning || aiStatus === "thinking";
   const [steerOpen, setSteerOpen] = useState(false);
@@ -298,14 +194,9 @@ export function CanvasHeader({
     }
   };
 
-  const isShapeActive = ["rect", "ellipse", "arrow"].includes(mode);
-  const activeShapeTool =
-    SHAPE_TOOLS.find((s) => s.mode === mode) || SHAPE_TOOLS[0];
-
-  const [styleOpen, setStyleOpen] = useState(false);
-
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background px-1.5 sm:px-3 w-full max-w-full overflow-hidden">
+    <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background/95 backdrop-blur-xs px-2 sm:px-3 w-full max-w-full overflow-hidden select-none">
+      {/* Left side: Brand, Menu, Sync, and Zoom controls */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         <span className="brand-wordmark pr-1 text-base sm:text-lg font-bold leading-none select-none">
           Drawva
@@ -373,13 +264,15 @@ export function CanvasHeader({
                   {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
                 </DropdownMenuItem>
               )}
-              <DropdownMenuItem
-                onClick={onClear}
-                className="text-destructive focus:text-destructive"
-              >
-                <HugeiconsIcon icon={Delete02Icon} />
-                Clear Board
-              </DropdownMenuItem>
+              {onClear && (
+                <DropdownMenuItem
+                  onClick={onClear}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <HugeiconsIcon icon={Delete02Icon} />
+                  Clear Board
+                </DropdownMenuItem>
+              )}
             </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
@@ -422,25 +315,24 @@ export function CanvasHeader({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {syncStatus === "connected" ? (
+        {/* P2P Sync Status */}
+        {syncStatus === "connected" && (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
-                  variant={"ghost"}
+                  variant="ghost"
                   size="sm"
                   onClick={onOpenConnect}
                   className="gap-1 px-2 text-xs"
                 >
                   <HugeiconsIcon
                     icon={Wifi01Icon}
-                    className={`size-3.5 ${syncStatus === "connected" ? "text-emerald-500" : ""}`}
+                    className="size-3.5 text-emerald-500"
                   />
-
                   <span className="font-mono font-bold text-xs">
                     {syncRoomCode}
                   </span>
-
                   {syncPeerCount > 0 && (
                     <Badge
                       variant="secondary"
@@ -454,10 +346,9 @@ export function CanvasHeader({
             />
             <TooltipContent>Live Device Connected (P2P)</TooltipContent>
           </Tooltip>
-        ) : (
-          ""
         )}
 
+        {/* Cloud Sync Status */}
         {session?.user && (
           <Tooltip>
             <TooltipTrigger
@@ -510,287 +401,112 @@ export function CanvasHeader({
             </TooltipContent>
           </Tooltip>
         )}
-      </div>
 
-      <Separator orientation="vertical" className="mx-1 h-5 hidden sm:block self-center" />
-
-      <div className="flex items-center gap-0.5 sm:gap-1 min-w-0 overflow-x-auto no-scrollbar py-0.5 px-0.5">
-        <ToolButton mode={mode} tool={PRIMARY_TOOLS[0]} onMode={onMode} disabled={toolsLocked} />
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant={viewMode ? "secondaryPrimary" : "ghost"}
-                onClick={onToggleViewMode}
-                data-icon="true"
-                aria-label="View canvas"
-                aria-pressed={viewMode}
-                disabled={toolsLocked}
-                className={cn(
-                  "shrink-0 size-7 sm:size-8 p-0",
-                  toolsLocked && "opacity-50 pointer-events-none",
-                )}
-              >
-                <HugeiconsIcon icon={ViewIcon} className="size-4" />
-              </Button>
-            }
-          />
-          <TooltipContent>
-            {viewMode ? "Exit view canvas (Esc)" : "View canvas"}
-          </TooltipContent>
-        </Tooltip>
-        {PRIMARY_TOOLS.slice(1, 5).map((t) => (
-          <ToolButton key={t.mode} mode={mode} tool={t} onMode={onMode} disabled={toolsLocked} />
-        ))}
-
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant={isShapeActive ? "secondaryPrimary" : "ghost"}
-                aria-label="Shapes"
-                data-icon="true"
-                disabled={toolsLocked}
-                className={cn("shrink-0 size-7 sm:size-8 p-0", toolsLocked && "opacity-50 pointer-events-none")}
-              >
-                <HugeiconsIcon icon={activeShapeTool.icon} className="size-4" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="center">
-            {SHAPE_TOOLS.map((s) => (
-              <DropdownMenuItem
-                key={s.mode}
-                onClick={() => {
-                  if (!toolsLocked) onMode(s.mode);
-                }}
-                disabled={toolsLocked}
-                className="gap-2"
-              >
-                <HugeiconsIcon icon={s.icon} />
-                <span>{s.label}</span>
-                <span className="kbd ml-auto">{s.kbd}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        <ToolButton mode={mode} tool={PRIMARY_TOOLS[5]} onMode={onMode} disabled={toolsLocked} />
-
-        <Popover open={styleOpen} onOpenChange={setStyleOpen}>
-          <PopoverTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                data-icon="true"
-                aria-label="Colors & Stroke"
-                className="shrink-0 size-7 sm:size-8 p-0"
-              >
-                <HugeiconsIcon icon={ColorsIcon} className="size-4" />
-              </Button>
-            }
-          />
-          <PopoverContent
-            align="center"
-            sideOffset={6}
-            className="w-56 items-start gap-3"
-          >
-            <PopoverHeader>
-              <PopoverTitle>Style</PopoverTitle>
-            </PopoverHeader>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {PALETTE.map((c) => (
-                <button
-                  key={c}
-                  onClick={() => {
-                    onColor(c);
-                    setStyleOpen(false);
-                  }}
-                  title={c}
-                  aria-label={`Color ${c}`}
-                  className="size-5 rounded-full border transition-transform hover:scale-110"
-                  style={{
-                    background: c,
-                    borderColor:
-                      color === c ? "var(--foreground)" : "var(--border)",
-                    outline: color === c ? "2px solid var(--ring)" : "none",
-                  }}
+        {/* Integrated Zoom Controls (relocated from bottom footer) */}
+        {onZoomIn && onZoomOut && (
+          <>
+            <Separator orientation="vertical" className="mx-0.5 sm:mx-1 h-4 sm:h-5 self-center" />
+            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      onClick={onZoomOut}
+                      aria-label="Zoom out"
+                      data-icon="true"
+                      className="size-7 sm:size-8 p-0"
+                    >
+                      <HugeiconsIcon icon={ZoomOutAreaIcon} className="size-3.5 sm:size-4" />
+                    </Button>
+                  }
                 />
-              ))}
-            </div>
-            <div className="flex flex-col gap-2 w-full">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>Stroke width</span>
-                <span>{pen}px</span>
-              </div>
-              <Slider
-                min={1}
-                max={16}
-                step={1}
-                value={[pen]}
-                onValueChange={(v) =>
-                  onPen(Number(Array.isArray(v) ? v[0] : v))
-                }
-              />
-            </div>
-          </PopoverContent>
-        </Popover>
+                <TooltipContent>Zoom out</TooltipContent>
+              </Tooltip>
 
-        <div className="hidden md:flex items-center gap-0.5">
-          <Separator orientation="vertical" className="mx-1 h-5 self-center" />
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={onUndo}
-                  disabled={!canUndo}
-                  data-icon="true"
-                >
-                  <HugeiconsIcon icon={UndoIcon} />
-                </Button>
-              }
-            />
-            <TooltipContent>
-              Undo <span className="kbd">⌘Z</span>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={onRedo}
-                  disabled={!canRedo}
-                  data-icon="true"
-                >
-                  <HugeiconsIcon icon={RedoIcon} />
-                </Button>
-              }
-            />
-            <TooltipContent>
-              Redo <span className="kbd">⇧⌘Z</span>
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant={gridVisible ? "secondaryPrimary" : "ghost"}
-                  onClick={onToggleGrid}
-                  data-icon="true"
-                  aria-label={gridVisible ? "Hide canvas grid" : "Show canvas grid"}
-                  aria-pressed={gridVisible}
-                  disabled={toolsLocked}
-                >
-                  <HugeiconsIcon icon={GridTableIcon} />
-                </Button>
-              }
-            />
-            <TooltipContent>
-              {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
-            </TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  onClick={onClear}
-                  data-icon="true"
-                  aria-label="Clear board"
-                >
-                  <HugeiconsIcon icon={Delete02Icon} />
-                </Button>
-              }
-            />
-            <TooltipContent>Clear board</TooltipContent>
-          </Tooltip>
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  data-icon="true"
-                  aria-label="More"
-                >
-                  <HugeiconsIcon icon={MoreIcon} />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuItem
-                disabled={aiStatus === "thinking"}
-                onClick={onTidy}
+              <Badge
+                variant="secondary"
+                className="w-12 sm:w-13 justify-center font-mono tabular-nums text-[11px] px-1"
               >
-                <HugeiconsIcon icon={MagicWand01Icon} />
-                Tidy layout
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+                {zoom}%
+              </Badge>
 
-        <div className="md:hidden">
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  size="icon-sm"
-                  variant="ghost"
-                  data-icon="true"
-                  aria-label="More tools"
-                >
-                  <HugeiconsIcon icon={MoreHorizontalIcon} />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="center" className="w-48">
-              <DropdownMenuItem onClick={onUndo} disabled={!canUndo}>
-                <HugeiconsIcon icon={UndoIcon} />
-                Undo
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onRedo} disabled={!canRedo}>
-                <HugeiconsIcon icon={RedoIcon} />
-                Redo
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                disabled={aiStatus === "thinking"}
-                onClick={onTidy}
-              >
-                <HugeiconsIcon icon={MagicWand01Icon} />
-                Tidy layout
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onImportImage}>
-                <HugeiconsIcon icon={ImageAdd01Icon} />
-                Insert Image
-              </DropdownMenuItem>
-              {onToggleGrid && (
-                <DropdownMenuItem onClick={onToggleGrid}>
-                  <HugeiconsIcon icon={GridTableIcon} />
-                  {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
-                </DropdownMenuItem>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      onClick={onZoomIn}
+                      aria-label="Zoom in"
+                      data-icon="true"
+                      className="size-7 sm:size-8 p-0"
+                    >
+                      <HugeiconsIcon icon={ZoomInAreaIcon} className="size-3.5 sm:size-4" />
+                    </Button>
+                  }
+                />
+                <TooltipContent>Zoom in</TooltipContent>
+              </Tooltip>
+
+              {onReset && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        size="icon-sm"
+                        variant="ghost"
+                        onClick={onReset}
+                        aria-label="Re-center board"
+                        data-icon="true"
+                        className="size-7 sm:size-8 p-0"
+                      >
+                        <HugeiconsIcon icon={Refresh01Icon} className="size-3.5" />
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>Re-center board</TooltipContent>
+                </Tooltip>
               )}
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={onClear} className="text-destructive">
-                <HugeiconsIcon icon={Delete02Icon} />
-                Clear Board
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
+            </div>
+          </>
+        )}
       </div>
 
-      <Separator orientation="vertical" className="mx-1 h-5 hidden lg:block self-center" />
+      {/* Center: Canvas Coordinates (clean & minimalist) */}
+      <div className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground font-mono tabular-nums select-none">
+        <span className="text-muted-foreground/50 text-[10px] uppercase tracking-wider font-sans">center</span>
+        <span className="text-foreground/75 text-[11px]">
+          {center.x}, {center.y}
+        </span>
+      </div>
 
+      {/* Right side: User Profile, Admin link, and AI Controls */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">
+        {session?.user && (
+          <div className="hidden xl:flex items-center gap-1.5 shrink-0">
+            <span className="inline-flex items-center gap-1.5 font-sans text-xs text-muted-foreground px-1 py-0.5">
+              <span className="size-1.5 rounded-full bg-primary shrink-0" />
+              <span className="font-medium truncate max-w-[110px]">
+                {session.user.name || "User"}
+              </span>
+            </span>
+            {(session.user as { role?: string }).role === "admin" && (
+              <Button
+                variant="outline"
+                size="xs"
+                render={<Link href="/admin" />}
+                className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans"
+              >
+                <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
+                <span>Admin</span>
+              </Button>
+            )}
+            <Separator orientation="vertical" className="mx-0.5 h-4" />
+          </div>
+        )}
+
         <AnimatePresence mode="wait">
           {agentRunning || aiStatus === "thinking" ? (
             <motion.div
@@ -941,7 +657,7 @@ export function CanvasHeader({
                         data-icon="true"
                         onClick={onCancelAi}
                         aria-label="Cancel generation"
-                        className="shrink-0  p-0 text-destructive"
+                        className="shrink-0 p-0 text-destructive"
                       >
                         <HugeiconsIcon icon={SquareStopIcon} className="size-4" />
                       </Button>
@@ -1088,3 +804,5 @@ export function CanvasHeader({
     </header>
   );
 }
+
+export default CanvasHeader;

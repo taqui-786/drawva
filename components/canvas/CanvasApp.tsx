@@ -32,7 +32,15 @@ import { SettingsDialog } from "./SettingsDialog";
 import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
 import { UserManualDialog } from "./UserManualDialog";
-import { CanvasFooter, type GenerationTickerState } from "./CanvasFooter";
+import { CanvasToolbar } from "./CanvasToolbar";
+
+export interface GenerationTickerState {
+  status: "idle" | "running" | "done" | "error";
+  currentMessage: string;
+  messageId: number;
+  detail?: string;
+}
+import { FloatingAiButton } from "./FloatingAiButton";
 import { WidgetManager, type WidgetItem } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
 import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
@@ -3376,6 +3384,9 @@ export function CanvasApp() {
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
       <div className={cn("shrink-0", viewMode && "hidden")}>
         <CanvasHeader
+          onZoomIn={() => zoomBy(-100)}
+          onZoomOut={() => zoomBy(100)}
+          onReset={resetView}
           mode={mode}
           onMode={handleModeChange}
           toolsLocked={refineState === "loading"}
@@ -3588,13 +3599,36 @@ export function CanvasApp() {
         )}
       </div>
 
-      {!viewMode && (
-        <CanvasFooter
-          onZoomIn={() => zoomBy(-100)}
-          onZoomOut={() => zoomBy(100)}
-          onReset={resetView}
-        />
-      )}
+      <CanvasToolbar
+        mode={mode}
+        onMode={handleModeChange}
+        toolsLocked={refineState === "loading"}
+        viewMode={viewMode}
+        color={color}
+        onColor={setColor}
+        pen={pen}
+        onPen={setPen}
+        onUndo={() => undoRef.current?.()}
+        onRedo={() => redoRef.current?.()}
+        canUndo={canUndoState}
+        canRedo={canRedoState}
+        onClear={clearBoard}
+        gridVisible={gridVisible}
+        onToggleGrid={() => setGridVisible(!gridVisible)}
+        onImportImage={importImage}
+        onTidy={handleTidy}
+        aiStatus={aiStatus}
+      />
+
+      <FloatingAiButton
+        isRunning={agentRunning}
+        onAskAi={handleAskAi}
+        onCancelAi={() => {
+          conductorRef.current?.cancel();
+          toast.info("Agent generation cancelled.");
+        }}
+        viewMode={viewMode}
+      />
 
       <input
         ref={fileRef}
