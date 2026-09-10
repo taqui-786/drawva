@@ -47,6 +47,7 @@ import {
   Download01Icon,
   EllipseIcon,
   EraserIcon,
+  GridTableIcon,
   HandIcon,
   HighlighterIcon,
   ImageAdd01Icon,
@@ -225,12 +226,16 @@ export function CanvasHeader({
   toolsLocked = false,
   viewMode = false,
   onToggleViewMode,
+  gridVisible = true,
+  onToggleGrid,
 }: {
   mode: CanvasMode;
   onMode: (m: CanvasMode) => void;
   toolsLocked?: boolean;
   viewMode?: boolean;
   onToggleViewMode?: () => void;
+  gridVisible?: boolean;
+  onToggleGrid?: () => void;
   color: string;
   onColor: (c: string) => void;
   pen: number;
@@ -360,6 +365,12 @@ export function CanvasHeader({
                 <DropdownMenuItem onClick={onOpenManual}>
                   <HugeiconsIcon icon={BookOpen01Icon} />
                   User Manual & Guide
+                </DropdownMenuItem>
+              )}
+              {onToggleGrid && (
+                <DropdownMenuItem onClick={onToggleGrid}>
+                  <HugeiconsIcon icon={GridTableIcon} />
+                  {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
                 </DropdownMenuItem>
               )}
               <DropdownMenuItem
@@ -671,6 +682,26 @@ export function CanvasHeader({
               render={
                 <Button
                   size="icon-sm"
+                  variant={gridVisible ? "secondaryPrimary" : "ghost"}
+                  onClick={onToggleGrid}
+                  data-icon="true"
+                  aria-label={gridVisible ? "Hide canvas grid" : "Show canvas grid"}
+                  aria-pressed={gridVisible}
+                  disabled={toolsLocked}
+                >
+                  <HugeiconsIcon icon={GridTableIcon} />
+                </Button>
+              }
+            />
+            <TooltipContent>
+              {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
+            </TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
                   variant="ghost"
                   onClick={onClear}
                   data-icon="true"
@@ -741,6 +772,12 @@ export function CanvasHeader({
                 <HugeiconsIcon icon={ImageAdd01Icon} />
                 Insert Image
               </DropdownMenuItem>
+              {onToggleGrid && (
+                <DropdownMenuItem onClick={onToggleGrid}>
+                  <HugeiconsIcon icon={GridTableIcon} />
+                  {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
+                </DropdownMenuItem>
+              )}
               <DropdownMenuSeparator />
               <DropdownMenuItem onClick={onClear} className="text-destructive">
                 <HugeiconsIcon icon={Delete02Icon} />

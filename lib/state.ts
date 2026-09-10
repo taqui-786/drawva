@@ -12,7 +12,17 @@ export const appState = proxy({
   aiStatus: "idle" as AiStatus,
   autoOn: false,
   viewMode: false,
+  gridVisible: true,
 });
+
+export function setGridVisible(visible: boolean): void {
+  appState.gridVisible = visible;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("drawva.gridVisible", String(visible));
+    } catch {}
+  }
+}
 
 export function setViewMode(enabled: boolean): void {
   appState.viewMode = enabled;

@@ -13,6 +13,7 @@ import {
   setPen,
   setZoom,
   setViewMode,
+  setGridVisible,
 } from "@/lib/state";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
@@ -215,7 +216,7 @@ const INK_COALESCE_MS = 25_000;
 
 export function CanvasApp() {
   const { engine, mountRef } = useCanvas();
-  const { mode, color, pen, aiStatus, autoOn, viewMode } = useSnapshot(appState);
+  const { mode, color, pen, aiStatus, autoOn, viewMode, gridVisible } = useSnapshot(appState);
   const eraser = 18;
 
   const tools = useRef<ToolManager | null>(null);
@@ -2686,6 +2687,21 @@ export function CanvasApp() {
   }, [viewMode]);
 
   useEffect(() => {
+    try {
+      const stored = localStorage.getItem("drawva.gridVisible");
+      if (stored !== null) {
+        setGridVisible(stored === "true");
+      }
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    if (!engine) return;
+    engine.gridVisible = gridVisible;
+    engine.requestRender();
+  }, [engine, gridVisible]);
+
+  useEffect(() => {
     const onMsg = (e: MessageEvent) => {
       if (e.data?.type !== "drawva-widget-wheel") return;
       if (appState.mode !== "hand" && !appState.viewMode) return;
@@ -3365,6 +3381,8 @@ export function CanvasApp() {
           toolsLocked={refineState === "loading"}
           viewMode={viewMode}
           onToggleViewMode={() => setViewMode(!viewMode)}
+          gridVisible={gridVisible}
+          onToggleGrid={() => setGridVisible(!gridVisible)}
           color={color}
           onColor={setColor}
           pen={pen}
