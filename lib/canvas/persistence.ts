@@ -350,12 +350,33 @@ export async function loadAllSavedProviderCredentialsFromDb(): Promise<
   }
 }
 
-export async function saveAutosave(snapshot: ProjectSnapshot): Promise<void> {
+export function getAutosaveKey(canvasId?: string | null): string {
+  return canvasId ? `canvas_${canvasId}` : "canvas_local";
+}
+
+export async function saveAutosave(snapshot: ProjectSnapshot, canvasId?: string | null): Promise<void> {
   try {
     const db = await openDb();
+    const key = getAutosaveKey(canvasId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(snapshot, KEY);
+      tx.objectStore(STORE).put(snapshot, key);
+      tx.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch {}
+}
+
+export async function deleteAutosave(canvasId?: string | null): Promise<void> {
+  try {
+    const db = await openDb();
+    const key = getAutosaveKey(canvasId);
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE, "readwrite");
+      tx.objectStore(STORE).delete(key);
       tx.oncomplete = () => {
         db.close();
         resolve();
@@ -513,17 +534,40 @@ function redactTraceValue(value: unknown, depth = 0): unknown {
   return value;
 }
 
-export async function loadAutosave(): Promise<ProjectSnapshot | null> {
+export async function loadAutosave(canvasId?: string | null): Promise<ProjectSnapshot | null> {
   try {
     const db = await openDb();
+    const key = getAutosaveKey(canvasId);
     return new Promise((resolve, reject) => {
       const tx = db.transaction(STORE, "readonly");
-      const req = tx.objectStore(STORE).get(KEY);
+      const req = tx.objectStore(STORE).get(key);
       req.onsuccess = () => {
+        const res = req.result as ProjectSnapshot | undefined;
+        if (res) {
+          db.close();
+          resolve(res);
+          return;
+        }
+        if (!canvasId) {
+          const legacyTx = db.transaction(STORE, "readonly");
+          const legacyReq = legacyTx.objectStore(STORE).get(KEY);
+          legacyReq.onsuccess = () => {
+            db.close();
+            resolve((legacyReq.result as ProjectSnapshot) ?? null);
+          };
+          legacyReq.onerror = () => {
+            db.close();
+            resolve(null);
+          };
+          return;
+        }
         db.close();
-        resolve((req.result as ProjectSnapshot) ?? null);
+        resolve(null);
       };
-      req.onerror = () => reject(req.error);
+      req.onerror = () => {
+        db.close();
+        reject(req.error);
+      };
     });
   } catch {
     return null;

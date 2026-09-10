@@ -256,11 +256,11 @@ export function setWebSearchEnabled(enabled: boolean): void {
 }
 
 export function getReasoningEffort(): ReasoningEffort {
-  const val = read<string>(REASONING_EFFORT_KEY, "default");
+  const val = read<string>(REASONING_EFFORT_KEY, "medium");
   if (REASONING_EFFORT_OPTIONS.some((opt) => opt.value === val)) {
     return val as ReasoningEffort;
   }
-  return "default";
+  return "medium";
 }
 
 export function setReasoningEffort(effort: ReasoningEffort): void {

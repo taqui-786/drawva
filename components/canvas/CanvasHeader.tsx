@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState } from "react";
 import Link from "next/link";
 import { useSnapshot } from "valtio";
 import { motion, AnimatePresence } from "motion/react";
@@ -15,15 +14,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import {
   Select,
   SelectContent,
@@ -39,36 +29,21 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowRight01Icon,
-  BookOpen01Icon,
-  ChevronDownIcon,
-  Delete02Icon,
-  Download01Icon,
-  GridTableIcon,
-  Image01Icon,
-  Maximize01Icon,
-  Menu01Icon,
-  Settings01Icon,
   AiBrain01Icon,
-  AiChipIcon,
-  SparklesIcon,
-  TerminalIcon,
-  Upload01Icon,
-  PeerToPeer01Icon,
-  Wifi01Icon,
-  ScreenRotationIcon,
-  Logout01Icon,
   CloudSyncIcon,
   CloudSavingDone01Icon,
   CloudAlertIcon,
   CloudOffIcon,
-  SquareStopIcon,
+  CloudCheckIcon,
   SteeringIcon,
   ZoomInAreaIcon,
   ZoomOutAreaIcon,
   Refresh01Icon,
   Shield01Icon,
+  PeerToPeer01Icon,
+  LayoutRightIcon,
 } from "@hugeicons/core-free-icons";
-import { useSession, signOut } from "@/lib/auth-client";
+import { useSession } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
 import { cn } from "@/lib/utils";
 import type { CanvasMode } from "@/lib/canvas/types";
@@ -76,7 +51,6 @@ import {
   type ReasoningEffort,
   REASONING_EFFORT_OPTIONS,
 } from "@/lib/ai/provider";
-import { requestFullscreenLandscape } from "@/lib/canvas/orientation";
 
 export interface AiRunState {
   phase: "idle" | "running" | "done" | "error";
@@ -86,29 +60,32 @@ export interface AiRunState {
 }
 
 export interface CanvasHeaderProps {
-  onExportPng: () => void;
-  onExportJson: () => void;
-  onImportJson: () => void;
+  canvasId?: string | null;
+  onOpenSaveDialog?: () => void;
+  onOpenSidebar?: () => void;
+  onExportPng?: () => void;
+  onExportJson?: () => void;
+  onImportJson?: () => void;
   onClear?: () => void;
   aiStatus: "idle" | "thinking" | "done" | "error";
-  aiRun: AiRunState;
+  aiRun?: AiRunState;
   autoOn: boolean;
-  onAutoChange: (v: boolean) => void;
+  onAutoChange: (auto: boolean) => void;
   onAskAi?: () => void;
   onCancelAi?: () => void;
   onSteerAi?: (guidance: string) => void;
   agentRunning?: boolean;
-  models: string[];
-  activeModel: string | null;
+  models?: string[];
+  activeModel?: string | null;
   onModelChange?: (model: string | null) => void;
   reasoningEffort?: ReasoningEffort;
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
-  onOpenModelSelect: () => void;
-  onOpenSettings: () => void;
+  onOpenModelSelect?: () => void;
+  onOpenSettings?: () => void;
   syncStatus: "idle" | "hosting" | "connecting" | "connected" | "error";
   syncRoomCode: string | null;
   syncPeerCount: number;
-  onOpenConnect: () => void;
+  onOpenConnect?: () => void;
   onOpenLogs?: () => void;
   onOpenManual?: () => void;
   cloudStatus?: CloudSyncStatus;
@@ -137,183 +114,121 @@ export interface CanvasHeaderProps {
 }
 
 export function CanvasHeader({
-  onExportPng,
-  onExportJson,
-  onImportJson,
-  onClear,
+  canvasId,
+  onOpenSaveDialog,
+  onOpenSidebar,
   aiStatus,
   aiRun,
   autoOn,
   onAutoChange,
-  onAskAi,
-  onCancelAi,
   onSteerAi,
   agentRunning = false,
-  models,
-  activeModel,
-  reasoningEffort = "default",
+  reasoningEffort = "medium",
   onReasoningEffortChange,
-  onOpenModelSelect,
-  onOpenSettings,
   syncStatus,
-  syncRoomCode,
   syncPeerCount,
   onOpenConnect,
-  onOpenLogs,
-  onOpenManual,
   cloudStatus = "idle",
   onTriggerCloudSync,
-  gridVisible = true,
-  onToggleGrid,
   onZoomIn,
   onZoomOut,
   onReset,
 }: CanvasHeaderProps) {
-  const router = useRouter();
   const { data: session } = useSession();
   const { zoom, center } = useSnapshot(appState);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const isGenerating = agentRunning || aiStatus === "thinking";
   const [steerOpen, setSteerOpen] = useState(false);
   const [steerInput, setSteerInput] = useState("");
   const isSteerOpen = steerOpen && isGenerating;
 
-  useEffect(() => {
-    const updateFs = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
-    document.addEventListener("fullscreenchange", updateFs);
-    return () => document.removeEventListener("fullscreenchange", updateFs);
-  }, []);
-
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.().catch(() => {});
-    } else {
-      document.exitFullscreen?.().catch(() => {});
-    }
-  };
-
   return (
-    <header className="flex h-12 shrink-0 items-center justify-between border-b bg-background/95 backdrop-blur-xs px-2 sm:px-3 w-full max-w-full overflow-hidden select-none">
-      {/* Left side: Brand, Menu, Sync, and Zoom controls */}
+    <header
+      className={cn(
+        "fixed top-0 left-0 right-0 z-40 flex items-center justify-between",
+        "h-12 sm:h-13 px-2 sm:px-4",
+        "border-b border-border/80 bg-background/95 backdrop-blur-md shadow-2xs select-none"
+      )}
+    >
+      {/* Left side: Brand, Save/Cloud Status, P2P, Zoom */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
         <span className="brand-wordmark pr-1 text-base sm:text-lg font-bold leading-none select-none">
           Drawva
         </span>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button variant="ghost" size="sm" className="gap-1 text-xs px-2">
-                <HugeiconsIcon icon={Menu01Icon} className="size-4" />
-                <span className="hidden sm:inline">Menu</span>
-                <HugeiconsIcon
-                  icon={ChevronDownIcon}
-                  className="size-3 text-muted-foreground"
+        {/* Save button (when on blank / unsaved canvas) OR Cloud sync indicator (when on saved canvas) */}
+        {session?.user && (
+          <>
+            {!canvasId ? (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="outline"
+                      size="xs"
+                      onClick={onOpenSaveDialog}
+                      className="gap-1.5 px-2.5 h-7 text-xs font-medium border-primary/30 text-primary hover:bg-primary/10 shadow-2xs cursor-pointer"
+                    >
+                      <HugeiconsIcon icon={CloudCheckIcon} className="size-3.5" />
+                      <span>Save</span>
+                    </Button>
+                  }
                 />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="start" className="w-52">
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>File</DropdownMenuLabel>
-              <DropdownMenuItem onClick={onExportPng}>
-                <HugeiconsIcon icon={Image01Icon} />
-                Export PNG
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onExportJson}>
-                <HugeiconsIcon icon={Download01Icon} />
-                Save JSON Project
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onImportJson}>
-                <HugeiconsIcon icon={Upload01Icon} />
-                Open JSON Project…
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>Canvas</DropdownMenuLabel>
-              <DropdownMenuItem onClick={toggleFullscreen}>
-                <HugeiconsIcon icon={Maximize01Icon} />
-                {isFullscreen ? "Exit Fullscreen" : "Fullscreen Mode"}
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => void requestFullscreenLandscape()}>
-                <HugeiconsIcon icon={ScreenRotationIcon} />
-                Landscape Mode (Rotate)
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onOpenConnect}>
-                <HugeiconsIcon icon={PeerToPeer01Icon} />
-                Live P2P Sync
-              </DropdownMenuItem>
-              {onOpenLogs && (
-                <DropdownMenuItem onClick={onOpenLogs}>
-                  <HugeiconsIcon icon={TerminalIcon} />
-                  AI Request Logs
-                </DropdownMenuItem>
-              )}
-              {onOpenManual && (
-                <DropdownMenuItem onClick={onOpenManual}>
-                  <HugeiconsIcon icon={BookOpen01Icon} />
-                  User Manual & Guide
-                </DropdownMenuItem>
-              )}
-              {onToggleGrid && (
-                <DropdownMenuItem onClick={onToggleGrid}>
-                  <HugeiconsIcon icon={GridTableIcon} />
-                  {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
-                </DropdownMenuItem>
-              )}
-              {onClear && (
-                <DropdownMenuItem
-                  onClick={onClear}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <HugeiconsIcon icon={Delete02Icon} />
-                  Clear Board
-                </DropdownMenuItem>
-              )}
-            </DropdownMenuGroup>
-            <DropdownMenuSeparator />
-            <DropdownMenuGroup>
-              <DropdownMenuLabel>AI Intelligence</DropdownMenuLabel>
-              <DropdownMenuItem onClick={onOpenModelSelect} disabled={agentRunning}>
-                <HugeiconsIcon icon={AiChipIcon} />
-                <div className="flex flex-col text-left">
-                  <span>Select AI Model</span>
-                  <span className="text-[10px] font-mono text-muted-foreground truncate max-w-[150px]">
-                    {activeModel || "No model"}
-                  </span>
-                </div>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={onOpenSettings}>
-                <HugeiconsIcon icon={Settings01Icon} />
-                AI Settings & Keys
-              </DropdownMenuItem>
-            </DropdownMenuGroup>
-            {session?.user && (
-              <>
-                <DropdownMenuSeparator />
-                <DropdownMenuGroup>
-                  <DropdownMenuLabel>Account</DropdownMenuLabel>
-                  <div className="px-2 py-1 text-xs text-muted-foreground truncate max-w-[190px]">
-                    {session.user.email}
-                  </div>
-                  <DropdownMenuItem
-                    onClick={async () => {
-                      await signOut();
-                      router.push("/signin");
-                    }}
-                    className="text-destructive focus:text-destructive"
-                  >
-                    <HugeiconsIcon icon={Logout01Icon} />
-                    Sign Out
-                  </DropdownMenuItem>
-                </DropdownMenuGroup>
-              </>
+                <TooltipContent>Save canvas to cloud & enable autosync</TooltipContent>
+              </Tooltip>
+            ) : (
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onTriggerCloudSync}
+                      className="gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                    >
+                      {cloudStatus === "syncing" ? (
+                        <>
+                          <HugeiconsIcon icon={CloudSyncIcon} className="size-3.5 animate-spin text-primary" />
+                          <span className="hidden xl:inline text-[11px]">Saving…</span>
+                        </>
+                      ) : cloudStatus === "synced" ? (
+                        <>
+                          <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-emerald-500" />
+                          <span className="hidden xl:inline text-[11px] text-emerald-600 dark:text-emerald-400">Synced</span>
+                        </>
+                      ) : cloudStatus === "error" ? (
+                        <>
+                          <HugeiconsIcon icon={CloudAlertIcon} className="size-3.5 text-destructive" />
+                          <span className="hidden xl:inline text-[11px] text-destructive">Sync retry</span>
+                        </>
+                      ) : cloudStatus === "offline" ? (
+                        <>
+                          <HugeiconsIcon icon={CloudOffIcon} className="size-3.5 text-muted-foreground" />
+                          <span className="hidden xl:inline text-[11px]">Offline</span>
+                        </>
+                      ) : (
+                        <>
+                          <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-muted-foreground/70" />
+                          <span className="hidden xl:inline text-[11px]">Cloud</span>
+                        </>
+                      )}
+                    </Button>
+                  }
+                />
+                <TooltipContent>
+                  {cloudStatus === "syncing"
+                    ? "Syncing canvas to cloud…"
+                    : cloudStatus === "synced"
+                    ? "All changes saved to cloud"
+                    : cloudStatus === "error"
+                    ? "Cloud sync failed (Click to retry)"
+                    : cloudStatus === "offline"
+                    ? "Working offline — cached locally in IndexedDB"
+                    : "Cloud Sync Active (Click to sync now)"}
+                </TooltipContent>
+              </Tooltip>
             )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+          </>
+        )}
 
         {/* P2P Sync Status */}
         {syncStatus === "connected" && (
@@ -321,88 +236,22 @@ export function CanvasHeader({
             <TooltipTrigger
               render={
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   onClick={onOpenConnect}
-                  className="gap-1 px-2 text-xs"
+                  className="gap-1 px-2 text-xs border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
                 >
-                  <HugeiconsIcon
-                    icon={Wifi01Icon}
-                    className="size-3.5 text-emerald-500"
-                  />
-                  <span className="font-mono font-bold text-xs">
-                    {syncRoomCode}
-                  </span>
-                  {syncPeerCount > 0 && (
-                    <Badge
-                      variant="secondary"
-                      className="px-1 py-0 text-[10px]"
-                    >
-                      {syncPeerCount}
-                    </Badge>
-                  )}
+                  <HugeiconsIcon icon={PeerToPeer01Icon} className="size-3.5" />
+                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[11px] font-mono">{syncPeerCount}</span>
                 </Button>
               }
             />
-            <TooltipContent>Live Device Connected (P2P)</TooltipContent>
+            <TooltipContent>P2P connected with {syncPeerCount} peer(s)</TooltipContent>
           </Tooltip>
         )}
 
-        {/* Cloud Sync Status */}
-        {session?.user && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={onTriggerCloudSync}
-                  className="gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                >
-                  {cloudStatus === "syncing" ? (
-                    <>
-                      <HugeiconsIcon icon={CloudSyncIcon} className="size-3.5 animate-spin text-primary" />
-                      <span className="hidden xl:inline text-[11px]">Saving…</span>
-                    </>
-                  ) : cloudStatus === "synced" ? (
-                    <>
-                      <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-emerald-500" />
-                      <span className="hidden xl:inline text-[11px] text-emerald-600 dark:text-emerald-400">Synced</span>
-                    </>
-                  ) : cloudStatus === "error" ? (
-                    <>
-                      <HugeiconsIcon icon={CloudAlertIcon} className="size-3.5 text-destructive" />
-                      <span className="hidden xl:inline text-[11px] text-destructive">Sync retry</span>
-                    </>
-                  ) : cloudStatus === "offline" ? (
-                    <>
-                      <HugeiconsIcon icon={CloudOffIcon} className="size-3.5 text-muted-foreground" />
-                      <span className="hidden xl:inline text-[11px]">Offline</span>
-                    </>
-                  ) : (
-                    <>
-                      <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-muted-foreground/70" />
-                      <span className="hidden xl:inline text-[11px]">Cloud</span>
-                    </>
-                  )}
-                </Button>
-              }
-            />
-            <TooltipContent>
-              {cloudStatus === "syncing"
-                ? "Syncing canvas to Neon Cloud DB…"
-                : cloudStatus === "synced"
-                ? "All changes saved to Neon Cloud DB"
-                : cloudStatus === "error"
-                ? "Cloud sync failed (Click to retry)"
-                : cloudStatus === "offline"
-                ? "Working offline — cached locally in IndexedDB"
-                : "Cloud Sync Active (Click to sync now)"}
-            </TooltipContent>
-          </Tooltip>
-        )}
-
-        {/* Integrated Zoom Controls (relocated from bottom footer) */}
+        {/* Integrated Zoom Controls */}
         {onZoomIn && onZoomOut && (
           <>
             <Separator orientation="vertical" className="mx-0.5 sm:mx-1 h-4 sm:h-5 self-center" />
@@ -482,29 +331,18 @@ export function CanvasHeader({
         </span>
       </div>
 
-      {/* Right side: User Profile, Admin link, and AI Controls */}
+      {/* Right side: Admin link, AI Controls, Thinking depth, Auto switch, Sidebar trigger */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">
-        {session?.user && (
-          <div className="hidden xl:flex items-center gap-1.5 shrink-0">
-            <span className="inline-flex items-center gap-1.5 font-sans text-xs text-muted-foreground px-1 py-0.5">
-              <span className="size-1.5 rounded-full bg-primary shrink-0" />
-              <span className="font-medium truncate max-w-[110px]">
-                {session.user.name || "User"}
-              </span>
-            </span>
-            {(session.user as { role?: string }).role === "admin" && (
-              <Button
-                variant="outline"
-                size="xs"
-                render={<Link href="/admin" />}
-                className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans"
-              >
-                <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
-                <span>Admin</span>
-              </Button>
-            )}
-            <Separator orientation="vertical" className="mx-0.5 h-4" />
-          </div>
+        {session?.user && (session.user as { role?: string }).role === "admin" && (
+          <Button
+            variant="outline"
+            size="xs"
+            render={<Link href="/admin" />}
+            className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans mr-1"
+          >
+            <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
+            <span>Admin</span>
+          </Button>
         )}
 
         <AnimatePresence mode="wait">
@@ -646,26 +484,6 @@ export function CanvasHeader({
                   </PopoverContent>
                 </Popover>
               )}
-
-              {onCancelAi && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-lg"
-                        variant="outline"
-                        data-icon="true"
-                        onClick={onCancelAi}
-                        aria-label="Cancel generation"
-                        className="shrink-0 p-0 text-destructive"
-                      >
-                        <HugeiconsIcon icon={SquareStopIcon} className="size-4" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Cancel generation</TooltipContent>
-                </Tooltip>
-              )}
             </motion.div>
           ) : (
             <motion.div
@@ -701,29 +519,11 @@ export function CanvasHeader({
                 </motion.div>
               )}
 
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={onOpenModelSelect}
-                      disabled={agentRunning}
-                      className="hidden md:inline-flex h-7 gap-1.5 px-2 font-mono text-xs max-w-[130px] lg:max-w-[180px] truncate shadow-2xs hover:border-primary/40 shrink-0"
-                      aria-label="Select AI Model"
-                    >
-                      <HugeiconsIcon icon={AiChipIcon} className="size-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate">{activeModel || (models.length > 0 ? "Choose Model" : "No Model")}</span>
-                    </Button>
-                  }
-                />
-                <TooltipContent>AI Model: {activeModel || "None selected"} (Click to browse & change)</TooltipContent>
-              </Tooltip>
-
+              {/* Thinking / Reasoning Effort Selector */}
               <div className="hidden sm:block shrink-0">
                 <Select
                   value={reasoningEffort}
-                  onValueChange={(val) => onReasoningEffortChange((val as ReasoningEffort) || "default")}
+                  onValueChange={(val) => onReasoningEffortChange((val as ReasoningEffort) || "medium")}
                   items={REASONING_EFFORT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
                 >
                   <SelectTrigger
@@ -748,6 +548,7 @@ export function CanvasHeader({
                 </Select>
               </div>
 
+              {/* Auto AI Switch */}
               <label className="hidden md:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none shrink-0">
                 <Switch
                   size="sm"
@@ -756,50 +557,30 @@ export function CanvasHeader({
                 />
                 Auto
               </label>
-
-              {onAskAi && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="sm"
-                        variant="default"
-                        onClick={onAskAi}
-                        disabled={agentRunning}
-                        aria-label="Ask AI"
-                        className="gap-1.5 px-2.5 sm:px-3.5 h-8 text-xs shrink-0 font-medium shadow-2xs bg-primary text-primary-foreground hover:bg-primary/90 transition-all cursor-pointer"
-                      >
-                        <HugeiconsIcon icon={SparklesIcon} className="size-3.5 shrink-0" />
-                        <span>Ask AI</span>
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>
-                    Ask AI to observe the canvas and generate answers or widgets
-                  </TooltipContent>
-                </Tooltip>
-              )}
-
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={onOpenSettings}
-                      data-icon="true"
-                      aria-label="AI settings"
-                      className="shrink-0 size-8 p-0"
-                    >
-                      <HugeiconsIcon icon={Settings01Icon} className="size-4" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>AI settings</TooltipContent>
-              </Tooltip>
             </motion.div>
           )}
         </AnimatePresence>
+
+        {/* Sidebar Trigger Button */}
+        {onOpenSidebar && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={onOpenSidebar}
+                  data-icon="true"
+                  aria-label="Open Canvases & Menu"
+                  className="shrink-0 size-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer ml-1"
+                >
+                  <HugeiconsIcon icon={LayoutRightIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent>Canvases & Menu</TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </header>
   );

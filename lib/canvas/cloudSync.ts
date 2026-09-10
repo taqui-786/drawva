@@ -11,11 +11,23 @@ export interface CloudCanvasResult {
   updatedAt: number;
 }
 
-export async function fetchCloudCanvas(signal?: AbortSignal): Promise<CloudCanvasResult | null> {
+export interface CanvasListItem {
+  id: string;
+  title: string;
+  savedAt: number;
+  updatedAt: number;
+  createdAt: number;
+}
+
+export async function fetchCloudCanvas(
+  id?: string | null,
+  signal?: AbortSignal
+): Promise<CloudCanvasResult | null> {
+  if (!id) return null;
   try {
-    const res = await fetch("/api/canvas/cloud", {
+    const res = await fetch(`/api/canvas/cloud?id=${encodeURIComponent(id)}`, {
       method: "GET",
-      headers: { "Accept": "application/json" },
+      headers: { Accept: "application/json" },
       signal: signal || AbortSignal.timeout(10000),
     });
     if (!res.ok) return null;
@@ -30,11 +42,30 @@ export async function fetchCloudCanvas(signal?: AbortSignal): Promise<CloudCanva
   }
 }
 
-export async function saveCloudCanvas(
+export async function fetchCanvasList(signal?: AbortSignal): Promise<CanvasListItem[]> {
+  try {
+    const res = await fetch("/api/canvas/cloud", {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: signal || AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return [];
+    const json = (await res.json()) as { authenticated: boolean; canvases?: CanvasListItem[] };
+    if (!json.authenticated || !json.canvases) return [];
+    return json.canvases;
+  } catch (err) {
+    if ((err as Error)?.name !== "AbortError") {
+      console.warn("fetchCanvasList:", err);
+    }
+    return [];
+  }
+}
+
+export async function createCloudCanvas(
   snapshot: ProjectSnapshot,
   title?: string,
   signal?: AbortSignal
-): Promise<{ success: boolean; savedAt?: number }> {
+): Promise<{ success: boolean; canvas?: CloudCanvasResult }> {
   try {
     const res = await fetch("/api/canvas/cloud", {
       method: "POST",
@@ -43,14 +74,65 @@ export async function saveCloudCanvas(
       signal: signal || AbortSignal.timeout(15000),
     });
     if (!res.ok) return { success: false };
+    const json = (await res.json()) as { success: boolean; canvas?: CloudCanvasResult };
+    return { success: !!json.success, canvas: json.canvas };
+  } catch (err) {
+    if ((err as Error)?.name !== "AbortError") {
+      console.warn("createCloudCanvas:", err);
+    }
+    return { success: false };
+  }
+}
+
+export async function updateCloudCanvas(
+  id: string,
+  snapshot?: ProjectSnapshot,
+  title?: string,
+  signal?: AbortSignal
+): Promise<{ success: boolean; savedAt?: number }> {
+  try {
+    const res = await fetch("/api/canvas/cloud", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, snapshot, title }),
+      signal: signal || AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return { success: false };
     const json = (await res.json()) as { success: boolean; savedAt?: number };
     return { success: !!json.success, savedAt: json.savedAt };
   } catch (err) {
     if ((err as Error)?.name !== "AbortError") {
-      console.warn("saveCloudCanvas:", err);
+      console.warn("updateCloudCanvas:", err);
     }
     return { success: false };
   }
+}
+
+export async function deleteCloudCanvas(id: string, signal?: AbortSignal): Promise<{ success: boolean }> {
+  try {
+    const res = await fetch(`/api/canvas/cloud?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+      signal: signal || AbortSignal.timeout(10000),
+    });
+    if (!res.ok) return { success: false };
+    const json = (await res.json()) as { success: boolean };
+    return { success: !!json.success };
+  } catch (err) {
+    if ((err as Error)?.name !== "AbortError") {
+      console.warn("deleteCloudCanvas:", err);
+    }
+    return { success: false };
+  }
+}
+
+// Backward compatibility helper
+export async function saveCloudCanvas(
+  snapshot: ProjectSnapshot,
+  title?: string,
+  signal?: AbortSignal
+): Promise<{ success: boolean; savedAt?: number }> {
+  return createCloudCanvas(snapshot, title, signal);
 }
 
 export class CloudSyncEngine {
@@ -63,14 +145,17 @@ export class CloudSyncEngine {
   private isSyncing = false;
   private enabled = true;
   private isAuthenticated = false;
+  private canvasId: string | null = null;
   private isBusyCheck?: () => boolean;
   private inFlightController: AbortController | null = null;
 
   constructor(opts?: {
+    canvasId?: string | null;
     onStatusChange?: (status: CloudSyncStatus) => void;
     isBusy?: () => boolean;
     isAuthenticated?: boolean;
   }) {
+    if (opts?.canvasId !== undefined) this.canvasId = opts.canvasId;
     if (opts?.onStatusChange) this.listeners.add(opts.onStatusChange);
     this.isBusyCheck = opts?.isBusy;
     this.isAuthenticated = !!opts?.isAuthenticated;
@@ -86,6 +171,18 @@ export class CloudSyncEngine {
     return this.status;
   }
 
+  public setCanvasId(id: string | null) {
+    this.canvasId = id;
+    if (!id) {
+      this.cancel();
+      this.setStatus("idle");
+    }
+  }
+
+  public getCanvasId(): string | null {
+    return this.canvasId;
+  }
+
   public setEnabled(val: boolean) {
     this.enabled = val;
     if (!val) {
@@ -99,7 +196,7 @@ export class CloudSyncEngine {
     if (!val) {
       this.cancel();
       this.setStatus("idle");
-    } else if (changed && this.pendingSnapshot) {
+    } else if (changed && this.pendingSnapshot && this.canvasId) {
       this.scheduleCloudSync(this.pendingSnapshot, 2000);
     }
   }
@@ -147,7 +244,8 @@ export class CloudSyncEngine {
   }
 
   public scheduleCloudSync(snapshot: ProjectSnapshot, delayMs = 4000) {
-    if (!this.enabled || !this.isAuthenticated) return;
+    // Only sync if enabled, authenticated, and associated with a cloud canvas
+    if (!this.enabled || !this.isAuthenticated || !this.canvasId) return;
 
     const hash = computeSnapshotHash(snapshot);
     if (this.lastSyncedHash && hash === this.lastSyncedHash) {
@@ -173,7 +271,7 @@ export class CloudSyncEngine {
   }
 
   public async flush(ignoreBusy = false): Promise<boolean> {
-    if (!this.enabled || !this.isAuthenticated || !this.pendingSnapshot || this.isSyncing) {
+    if (!this.enabled || !this.isAuthenticated || !this.canvasId || !this.pendingSnapshot || this.isSyncing) {
       return false;
     }
 
@@ -209,7 +307,7 @@ export class CloudSyncEngine {
     this.inFlightController = controller;
 
     try {
-      const res = await saveCloudCanvas(snapshotToSync, undefined, controller.signal);
+      const res = await updateCloudCanvas(this.canvasId, snapshotToSync, undefined, controller.signal);
       if (res.success) {
         this.lastSyncedHash = currentHash;
         this.setStatus("synced");

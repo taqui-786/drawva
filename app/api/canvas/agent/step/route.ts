@@ -84,7 +84,7 @@ export async function POST(req: Request) {
   if (history === null) return json({ error: "history is invalid." }, 400);
 
   const mode = (body.mode === "steer" ? "steer" : "followup") as "steer" | "followup";
-  const reasoningEffort = (typeof body.reasoningEffort === "string" ? body.reasoningEffort : "default") as ReasoningEffort;
+  const reasoningEffort = (typeof body.reasoningEffort === "string" ? body.reasoningEffort : "medium") as ReasoningEffort;
 
   const turnOptions = {
     conversationId,

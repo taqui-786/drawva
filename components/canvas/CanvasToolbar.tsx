@@ -10,6 +10,9 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import {
   Popover,
@@ -39,7 +42,18 @@ import {
   ImageAdd01Icon,
   MoreHorizontalIcon,
   ViewIcon,
+  Image01Icon,
+  Download01Icon,
+  Upload01Icon,
+  Maximize01Icon,
+  ScreenRotationIcon,
+  PeerToPeer01Icon,
+  TerminalIcon,
+  BookOpen01Icon,
+  AiChipIcon,
+  Settings01Icon,
 } from "@hugeicons/core-free-icons";
+import { requestFullscreenLandscape } from "@/lib/canvas/orientation";
 
 export const PALETTE = [
   "#111111",
@@ -148,6 +162,14 @@ export interface CanvasToolbarProps {
   onImportImage?: () => void;
   onTidy?: () => void;
   aiStatus?: "idle" | "thinking" | "done" | "error";
+  onExportPng?: () => void;
+  onExportJson?: () => void;
+  onImportJson?: () => void;
+  onOpenConnect?: () => void;
+  onOpenLogs?: () => void;
+  onOpenManual?: () => void;
+  onOpenModelSelect?: () => void;
+  onOpenSettings?: () => void;
   className?: string;
 }
 
@@ -171,9 +193,28 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   onImportImage,
   onTidy,
   aiStatus = "idle",
+  onExportPng,
+  onExportJson,
+  onImportJson,
+  onOpenConnect,
+  onOpenLogs,
+  onOpenManual,
+  onOpenModelSelect,
+  onOpenSettings,
   className,
 }) => {
   const [styleOpen, setStyleOpen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {});
+      setIsFullscreen(true);
+    } else {
+      document.exitFullscreen().catch(() => {});
+      setIsFullscreen(false);
+    }
+  };
 
   if (viewMode) return null;
 
@@ -209,13 +250,10 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                   variant={viewMode ? "secondaryPrimary" : "ghost"}
                   onClick={onToggleViewMode}
                   data-icon="true"
-                  aria-label="View canvas"
-                  aria-pressed={viewMode}
-                  disabled={toolsLocked}
+                  aria-label="View Canvas only"
                   className={cn(
-                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl",
-                    viewMode && "shadow-xs",
-                    toolsLocked && "opacity-50 pointer-events-none"
+                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl transition-all",
+                    viewMode && "shadow-xs"
                   )}
                 >
                   <HugeiconsIcon icon={ViewIcon} className="size-4" />
@@ -223,10 +261,12 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
               }
             />
             <TooltipContent side="top">
-              {viewMode ? "Exit view canvas (Esc)" : "View canvas"}
+              View Canvas <span className="kbd">Alt+V</span>
             </TooltipContent>
           </Tooltip>
         )}
+
+        <Separator orientation="vertical" className="mx-0.5 h-5 self-center opacity-50" />
 
         {/* Hand */}
         <ToolButton
@@ -236,15 +276,15 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
           disabled={toolsLocked}
         />
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 self-center" />
-
-        {/* Drawing Tools: Pen, Eraser */}
+        {/* Pen */}
         <ToolButton
           mode={mode}
           tool={PRIMARY_TOOLS[2]}
           onMode={onMode}
           disabled={toolsLocked}
         />
+
+        {/* Eraser */}
         <ToolButton
           mode={mode}
           tool={PRIMARY_TOOLS[3]}
@@ -252,45 +292,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
           disabled={toolsLocked}
         />
 
-        {/* Shape Tools Dropdown */}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant={isShapeActive ? "secondaryPrimary" : "ghost"}
-                aria-label="Shapes"
-                data-icon="true"
-                disabled={toolsLocked}
-                className={cn(
-                  "shrink-0 size-8 sm:size-9 p-0 rounded-xl",
-                  isShapeActive && "shadow-xs",
-                  toolsLocked && "opacity-50 pointer-events-none"
-                )}
-              >
-                <HugeiconsIcon icon={activeShapeTool.icon} className="size-4" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="center" side="top" sideOffset={8}>
-            {SHAPE_TOOLS.map((s) => (
-              <DropdownMenuItem
-                key={s.mode}
-                onClick={() => {
-                  if (!toolsLocked) onMode(s.mode);
-                }}
-                disabled={toolsLocked}
-                className="gap-2"
-              >
-                <HugeiconsIcon icon={s.icon} />
-                <span>{s.label}</span>
-                <span className="kbd ml-auto">{s.kbd}</span>
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-
-        {/* Text Tool */}
+        {/* Text */}
         <ToolButton
           mode={mode}
           tool={PRIMARY_TOOLS[4]}
@@ -298,142 +300,209 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
           disabled={toolsLocked}
         />
 
-        {/* Style Popover (Color & Stroke Width) */}
-        <Popover open={styleOpen} onOpenChange={setStyleOpen}>
-          <PopoverTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                data-icon="true"
-                aria-label="Colors & Stroke"
-                className="shrink-0 size-8 sm:size-9 p-0 rounded-xl relative"
+        {/* Shapes Menu */}
+        <DropdownMenu>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant={isShapeActive ? "secondaryPrimary" : "ghost"}
+                      aria-pressed={isShapeActive}
+                      disabled={toolsLocked}
+                      data-icon="true"
+                      aria-label="Shape tools"
+                      className={cn(
+                        "shrink-0 size-8 sm:size-9 p-0 rounded-xl transition-all",
+                        isShapeActive && "shadow-xs",
+                        toolsLocked && "opacity-50 pointer-events-none"
+                      )}
+                    />
+                  }
+                >
+                  <HugeiconsIcon icon={activeShapeTool.icon} className="size-4" />
+                </DropdownMenuTrigger>
+              }
+            />
+            <TooltipContent side="top">
+              {isShapeActive
+                ? `${activeShapeTool.label} (${activeShapeTool.kbd})`
+                : "Shapes (R, O, A)"}
+            </TooltipContent>
+          </Tooltip>
+
+          <DropdownMenuContent align="center" side="top" sideOffset={8} className="w-36">
+            {SHAPE_TOOLS.map((s) => (
+              <DropdownMenuItem
+                key={s.mode}
+                onClick={() => onMode(s.mode)}
+                className={cn("flex items-center gap-2 cursor-pointer", mode === s.mode && "font-semibold text-primary")}
               >
-                <HugeiconsIcon icon={ColorsIcon} className="size-4" />
-                <span
-                  className="absolute bottom-1.5 right-1.5 size-2 rounded-full border border-background shadow-xs"
-                  style={{ backgroundColor: color }}
-                />
-              </Button>
-            }
-          />
-          <PopoverContent
-            align="center"
-            side="top"
-            sideOffset={8}
-            className="w-56 items-start gap-3 p-3"
-          >
-            <PopoverHeader>
-              <PopoverTitle className="text-xs font-semibold">Style</PopoverTitle>
+                <HugeiconsIcon icon={s.icon} className="size-4" />
+                <span className="flex-1">{s.label}</span>
+                <span className="kbd text-[10px]">{s.kbd}</span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <Separator orientation="vertical" className="mx-0.5 h-5 self-center opacity-50" />
+
+        {/* Color & Stroke Popover */}
+        <Popover open={styleOpen} onOpenChange={setStyleOpen}>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <PopoverTrigger
+                  render={
+                    <Button
+                      size="icon-sm"
+                      variant="ghost"
+                      data-icon="true"
+                      aria-label="Color and stroke style"
+                      className="shrink-0 size-8 sm:size-9 p-0 rounded-xl relative"
+                    />
+                  }
+                >
+                  <HugeiconsIcon icon={ColorsIcon} className="size-4" />
+                  <span
+                    className="absolute bottom-1 right-1 size-2 rounded-full border border-background"
+                    style={{ backgroundColor: color }}
+                  />
+                </PopoverTrigger>
+              }
+            />
+            <TooltipContent side="top">Color & Stroke</TooltipContent>
+          </Tooltip>
+
+          <PopoverContent align="center" side="top" sideOffset={8} className="w-64 p-3">
+            <PopoverHeader className="mb-2">
+              <PopoverTitle className="text-xs font-semibold">Stroke & Color</PopoverTitle>
             </PopoverHeader>
-            <div className="flex flex-wrap items-center gap-1.5">
-              {PALETTE.map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => {
-                    onColor(c);
-                    setStyleOpen(false);
-                  }}
-                  title={c}
-                  aria-label={`Color ${c}`}
-                  className="size-6 rounded-full border transition-transform hover:scale-110 cursor-pointer"
-                  style={{
-                    background: c,
-                    borderColor:
-                      color === c ? "var(--foreground)" : "var(--border)",
-                    outline: color === c ? "2px solid var(--ring)" : "none",
-                  }}
-                />
-              ))}
-            </div>
-            <div className="flex flex-col gap-2 w-full mt-1">
-              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                <span>Stroke width</span>
-                <span className="font-mono">{pen}px</span>
+            <div className="space-y-3">
+              {/* Palette */}
+              <div>
+                <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider block mb-1.5">
+                  Color
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {PALETTE.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => onColor(c)}
+                      aria-label={`Select color ${c}`}
+                      className={cn(
+                        "size-6 rounded-full transition-transform cursor-pointer border border-border/50",
+                        color === c && "ring-2 ring-primary ring-offset-2 scale-110"
+                      )}
+                      style={{ backgroundColor: c }}
+                    />
+                  ))}
+                </div>
               </div>
-              <Slider
-                min={1}
-                max={16}
-                step={1}
-                value={[pen]}
-                onValueChange={(v) =>
-                  onPen(Number(Array.isArray(v) ? v[0] : v))
-                }
-              />
+
+              {/* Stroke Width */}
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <span className="text-[10px] text-muted-foreground font-medium uppercase tracking-wider">
+                    Width
+                  </span>
+                  <span className="text-xs font-mono tabular-nums">{pen}px</span>
+                </div>
+                <Slider
+                  min={1}
+                  max={24}
+                  step={1}
+                  value={[pen]}
+                  onValueChange={(val) => {
+                    const next = Array.isArray(val) ? val[0] : val;
+                    if (typeof next === "number") onPen(next);
+                  }}
+                  className="cursor-pointer"
+                />
+              </div>
             </div>
           </PopoverContent>
         </Popover>
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 self-center" />
-
         {/* Undo / Redo */}
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                onClick={onUndo}
-                disabled={!canUndo}
-                data-icon="true"
-                aria-label="Undo"
-                className="shrink-0 size-8 sm:size-9 p-0 rounded-xl"
-              >
-                <HugeiconsIcon icon={UndoIcon} className="size-4" />
-              </Button>
-            }
-          />
-          <TooltipContent side="top">
-            Undo <span className="kbd">⌘Z</span>
-          </TooltipContent>
-        </Tooltip>
+        {onUndo && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  disabled={!canUndo}
+                  onClick={onUndo}
+                  data-icon="true"
+                  aria-label="Undo"
+                  className={cn(
+                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl",
+                    !canUndo && "opacity-40 pointer-events-none"
+                  )}
+                >
+                  <HugeiconsIcon icon={UndoIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">
+              Undo <span className="kbd">Ctrl+Z</span>
+            </TooltipContent>
+          </Tooltip>
+        )}
 
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                onClick={onRedo}
-                disabled={!canRedo}
-                data-icon="true"
-                aria-label="Redo"
-                className="shrink-0 size-8 sm:size-9 p-0 rounded-xl"
-              >
-                <HugeiconsIcon icon={RedoIcon} className="size-4" />
-              </Button>
-            }
-          />
-          <TooltipContent side="top">
-            Redo <span className="kbd">⇧⌘Z</span>
-          </TooltipContent>
-        </Tooltip>
+        {onRedo && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  disabled={!canRedo}
+                  onClick={onRedo}
+                  data-icon="true"
+                  aria-label="Redo"
+                  className={cn(
+                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl",
+                    !canRedo && "opacity-40 pointer-events-none"
+                  )}
+                >
+                  <HugeiconsIcon icon={RedoIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">
+              Redo <span className="kbd">Ctrl+Y</span>
+            </TooltipContent>
+          </Tooltip>
+        )}
 
-        {/* Grid Toggle */}
+        {/* Grid toggle directly accessible */}
         {onToggleGrid && (
           <Tooltip>
             <TooltipTrigger
               render={
                 <Button
                   size="icon-sm"
-                  variant={gridVisible ? "secondaryPrimary" : "ghost"}
+                  variant={gridVisible ? "ghost" : "secondary"}
                   onClick={onToggleGrid}
                   data-icon="true"
-                  aria-label={gridVisible ? "Hide canvas grid" : "Show canvas grid"}
-                  aria-pressed={gridVisible}
-                  disabled={toolsLocked}
-                  className={cn(
-                    "hidden sm:flex shrink-0 size-8 sm:size-9 p-0 rounded-xl",
-                    gridVisible && "shadow-xs"
-                  )}
+                  aria-label="Toggle grid"
+                  className="hidden sm:inline-flex shrink-0 size-8 sm:size-9 p-0 rounded-xl"
                 >
-                  <HugeiconsIcon icon={GridTableIcon} className="size-4" />
+                  <HugeiconsIcon
+                    icon={GridTableIcon}
+                    className={cn("size-4", !gridVisible && "opacity-40")}
+                  />
                 </Button>
               }
             />
             <TooltipContent side="top">
-              {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
+              {gridVisible ? "Hide grid" : "Show grid"}
             </TooltipContent>
           </Tooltip>
         )}
@@ -461,7 +530,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
           </Tooltip>
         )}
 
-        {/* More Actions Dropdown */}
+        {/* More Actions Dropdown (⋯) */}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -476,27 +545,126 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
               </Button>
             }
           />
-          <DropdownMenuContent align="end" side="top" sideOffset={8} className="w-48">
-            {onTidy && (
-              <DropdownMenuItem
-                disabled={aiStatus === "thinking"}
-                onClick={onTidy}
-              >
-                <HugeiconsIcon icon={MagicWand01Icon} />
-                Tidy layout
-              </DropdownMenuItem>
+          <DropdownMenuContent align="end" side="top" sideOffset={8} className="w-52">
+            {/* File Section */}
+            {(onExportPng || onExportJson || onImportJson) && (
+              <>
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
+                    File
+                  </DropdownMenuLabel>
+                  {onExportPng && (
+                    <DropdownMenuItem onClick={onExportPng} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={Image01Icon} className="size-4" />
+                      <span>Export PNG</span>
+                    </DropdownMenuItem>
+                  )}
+                  {onExportJson && (
+                    <DropdownMenuItem onClick={onExportJson} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={Download01Icon} className="size-4" />
+                      <span>Save JSON Project</span>
+                    </DropdownMenuItem>
+                  )}
+                  {onImportJson && (
+                    <DropdownMenuItem onClick={onImportJson} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={Upload01Icon} className="size-4" />
+                      <span>Open JSON Project…</span>
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
+              </>
             )}
-            {onImportImage && (
-              <DropdownMenuItem onClick={onImportImage}>
-                <HugeiconsIcon icon={ImageAdd01Icon} />
-                Insert Image
+
+            {/* Canvas / View Section */}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
+                Canvas
+              </DropdownMenuLabel>
+              <DropdownMenuItem onClick={toggleFullscreen} className="cursor-pointer gap-2">
+                <HugeiconsIcon icon={Maximize01Icon} className="size-4" />
+                <span>{isFullscreen ? "Exit Fullscreen" : "Fullscreen Mode"}</span>
               </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => void requestFullscreenLandscape()} className="cursor-pointer gap-2">
+                <HugeiconsIcon icon={ScreenRotationIcon} className="size-4" />
+                <span>Landscape Mode</span>
+              </DropdownMenuItem>
+              {onTidy && (
+                <DropdownMenuItem
+                  disabled={aiStatus === "thinking"}
+                  onClick={onTidy}
+                  className="cursor-pointer gap-2"
+                >
+                  <HugeiconsIcon icon={MagicWand01Icon} className="size-4" />
+                  <span>Tidy layout</span>
+                </DropdownMenuItem>
+              )}
+              {onImportImage && (
+                <DropdownMenuItem onClick={onImportImage} className="cursor-pointer gap-2">
+                  <HugeiconsIcon icon={ImageAdd01Icon} className="size-4" />
+                  <span>Insert Image</span>
+                </DropdownMenuItem>
+              )}
+              {onToggleGrid && (
+                <DropdownMenuItem onClick={onToggleGrid} className="cursor-pointer gap-2 sm:hidden">
+                  <HugeiconsIcon icon={GridTableIcon} className="size-4" />
+                  <span>{gridVisible ? "Hide canvas grid" : "Show canvas grid"}</span>
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuGroup>
+
+            {/* Collaboration & Docs */}
+            {(onOpenConnect || onOpenLogs || onOpenManual) && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
+                    Tools & Docs
+                  </DropdownMenuLabel>
+                  {onOpenConnect && (
+                    <DropdownMenuItem onClick={onOpenConnect} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={PeerToPeer01Icon} className="size-4" />
+                      <span>Live P2P Sync</span>
+                    </DropdownMenuItem>
+                  )}
+                  {onOpenLogs && (
+                    <DropdownMenuItem onClick={onOpenLogs} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={TerminalIcon} className="size-4" />
+                      <span>AI Request Logs</span>
+                    </DropdownMenuItem>
+                  )}
+                  {onOpenManual && (
+                    <DropdownMenuItem onClick={onOpenManual} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={BookOpen01Icon} className="size-4" />
+                      <span>User Manual</span>
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+              </>
             )}
-            {onToggleGrid && (
-              <DropdownMenuItem onClick={onToggleGrid} className="sm:hidden">
-                <HugeiconsIcon icon={GridTableIcon} />
-                {gridVisible ? "Hide canvas grid" : "Show canvas grid"}
-              </DropdownMenuItem>
+
+            {/* AI & Settings */}
+            {(onOpenModelSelect || onOpenSettings) && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-[10px] text-muted-foreground uppercase font-mono tracking-wider">
+                    AI & Config
+                  </DropdownMenuLabel>
+                  {onOpenModelSelect && (
+                    <DropdownMenuItem onClick={onOpenModelSelect} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={AiChipIcon} className="size-4" />
+                      <span>Select AI Model</span>
+                    </DropdownMenuItem>
+                  )}
+                  {onOpenSettings && (
+                    <DropdownMenuItem onClick={onOpenSettings} className="cursor-pointer gap-2">
+                      <HugeiconsIcon icon={Settings01Icon} className="size-4" />
+                      <span>AI Settings & Keys</span>
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuGroup>
+              </>
             )}
           </DropdownMenuContent>
         </DropdownMenu>

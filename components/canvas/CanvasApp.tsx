@@ -27,12 +27,15 @@ import { rasterizeText, renderTextBlock } from "@/lib/canvas/textTool";
 import { placeImageAt } from "@/lib/canvas/images";
 import { CanvasHeader, type AiRunState } from "./CanvasHeader";
 import { Conductor, type ConductorEvent } from "@/lib/ai/conductor";
+import { useRouter } from "next/navigation";
 import { AGENT_MAX_STEPS_PER_TURN } from "@/lib/ai/agentTools";
 import { SettingsDialog } from "./SettingsDialog";
 import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
 import { UserManualDialog } from "./UserManualDialog";
 import { CanvasToolbar } from "./CanvasToolbar";
+import { CanvasSidebar } from "./CanvasSidebar";
+import { SaveCanvasDialog } from "./SaveCanvasDialog";
 
 export interface GenerationTickerState {
   status: "idle" | "running" | "done" | "error";
@@ -65,6 +68,7 @@ import {
 import {
   CloudSyncEngine,
   fetchCloudCanvas,
+  createCloudCanvas,
   type CloudSyncStatus,
 } from "@/lib/canvas/cloudSync";
 import { useSession } from "@/lib/auth-client";
@@ -222,7 +226,8 @@ type RefineResult =
  */
 const INK_COALESCE_MS = 25_000;
 
-export function CanvasApp() {
+export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}) {
+  const router = useRouter();
   const { engine, mountRef } = useCanvas();
   const { mode, color, pen, aiStatus, autoOn, viewMode, gridVisible } = useSnapshot(appState);
   const eraser = 18;
@@ -270,11 +275,34 @@ export function CanvasApp() {
     peerName: null,
   });
   const [connectOpen, setConnectOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const { data: session } = useSession();
   const isAuthenticated = !!session?.user;
   const isAuthenticatedRef = useRef(isAuthenticated);
   const cloudSync = useRef<CloudSyncEngine | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>("idle");
+
+  const handleSaveToCloud = async (title: string) => {
+    const eng = engine;
+    if (!eng) return;
+    const snapshot = serializeSnapshot(
+      eng,
+      widgets.current,
+      objects.current
+    );
+    const res = await createCloudCanvas(snapshot, title);
+    if (res.success && res.canvas) {
+      void saveAutosave(snapshot, res.canvas.id);
+      cloudSync.current?.setCanvasId(res.canvas.id);
+      cloudSync.current?.setLastSyncedHash(computeSnapshotHash(snapshot));
+      toast.success("Canvas saved to cloud!");
+      router.push(`/canvas/${res.canvas.id}`);
+    } else {
+      toast.error("Failed to save canvas to cloud");
+      throw new Error("Failed to save canvas");
+    }
+  };
 
   useEffect(() => {
     isAuthenticatedRef.current = isAuthenticated;
@@ -282,6 +310,12 @@ export function CanvasApp() {
     const name = session?.user?.name;
     if (name) syncManager.current?.setLocalName(name);
   }, [isAuthenticated, session?.user?.name]);
+
+  const canvasIdRef = useRef(canvasId);
+  useEffect(() => {
+    canvasIdRef.current = canvasId;
+    cloudSync.current?.setCanvasId(canvasId ?? null);
+  }, [canvasId]);
 
   const lastUserIdRef = useRef<string | null>(null);
   const userIdRef = useRef<string | undefined>(session?.user?.id);
@@ -1363,8 +1397,8 @@ export function CanvasApp() {
           widgets.current,
           objects.current,
         );
-        void saveAutosave(snapshot);
-        if (isAuthenticated) {
+        void saveAutosave(snapshot, canvasId);
+        if (isAuthenticated && canvasId) {
           cloudSync.current?.scheduleCloudSync(snapshot, 4000);
         }
       }
@@ -2587,6 +2621,7 @@ export function CanvasApp() {
     });
 
     const cs = new CloudSyncEngine({
+      canvasId: canvasIdRef.current,
       onStatusChange: (st) => setCloudStatus(st),
       isBusy: () => isCanvasBusyRef.current(),
       isAuthenticated: isAuthenticatedRef.current,
@@ -2626,7 +2661,7 @@ export function CanvasApp() {
       const session = getStoredP2PSession();
       if (session?.role === "joiner") return;
 
-      const localSaved = await loadAutosave();
+      const localSaved = await loadAutosave(canvasId);
       if (localSaved && !cancelled) {
         await restoreSnapshot(
           engine,
@@ -2637,9 +2672,9 @@ export function CanvasApp() {
         history.current?.reset();
       }
 
-      if (isAuthenticated) {
+      if (isAuthenticated && canvasId) {
         try {
-          const cloudRes = await fetchCloudCanvas();
+          const cloudRes = await fetchCloudCanvas(canvasId);
           if (cancelled) return;
           if (cloudRes?.data) {
             const cloudSavedAt = cloudRes.savedAt || 0;
@@ -2657,7 +2692,7 @@ export function CanvasApp() {
                 cloudRes.data,
               );
               history.current?.reset();
-              void saveAutosave(cloudRes.data);
+              void saveAutosave(cloudRes.data, canvasId);
               cloudSync.current?.setLastSyncedHash(cloudHash);
             } else if (localSaved && localSavedAt > cloudSavedAt) {
               cloudSync.current?.setLastSyncedHash(cloudHash);
@@ -2674,7 +2709,7 @@ export function CanvasApp() {
     return () => {
       cancelled = true;
     };
-  }, [engine, isAuthenticated]);
+  }, [engine, canvasId, isAuthenticated]);
 
   useEffect(() => {
     tools.current?.setMode(mode);
@@ -3383,6 +3418,9 @@ export function CanvasApp() {
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
       <div className={cn("shrink-0", viewMode && "hidden")}>
         <CanvasHeader
+          canvasId={canvasId}
+          onOpenSaveDialog={() => setSaveDialogOpen(true)}
+          onOpenSidebar={() => setSidebarOpen(true)}
           onZoomIn={() => zoomBy(-100)}
           onZoomOut={() => zoomBy(100)}
           onReset={resetView}
@@ -3618,6 +3656,14 @@ export function CanvasApp() {
         onImportImage={importImage}
         onTidy={handleTidy}
         aiStatus={aiStatus}
+        onExportPng={doExportPng}
+        onExportJson={doExportJson}
+        onImportJson={() => jsonFileRef.current?.click()}
+        onOpenConnect={() => setConnectOpen(true)}
+        onOpenLogs={() => setLogsOpen(true)}
+        onOpenManual={() => setManualOpen(true)}
+        onOpenModelSelect={() => setModelSelectOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
       />
 
       <FloatingAiButton
@@ -3696,6 +3742,21 @@ export function CanvasApp() {
         }
       />
       <UserManualDialog open={manualOpen} onOpenChange={setManualOpen} />
+
+      <CanvasSidebar
+        open={sidebarOpen}
+        onOpenChange={setSidebarOpen}
+        currentCanvasId={canvasId ?? null}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onOpenModelSelect={() => setModelSelectOpen(true)}
+        activeModelName={activeModel || undefined}
+      />
+
+      <SaveCanvasDialog
+        open={saveDialogOpen}
+        onOpenChange={setSaveDialogOpen}
+        onSave={handleSaveToCloud}
+      />
     </div>
   );
 }

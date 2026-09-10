@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 export default function CanvasPage() {
   return (
     <CanvasProvider>
-      <CanvasApp />
+      <CanvasApp canvasId={null} />
     </CanvasProvider>
   );
 }
