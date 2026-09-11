@@ -19,7 +19,7 @@ import {
   ArrowLeft01Icon,
   FavouriteIcon,
   Comment01Icon,
-  Share01Icon,
+  Share07Icon,
   SparklesIcon,
   MoreVerticalIcon,
   Flag01Icon,
@@ -220,7 +220,7 @@ export function DravHeader({
                 onClick={handleShare}
                 className="size-8 border-border/70 cursor-pointer hidden sm:inline-flex"
               >
-                <HugeiconsIcon icon={Share01Icon} className="size-3.5" />
+                <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
               </Button>
             }
           />
@@ -258,7 +258,7 @@ export function DravHeader({
           />
           <DropdownMenuContent align="end" className="text-xs">
             <DropdownMenuItem onClick={handleShare} className="gap-2 cursor-pointer sm:hidden">
-              <HugeiconsIcon icon={Share01Icon} className="size-3.5" />
+              <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
               <span>Copy Link</span>
             </DropdownMenuItem>
             <DropdownMenuItem

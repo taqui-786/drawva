@@ -18,7 +18,7 @@ import { Loading02Icon, CloudCheckIcon } from "@hugeicons/core-free-icons";
 interface SaveCanvasDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSave: (title: string) => Promise<void>;
+  onSave: (title: string) => Promise<unknown>;
   defaultTitle?: string;
 }
 

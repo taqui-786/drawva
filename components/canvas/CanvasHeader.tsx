@@ -37,7 +37,7 @@ import {
   Shield01Icon,
   PeerToPeer01Icon,
   LayoutRightIcon,
-  Share01Icon,
+  Share07Icon,
 } from "@hugeicons/core-free-icons";
 import { useSession } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
@@ -150,6 +150,56 @@ export function CanvasHeader({
           Drawva
         </span>
 
+
+        {/* P2P Sync Status */}
+        {syncStatus === "connected" && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={onOpenConnect}
+                  className="gap-1 px-2 text-xs border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
+                >
+                  <HugeiconsIcon icon={PeerToPeer01Icon} className="size-3.5" />
+                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[11px] font-mono">{syncPeerCount}</span>
+                </Button>
+              }
+            />
+            <TooltipContent>
+              P2P connected with {syncPeerCount} peer(s)
+            </TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+
+      {/* Center: Canvas Coordinates (plain text, no interaction) */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:flex items-center gap-1.5 pointer-events-none select-none font-mono text-[11px] tabular-nums text-muted-foreground/70">
+        <span className="text-[10px] uppercase font-sans tracking-wider font-semibold text-muted-foreground/50">
+          Center
+        </span>
+        <span className="font-medium text-foreground/65">
+          {center.x}, {center.y}
+        </span>
+      </div>
+
+      {/* Right side: Admin link, Save/Cloud Sync, AI Controls, Thinking depth, Auto switch, Sidebar trigger */}
+      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">
+        {session?.user &&
+          (session.user as { role?: string }).role === "admin" && (
+            <Button
+              variant="outline"
+              size="xs"
+              render={<Link href="/admin" />}
+              className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans mr-0.5"
+            >
+              <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
+              <span>Admin</span>
+            </Button>
+          )}
+
         {/* Save button (when on blank / unsaved canvas) OR Cloud sync indicator (when on saved canvas) */}
         {session?.user && (
           <>
@@ -161,7 +211,7 @@ export function CanvasHeader({
                       variant="outline"
                       size="xs"
                       onClick={onOpenSaveDialog}
-                      className="gap-1.5 px-2.5 h-7 text-xs font-medium animate-pulse text-green-500 bg-green-500/10 cursor-pointer"
+                      className="gap-1.5 px-2.5 h-7 text-xs font-medium animate-pulse text-green-500 bg-green-500/10 hover:bg-green-500/20 cursor-pointer shrink-0"
                     >
                       <HugeiconsIcon
                         icon={CloudCheckIcon}
@@ -183,7 +233,7 @@ export function CanvasHeader({
                       variant="ghost"
                       size="sm"
                       onClick={onTriggerCloudSync}
-                      className="gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                      className="gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground cursor-pointer shrink-0"
                     >
                       {cloudStatus === "syncing" ? (
                         <>
@@ -254,55 +304,6 @@ export function CanvasHeader({
             )}
           </>
         )}
-
-        {/* P2P Sync Status */}
-        {syncStatus === "connected" && (
-          <Tooltip>
-            <TooltipTrigger
-              render={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={onOpenConnect}
-                  className="gap-1 px-2 text-xs border-emerald-500/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/10"
-                >
-                  <HugeiconsIcon icon={PeerToPeer01Icon} className="size-3.5" />
-                  <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[11px] font-mono">{syncPeerCount}</span>
-                </Button>
-              }
-            />
-            <TooltipContent>
-              P2P connected with {syncPeerCount} peer(s)
-            </TooltipContent>
-          </Tooltip>
-        )}
-      </div>
-
-      {/* Center: Canvas Coordinates (plain text, no interaction) */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:flex items-center gap-1.5 pointer-events-none select-none font-mono text-[11px] tabular-nums text-muted-foreground/70">
-        <span className="text-[10px] uppercase font-sans tracking-wider font-semibold text-muted-foreground/50">
-          Center
-        </span>
-        <span className="font-medium text-foreground/65">
-          {center.x}, {center.y}
-        </span>
-      </div>
-
-      {/* Right side: Admin link, AI Controls, Thinking depth, Auto switch, Sidebar trigger */}
-      <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">
-        {session?.user &&
-          (session.user as { role?: string }).role === "admin" && (
-            <Button
-              variant="outline"
-              size="xs"
-              render={<Link href="/admin" />}
-              className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans mr-1"
-            >
-              <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
-              <span>Admin</span>
-            </Button>
-          )}
 
         <AnimatePresence mode="wait">
           {agentRunning || aiStatus === "thinking" ? (
@@ -499,7 +500,7 @@ export function CanvasHeader({
                         onClick={onOpenPublishDialog}
                         className="h-7 gap-1.5 px-2 text-xs font-medium shrink-0 border-primary/30 text-primary hover:bg-primary/10 hover:text-primary cursor-pointer"
                       >
-                        <HugeiconsIcon icon={Share01Icon} className="size-3.5" />
+                        <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
                         <span className="hidden sm:inline">Share</span>
                       </Button>
                     }

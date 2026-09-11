@@ -13,7 +13,7 @@ import {
   FavouriteIcon,
   Comment01Icon,
   ViewIcon,
-  Share01Icon,
+  Share07Icon,
   SparklesIcon,
 } from "@hugeicons/core-free-icons";
 import { useSession } from "@/lib/auth-client";
@@ -144,7 +144,7 @@ export function DravCard({ drav }: DravCardProps) {
                   onClick={handleShareClick}
                   className="size-7 rounded-full bg-background/90 backdrop-blur-md border border-border/60 hover:bg-background shadow-sm text-foreground/80 cursor-pointer"
                 >
-                  <HugeiconsIcon icon={Share01Icon} className="size-3.5" />
+                  <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
                 </Button>
               }
             />

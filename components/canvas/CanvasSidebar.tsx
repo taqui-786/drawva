@@ -11,7 +11,7 @@ import {
   Logout01Icon,
   MoreVerticalIcon,
   Settings01Icon,
-  Share01Icon,
+  Share07Icon,
   AiChipIcon,
   CanvasIcon,
 } from "@hugeicons/core-free-icons";
@@ -252,7 +252,7 @@ export function CanvasSidebar({
                         onClick={(e) => handleShare(c.id, e as unknown as React.MouseEvent)}
                         className="gap-2 cursor-pointer text-xs"
                       >
-                        <HugeiconsIcon icon={Share01Icon} className="h-3.5 w-3.5" />
+                        <HugeiconsIcon icon={Share07Icon} className="h-3.5 w-3.5" />
                         <span>Share</span>
                       </DropdownMenuItem>
                       <DropdownMenuItem

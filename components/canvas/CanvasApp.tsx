@@ -27,7 +27,6 @@ import { rasterizeText, renderTextBlock } from "@/lib/canvas/textTool";
 import { placeImageAt } from "@/lib/canvas/images";
 import { CanvasHeader, type AiRunState } from "./CanvasHeader";
 import { Conductor, type ConductorEvent } from "@/lib/ai/conductor";
-import { useRouter } from "next/navigation";
 import { AGENT_MAX_STEPS_PER_TURN } from "@/lib/ai/agentTools";
 import { SettingsDialog } from "./SettingsDialog";
 import { ModelSelectDialog } from "./ModelSelectDialog";
@@ -230,7 +229,6 @@ type RefineResult =
 const INK_COALESCE_MS = 25_000;
 
 export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}) {
-  const router = useRouter();
   const { engine, mountRef } = useCanvas();
   const { mode, color, pen, aiStatus, autoOn, viewMode, gridVisible } = useSnapshot(appState);
   const eraser = 18;
@@ -281,15 +279,19 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
+  const [createdCanvasId, setCreatedCanvasId] = useState<string | null>(null);
+  const [createdCanvasTitle, setCreatedCanvasTitle] = useState<string | null>(null);
+  const activeCanvasId = canvasId ?? createdCanvasId;
+  const activeCanvasTitle = createdCanvasTitle || "Untitled Drav";
   const { data: session } = useSession();
   const isAuthenticated = !!session?.user;
   const isAuthenticatedRef = useRef(isAuthenticated);
   const cloudSync = useRef<CloudSyncEngine | null>(null);
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>("idle");
 
-  const handleSaveToCloud = async (title: string) => {
+  const handleSaveToCloud = async (title: string): Promise<string> => {
     const eng = engine;
-    if (!eng) return;
+    if (!eng) throw new Error("Canvas engine not ready");
     const snapshot = serializeSnapshot(
       eng,
       widgets.current,
@@ -301,7 +303,10 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       cloudSync.current?.setCanvasId(res.canvas.id);
       cloudSync.current?.setLastSyncedHash(computeSnapshotHash(snapshot));
       toast.success("Canvas saved to cloud!");
-      router.push(`/canvas/${res.canvas.id}`);
+      setCreatedCanvasId(res.canvas.id);
+      setCreatedCanvasTitle(res.canvas.title || title);
+      window.history.replaceState(null, "", `/canvas/${res.canvas.id}`);
+      return res.canvas.id;
     } else {
       toast.error("Failed to save canvas to cloud");
       throw new Error("Failed to save canvas");
@@ -2681,6 +2686,9 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           const cloudRes = await fetchCloudCanvas(canvasId);
           if (cancelled) return;
           if (cloudRes?.data) {
+            if (cloudRes.title) {
+              setCreatedCanvasTitle(cloudRes.title);
+            }
             const cloudSavedAt = cloudRes.savedAt || 0;
             const localSavedAt = localSaved?.savedAt || 0;
             const cloudHash = computeSnapshotHash(cloudRes.data);
@@ -3773,8 +3781,9 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       <PublishDravDialog
         open={publishDialogOpen}
         onOpenChange={setPublishDialogOpen}
-        canvasId={canvasId ?? null}
-        defaultTitle="Untitled Drav"
+        canvasId={activeCanvasId}
+        defaultTitle={activeCanvasTitle}
+        onSaveCanvas={handleSaveToCloud}
         getCanvasSnapshot={() => {
           if (!engine) return "";
           return serializeSnapshot(engine, widgets.current, objects.current);

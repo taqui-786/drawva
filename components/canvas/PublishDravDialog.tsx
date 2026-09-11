@@ -26,20 +26,25 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Share01Icon,
+  Share07Icon,
   Cancel01Icon,
   Loading03Icon,
+  Loading02Icon,
   CheckmarkCircle01Icon,
   Globe02Icon,
   Link01Icon,
+  CloudCheckIcon,
+  Login01Icon,
 } from "@hugeicons/core-free-icons";
 import { useSession } from "@/lib/auth-client";
+import { useRouter } from "next/navigation";
 
 interface PublishDravDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   canvasId: string | null;
   defaultTitle?: string;
+  onSaveCanvas?: (title: string) => Promise<string | null>;
   getCanvasSnapshot: () => Promise<unknown> | unknown;
   getCanvasThumbnail: () => Promise<string>;
 }
@@ -49,13 +54,23 @@ export function PublishDravDialog({
   onOpenChange,
   canvasId,
   defaultTitle = "Untitled Drav",
+  onSaveCanvas,
   getCanvasSnapshot,
   getCanvasThumbnail,
 }: PublishDravDialogProps) {
+  const router = useRouter();
   const { data: session } = useSession();
   const queryClient = useQueryClient();
 
-  const [title, setTitle] = React.useState(defaultTitle);
+  const [localCanvasId, setLocalCanvasId] = React.useState<string | null>(null);
+  const [customSaveTitle, setCustomSaveTitle] = React.useState<string | null>(null);
+  const [customTitle, setCustomTitle] = React.useState<string | null>(null);
+  const [isSavingCanvas, setIsSavingCanvas] = React.useState(false);
+
+  const effectiveCanvasId = canvasId || localCanvasId;
+  const title = customTitle ?? defaultTitle;
+  const saveTitle = customSaveTitle ?? defaultTitle;
+
   const [description, setDescription] = React.useState("");
   const [category, setCategory] = React.useState<string>("ai");
   const [tagInput, setTagInput] = React.useState("");
@@ -70,6 +85,10 @@ export function PublishDravDialog({
       setThumbnailPreview("");
       setPublishedDravId(null);
       setIsGeneratingThumb(true);
+      setIsSavingCanvas(false);
+      setLocalCanvasId(null);
+      setCustomTitle(null);
+      setCustomSaveTitle(null);
     }
     onOpenChange(newOpen);
   };
@@ -96,6 +115,29 @@ export function PublishDravDialog({
     };
   }, [open, getCanvasThumbnail]);
 
+  const handleSaveFirst = async () => {
+    if (!onSaveCanvas) return;
+    if (!session?.user) {
+      toast.error("Please sign in to save your canvas.");
+      router.push("/signin");
+      return;
+    }
+    const finalTitle = saveTitle.trim() || "Untitled Drav";
+    try {
+      setIsSavingCanvas(true);
+      const newId = await onSaveCanvas(finalTitle);
+      if (newId) {
+        setLocalCanvasId(newId);
+        setCustomTitle(finalTitle);
+        toast.success("Canvas saved to cloud! Ready to publish.");
+      }
+    } catch (err) {
+      console.error("Failed to save canvas before publishing:", err);
+    } finally {
+      setIsSavingCanvas(false);
+    }
+  };
+
   const addTag = () => {
     const trimmed = tagInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, "");
     if (trimmed && !tags.includes(trimmed) && tags.length < 8) {
@@ -121,6 +163,9 @@ export function PublishDravDialog({
       if (!session?.user) {
         throw new Error("You must be signed in to publish a Drav.");
       }
+      if (!effectiveCanvasId) {
+        throw new Error("Please save your canvas before publishing.");
+      }
       if (!title.trim()) {
         throw new Error("Please enter a title for your Drav.");
       }
@@ -128,13 +173,11 @@ export function PublishDravDialog({
       const snapshot = await getCanvasSnapshot();
       const snapshotStr = typeof snapshot === "string" ? snapshot : JSON.stringify(snapshot);
 
-      const targetCanvasId = canvasId || `c_temp_${Date.now().toString(36)}`;
-
       const res = await fetch("/api/dravs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          canvasId: targetCanvasId,
+          canvasId: effectiveCanvasId,
           title: title.trim(),
           description: description.trim() || undefined,
           category,
@@ -155,7 +198,6 @@ export function PublishDravDialog({
     onSuccess: (data) => {
       toast.success("Drav published successfully to Drawva Community!");
       setPublishedDravId(data.id);
-      // Invalidate community query cache so discovery tab instantly includes the new Drav
       queryClient.invalidateQueries({ queryKey: ["dravs"] });
     },
     onError: (err: Error) => {
@@ -167,32 +209,41 @@ export function PublishDravDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto p-6 sm:p-7">
-        <DialogHeader>
-          <div className="flex items-center gap-2 text-primary font-semibold text-xs tracking-wider uppercase mb-1">
-            <HugeiconsIcon icon={Share01Icon} className="size-4" />
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto p-4 sm:p-5">
+        <DialogHeader className="space-y-1">
+          <div className="flex items-center gap-1.5 text-primary font-semibold text-[11px] tracking-wider uppercase">
+            <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
             <span>Community Drav</span>
           </div>
-          <DialogTitle className="text-xl font-bold tracking-tight">
-            Publish your Drav to Community
+          <DialogTitle className="text-base sm:text-lg font-bold tracking-tight">
+            {publishedDravId
+              ? "Drav Published!"
+              : !effectiveCanvasId
+              ? "Save your Drav before sharing"
+              : "Publish your Drav to Community"}
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground">
-            Share your interactive whiteboard canvas, workflows, and diagrams with the world.
+          <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+            {publishedDravId
+              ? "Your interactive whiteboard is live in the community."
+              : !effectiveCanvasId
+              ? "Whiteboards must be saved to your cloud workspace first so others can view and remix."
+              : "Share your interactive canvas, workflows, and diagrams with the world."}
           </DialogDescription>
         </DialogHeader>
 
         {publishedDravId ? (
-          <div className="py-6 flex flex-col items-center justify-center text-center space-y-4">
-            <div className="size-12 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-500">
-              <HugeiconsIcon icon={CheckmarkCircle01Icon} className="size-6" />
+          /* Success Screen */
+          <div className="py-4 flex flex-col items-center justify-center text-center space-y-3">
+            <div className="size-11 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-500">
+              <HugeiconsIcon icon={CheckmarkCircle01Icon} className="size-5" />
             </div>
-            <div className="space-y-1">
-              <h3 className="text-base font-semibold">Your Drav is live!</h3>
-              <p className="text-xs text-muted-foreground">
-                Anyone with access can view, like, comment, and remix your creation.
+            <div className="space-y-0.5">
+              <h3 className="text-sm font-semibold">Your Drav is live in the community!</h3>
+              <p className="text-xs text-muted-foreground max-w-xs mx-auto">
+                Anyone with access can explore, like, comment, and remix your creation.
               </p>
             </div>
-            <div className="flex items-center gap-2 pt-2">
+            <div className="flex items-center gap-2 pt-1">
               <Button
                 variant="outline"
                 size="sm"
@@ -201,7 +252,7 @@ export function PublishDravDialog({
                   navigator.clipboard.writeText(url);
                   toast.success("Drav link copied to clipboard!");
                 }}
-                className="gap-1.5 text-xs"
+                className="gap-1.5 text-xs h-8"
               >
                 <HugeiconsIcon icon={Link01Icon} className="size-3.5" />
                 <span>Copy Link</span>
@@ -211,20 +262,86 @@ export function PublishDravDialog({
                 onClick={() => {
                   window.open(`/drav/${publishedDravId}`, "_blank");
                 }}
-                className="gap-1.5 text-xs"
+                className="gap-1.5 text-xs h-8"
               >
                 <HugeiconsIcon icon={Globe02Icon} className="size-3.5" />
                 <span>Open Drav</span>
               </Button>
             </div>
           </div>
-        ) : (
-          <div className="space-y-4 py-2">
-            {/* Thumbnail Preview */}
-            <div className="relative aspect-video w-full overflow-hidden rounded-xl border border-border/80 bg-muted/20 flex items-center justify-center">
+        ) : !effectiveCanvasId ? (
+          /* Step 1: Save Required Screen */
+          <div className="space-y-3 py-1">
+            {/* Live Thumbnail Preview */}
+            <div className="relative aspect-[16/9] max-h-36 w-full overflow-hidden rounded-lg border border-border/80 bg-muted/20 flex items-center justify-center">
               {isGeneratingThumb ? (
-                <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground">
-                  <HugeiconsIcon icon={Loading03Icon} className="size-5 animate-spin text-primary" />
+                <div className="flex flex-col items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <HugeiconsIcon icon={Loading03Icon} className="size-4 animate-spin text-primary" />
+                  <span>Preparing canvas preview…</span>
+                </div>
+              ) : thumbnailPreview ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={thumbnailPreview}
+                  alt="Canvas preview"
+                  className="size-full object-contain"
+                />
+              ) : (
+                <span className="text-[11px] text-muted-foreground">Canvas preview</span>
+              )}
+            </div>
+
+            {!session?.user ? (
+              <div className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-center space-y-2">
+                <p className="text-xs text-muted-foreground">
+                  You need a Drawva account to save canvases and publish to the community.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => router.push("/signin")}
+                  className="gap-1.5 text-xs h-8 w-full"
+                >
+                  <HugeiconsIcon icon={Login01Icon} className="size-3.5" />
+                  <span>Sign In to Continue</span>
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <Label htmlFor="save-drav-title" className="text-xs font-medium">
+                    Canvas Title <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="save-drav-title"
+                    placeholder="e.g. Interactive Geometry with Angle Calculations"
+                    value={saveTitle}
+                    onChange={(e) => setCustomSaveTitle(e.target.value)}
+                    maxLength={100}
+                    className="h-8 text-xs"
+                    disabled={isSavingCanvas}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleSaveFirst();
+                      }
+                    }}
+                  />
+                </div>
+                <div className="rounded-lg border border-border/60 bg-muted/30 p-2.5 text-[11px] text-muted-foreground flex items-center gap-2">
+                  <HugeiconsIcon icon={CloudCheckIcon} className="size-4 shrink-0 text-primary" />
+                  <span>Saving creates a cloud record with an ID for community sharing.</span>
+                </div>
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Step 2: Publish Form (Compact & Space-Optimized) */
+          <div className="space-y-2.5 py-1">
+            {/* Live Thumbnail Preview */}
+            <div className="relative aspect-[16/9] max-h-32 sm:max-h-36 w-full overflow-hidden rounded-lg border border-border/80 bg-muted/20 flex items-center justify-center">
+              {isGeneratingThumb ? (
+                <div className="flex flex-col items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <HugeiconsIcon icon={Loading03Icon} className="size-4 animate-spin text-primary" />
                   <span>Generating canvas preview…</span>
                 </div>
               ) : thumbnailPreview ? (
@@ -235,52 +352,36 @@ export function PublishDravDialog({
                   className="size-full object-contain"
                 />
               ) : (
-                <span className="text-xs text-muted-foreground">No preview available</span>
+                <span className="text-[11px] text-muted-foreground">No preview available</span>
               )}
             </div>
 
             {/* Title Input */}
-            <div className="space-y-1.5">
-              <Label htmlFor="drav-title" className="text-xs font-medium">
+            <div className="space-y-1">
+              <Label htmlFor="drav-title" className="text-[11px] font-medium">
                 Title <span className="text-destructive">*</span>
               </Label>
               <Input
                 id="drav-title"
                 placeholder="E.g. Full-Stack Agent Architecture & Flow"
                 value={title}
-                onChange={(e) => setTitle(e.target.value)}
+                onChange={(e) => setCustomTitle(e.target.value)}
                 maxLength={100}
-                className="h-9 text-sm"
+                className="h-8 text-xs"
               />
             </div>
 
-            {/* Description Input */}
-            <div className="space-y-1.5">
-              <Label htmlFor="drav-desc" className="text-xs font-medium">
-                Description (optional)
-              </Label>
-              <Textarea
-                id="drav-desc"
-                placeholder="Briefly explain what's on this whiteboard canvas..."
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                maxLength={500}
-                rows={2}
-                className="text-xs resize-none"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {/* Category Select */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium">Category</Label>
+            {/* Category & Visibility row */}
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium">Category</Label>
                 <Select
                   value={category}
                   onValueChange={(val) => {
                     if (val) setCategory(val);
                   }}
                 >
-                  <SelectTrigger className="h-9 text-xs">
+                  <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -293,24 +394,23 @@ export function PublishDravDialog({
                 </Select>
               </div>
 
-              {/* Visibility Select */}
-              <div className="space-y-1.5">
-                <Label className="text-xs font-medium">Visibility</Label>
+              <div className="space-y-1">
+                <Label className="text-[11px] font-medium">Visibility</Label>
                 <Select
                   value={visibility}
                   onValueChange={(val) => {
                     if (val) setVisibility(val as DravVisibility);
                   }}
                 >
-                  <SelectTrigger className="h-9 text-xs">
+                  <SelectTrigger className="h-8 text-xs">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="public" className="text-xs">
-                      Public (Visible in Community)
+                      Public (Community)
                     </SelectItem>
                     <SelectItem value="unlisted" className="text-xs">
-                      Unlisted (Direct URL only)
+                      Unlisted (Direct Link)
                     </SelectItem>
                     <SelectItem value="private" className="text-xs">
                       Private (Only you)
@@ -320,19 +420,35 @@ export function PublishDravDialog({
               </div>
             </div>
 
-            {/* Tags Input */}
-            <div className="space-y-1.5">
-              <Label htmlFor="drav-tags" className="text-xs font-medium">
-                Tags (press Enter to add)
+            {/* Description Input */}
+            <div className="space-y-1">
+              <Label htmlFor="drav-desc" className="text-[11px] font-medium">
+                Description (optional)
               </Label>
-              <div className="flex gap-2">
+              <Textarea
+                id="drav-desc"
+                placeholder="Briefly explain what's on this whiteboard canvas..."
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                maxLength={500}
+                rows={2}
+                className="text-xs py-1.5 resize-none min-h-[48px]"
+              />
+            </div>
+
+            {/* Tags Input */}
+            <div className="space-y-1">
+              <Label htmlFor="drav-tags" className="text-[11px] font-medium">
+                Tags
+              </Label>
+              <div className="flex gap-1.5">
                 <Input
                   id="drav-tags"
-                  placeholder="e.g. mermaid, ai, react"
+                  placeholder="e.g. math, geometry, interactive"
                   value={tagInput}
                   onChange={(e) => setTagInput(e.target.value)}
                   onKeyDown={handleKeyDownTag}
-                  className="h-8 text-xs"
+                  className="h-7 text-xs"
                 />
                 <Button
                   type="button"
@@ -340,18 +456,18 @@ export function PublishDravDialog({
                   size="sm"
                   onClick={addTag}
                   disabled={!tagInput.trim()}
-                  className="h-8 text-xs shrink-0"
+                  className="h-7 text-xs px-2.5 shrink-0"
                 >
                   Add
                 </Button>
               </div>
               {tags.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 pt-1">
+                <div className="flex flex-wrap gap-1 pt-0.5">
                   {tags.map((t) => (
                     <Badge
                       key={t}
                       variant="secondary"
-                      className="text-[11px] font-mono py-0.5 px-2 flex items-center gap-1 cursor-pointer hover:bg-destructive/20"
+                      className="text-[10px] font-mono py-0 px-1.5 flex items-center gap-1 cursor-pointer hover:bg-destructive/20"
                       onClick={() => removeTag(t)}
                     >
                       <span>#{t}</span>
@@ -364,24 +480,56 @@ export function PublishDravDialog({
           </div>
         )}
 
-        <DialogFooter className="gap-2 sm:gap-0 mt-2">
+        <DialogFooter className="gap-2 sm:gap-0 mt-1 pt-2 border-t border-border/50">
           {publishedDravId ? (
             <Button
               variant="outline"
               size="sm"
               onClick={() => onOpenChange(false)}
-              className="text-xs w-full sm:w-auto"
+              className="text-xs w-full sm:w-auto h-8"
             >
               Close
             </Button>
+          ) : !effectiveCanvasId ? (
+            <div className="flex items-center justify-end gap-2 w-full">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => onOpenChange(false)}
+                disabled={isSavingCanvas}
+                className="text-xs h-8"
+              >
+                Cancel
+              </Button>
+              {session?.user && (
+                <Button
+                  size="sm"
+                  onClick={handleSaveFirst}
+                  disabled={isSavingCanvas || !saveTitle.trim()}
+                  className="gap-1.5 text-xs h-8 font-medium"
+                >
+                  {isSavingCanvas ? (
+                    <>
+                      <HugeiconsIcon icon={Loading02Icon} className="size-3.5 animate-spin" />
+                      <span>Saving Canvas…</span>
+                    </>
+                  ) : (
+                    <>
+                      <HugeiconsIcon icon={CloudCheckIcon} className="size-3.5" />
+                      <span>Save Drav & Continue</span>
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
           ) : (
-            <>
+            <div className="flex items-center justify-end gap-2 w-full">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => onOpenChange(false)}
                 disabled={publishMutation.isPending}
-                className="text-xs"
+                className="text-xs h-8"
               >
                 Cancel
               </Button>
@@ -389,7 +537,7 @@ export function PublishDravDialog({
                 size="sm"
                 onClick={() => publishMutation.mutate()}
                 disabled={publishMutation.isPending || !title.trim()}
-                className="gap-1.5 text-xs"
+                className="gap-1.5 text-xs h-8 font-medium"
               >
                 {publishMutation.isPending ? (
                   <>
@@ -398,12 +546,12 @@ export function PublishDravDialog({
                   </>
                 ) : (
                   <>
-                    <HugeiconsIcon icon={Share01Icon} className="size-3.5" />
+                    <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
                     <span>Publish Drav</span>
                   </>
                 )}
               </Button>
-            </>
+            </div>
           )}
         </DialogFooter>
       </DialogContent>
