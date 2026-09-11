@@ -743,7 +743,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     }
   }, [tickerState]);
 
-  const handleAskAi = useCallback(() => {
+  const handleAskAi = useCallback((customPrompt?: string) => {
     const agent = conductorRef.current;
     if (!agent) {
       toast.error("AI Conductor is initializing, please wait a moment.");
@@ -772,12 +772,13 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     });
     setTickerState((prev) => ({
       status: "running",
-      currentMessage: "Taking a look at your board…",
+      currentMessage: customPrompt ? `Agent: ${customPrompt.slice(0, 36)}…` : "Taking a look at your board…",
       messageId: prev.messageId + 1,
       detail: undefined,
     }));
 
     const prompt =
+      customPrompt ||
       "Observe the canvas handwriting, formulas, diagrams, questions, and drawings. Provide the appropriate continuation, solution, calculation, drawing, diagram, or widget.";
     agent.send(prompt).catch((err) => {
       console.error("[Ask AI] Error starting turn:", err);
