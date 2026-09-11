@@ -199,6 +199,10 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
   // Desktop hover handling with smooth buffer to transition between button and menu
   const handleMouseEnter = () => {
     if (isRunning) return;
+    // Don't auto-open on touch devices on synthetic hover
+    if (typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches) {
+      return;
+    }
     if (closeTimerRef.current) {
       clearTimeout(closeTimerRef.current);
       closeTimerRef.current = null;
@@ -207,6 +211,10 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
   };
 
   const handleMouseLeave = () => {
+    // Ignore on touch devices so the menu doesn't vanish when user lifts their finger
+    if (typeof window !== "undefined" && window.matchMedia("(pointer: coarse)").matches) {
+      return;
+    }
     if (closeTimerRef.current) {
       clearTimeout(closeTimerRef.current);
     }
@@ -231,8 +239,19 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
       return;
     }
 
-    // Toggle menu state on button click
-    setIsMenuOpen((prev) => !prev);
+    const isTouch =
+      typeof window !== "undefined" &&
+      (window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768);
+
+    // On touch devices without cursor hover, first tap opens the menu
+    if (isTouch && !isMenuOpen) {
+      setIsMenuOpen(true);
+      return;
+    }
+
+    // On desktop, or when tapped again on mobile, execute default Ask AI action
+    setIsMenuOpen(false);
+    onAskAi?.();
   };
 
   return (
