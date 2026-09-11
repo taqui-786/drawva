@@ -148,9 +148,13 @@ export async function restoreSnapshot(
     if (!c) continue;
     const img = new Image();
     img.src = dataUrl;
-    await img.decode();
-    c.getContext("2d")!.drawImage(img, 0, 0);
-    engine.tiles.set(k, c, dataUrl);
+    try {
+      await img.decode();
+      c.getContext("2d")?.drawImage(img, 0, 0);
+      engine.tiles.set(k, c, dataUrl);
+    } catch (err) {
+      console.warn("[persistence] Failed to decode tile:", k, err);
+    }
   }
   for (const w of snapshot.widgets || []) {
     widgets?.add({ ...w });
@@ -228,15 +232,36 @@ export interface SavedProviderCredentials {
 
 const PROVIDER_CREDENTIALS_KEY = "saved_provider_credentials";
 
+const DB_VERSION = 3;
+
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    if (typeof window === "undefined" || !window.indexedDB) {
+      return reject(new Error("IndexedDB unavailable"));
+    }
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+      if (db.objectStoreNames.contains(STORE)) {
+        try {
+          const existingStore = req.transaction?.objectStore(STORE);
+          if (existingStore && existingStore.keyPath !== null) {
+            db.deleteObjectStore(STORE);
+            db.createObjectStore(STORE);
+          }
+        } catch {
+          db.deleteObjectStore(STORE);
+          db.createObjectStore(STORE);
+        }
+      } else {
+        db.createObjectStore(STORE);
+      }
     };
     req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onerror = () => reject(req.error || new Error("Failed to open IndexedDB"));
+    req.onblocked = () => {
+      console.warn("[persistence] IndexedDB open blocked by existing connection");
+    };
   });
 }
 
@@ -355,35 +380,75 @@ export function getAutosaveKey(canvasId?: string | null): string {
 }
 
 export async function saveAutosave(snapshot: ProjectSnapshot, canvasId?: string | null): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
   try {
     const db = await openDb();
     const key = getAutosaveKey(canvasId);
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).put(snapshot, key);
-      tx.oncomplete = () => {
+    return await new Promise<void>((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          const err = tx.error;
+          db.close();
+          console.error("[persistence] saveAutosave transaction error:", err);
+          reject(err);
+        };
+        tx.onabort = () => {
+          const err = tx.error || new Error("Transaction aborted");
+          db.close();
+          console.error("[persistence] saveAutosave transaction aborted:", err);
+          reject(err);
+        };
+        tx.objectStore(STORE).put(snapshot, key);
+      } catch (err) {
         db.close();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
+        console.error("[persistence] saveAutosave put error:", err);
+        reject(err);
+      }
     });
-  } catch {}
+  } catch (err) {
+    console.error("[persistence] saveAutosave failed for key:", getAutosaveKey(canvasId), err);
+  }
 }
 
 export async function deleteAutosave(canvasId?: string | null): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
   try {
     const db = await openDb();
     const key = getAutosaveKey(canvasId);
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, "readwrite");
-      tx.objectStore(STORE).delete(key);
-      tx.oncomplete = () => {
+    return await new Promise<void>((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE, "readwrite");
+        tx.objectStore(STORE).delete(key);
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+        tx.onerror = () => {
+          const err = tx.error;
+          db.close();
+          console.error("[persistence] deleteAutosave transaction error:", err);
+          reject(err);
+        };
+        tx.onabort = () => {
+          const err = tx.error || new Error("Transaction aborted");
+          db.close();
+          console.error("[persistence] deleteAutosave transaction aborted:", err);
+          reject(err);
+        };
+      } catch (err) {
         db.close();
-        resolve();
-      };
-      tx.onerror = () => reject(tx.error);
+        console.error("[persistence] deleteAutosave delete error:", err);
+        reject(err);
+      }
     });
-  } catch {}
+  } catch (err) {
+    console.error("[persistence] deleteAutosave failed for key:", getAutosaveKey(canvasId), err);
+  }
 }
 
 export async function saveAgentSession(messages: unknown[], canvasId?: string): Promise<void> {
@@ -535,41 +600,56 @@ function redactTraceValue(value: unknown, depth = 0): unknown {
 }
 
 export async function loadAutosave(canvasId?: string | null): Promise<ProjectSnapshot | null> {
+  if (typeof window === "undefined" || !window.indexedDB) return null;
   try {
     const db = await openDb();
     const key = getAutosaveKey(canvasId);
-    return new Promise((resolve, reject) => {
-      const tx = db.transaction(STORE, "readonly");
-      const req = tx.objectStore(STORE).get(key);
-      req.onsuccess = () => {
-        const res = req.result as ProjectSnapshot | undefined;
-        if (res) {
+    return await new Promise<ProjectSnapshot | null>((resolve, reject) => {
+      try {
+        const tx = db.transaction(STORE, "readonly");
+        const store = tx.objectStore(STORE);
+        const req = store.get(key);
+        req.onsuccess = () => {
+          const res = req.result as ProjectSnapshot | undefined;
+          if (res) {
+            db.close();
+            resolve(res);
+            return;
+          }
+          if (!canvasId) {
+            const legacyReq = store.get(KEY);
+            legacyReq.onsuccess = () => {
+              db.close();
+              resolve((legacyReq.result as ProjectSnapshot) ?? null);
+            };
+            legacyReq.onerror = () => {
+              db.close();
+              resolve(null);
+            };
+            return;
+          }
           db.close();
-          resolve(res);
-          return;
-        }
-        if (!canvasId) {
-          const legacyTx = db.transaction(STORE, "readonly");
-          const legacyReq = legacyTx.objectStore(STORE).get(KEY);
-          legacyReq.onsuccess = () => {
-            db.close();
-            resolve((legacyReq.result as ProjectSnapshot) ?? null);
-          };
-          legacyReq.onerror = () => {
-            db.close();
-            resolve(null);
-          };
-          return;
-        }
+          resolve(null);
+        };
+        req.onerror = () => {
+          db.close();
+          reject(req.error);
+        };
+        tx.onerror = () => {
+          db.close();
+          reject(tx.error);
+        };
+        tx.onabort = () => {
+          db.close();
+          reject(tx.error || new Error("Transaction aborted"));
+        };
+      } catch (err) {
         db.close();
-        resolve(null);
-      };
-      req.onerror = () => {
-        db.close();
-        reject(req.error);
-      };
+        reject(err);
+      }
     });
-  } catch {
+  } catch (err) {
+    console.error("[persistence] loadAutosave failed for key:", getAutosaveKey(canvasId), err);
     return null;
   }
 }

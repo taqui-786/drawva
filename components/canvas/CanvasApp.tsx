@@ -67,6 +67,7 @@ import {
   loadAgentLogs,
   clearAgentLogs,
   getAutosaveEnabled,
+  type ProjectSnapshot,
 } from "@/lib/canvas/persistence";
 import {
   CloudSyncEngine,
@@ -302,7 +303,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     if (res.success && res.canvas) {
       void saveAutosave(snapshot, res.canvas.id);
       cloudSync.current?.setCanvasId(res.canvas.id);
-      cloudSync.current?.setLastSyncedHash(computeSnapshotHash(snapshot));
+      cloudSync.current?.markSynced(computeSnapshotHash(snapshot));
       toast.success("Canvas saved to cloud!");
       setCreatedCanvasId(res.canvas.id);
       setCreatedCanvasTitle(res.canvas.title || title);
@@ -321,11 +322,11 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     if (name) syncManager.current?.setLocalName(name);
   }, [isAuthenticated, session?.user?.name]);
 
-  const canvasIdRef = useRef(canvasId);
+  const canvasIdRef = useRef(activeCanvasId);
   useEffect(() => {
-    canvasIdRef.current = canvasId;
-    cloudSync.current?.setCanvasId(canvasId ?? null);
-  }, [canvasId]);
+    canvasIdRef.current = activeCanvasId;
+    cloudSync.current?.setCanvasId(activeCanvasId ?? null);
+  }, [activeCanvasId]);
 
   const lastUserIdRef = useRef<string | null>(null);
   const userIdRef = useRef<string | undefined>(session?.user?.id);
@@ -1453,8 +1454,9 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           widgets.current,
           objects.current,
         );
-        void saveAutosave(snapshot, canvasId);
-        if (isAuthenticated && canvasId) {
+        const currentId = canvasIdRef.current;
+        void saveAutosave(snapshot, currentId);
+        if (isAuthenticatedRef.current && currentId) {
           cloudSync.current?.scheduleCloudSync(snapshot, 4000);
         }
       }
@@ -1472,7 +1474,10 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
+  const userEditedRef = useRef(false);
+
   function afterBoardChange() {
+    userEditedRef.current = true;
     bumpRevision();
     history.current?.commit();
     syncHistoryButtons();
@@ -1490,9 +1495,12 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     const h = history.current;
     if (!h || !h.canUndo) return;
     await h.undo();
+    userEditedRef.current = true;
     bumpRevision();
     inkEpochRef.current += 1;
     syncHistoryButtons();
+    scheduleSave();
+    updateCanvasEmptyState();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(
         engine,
@@ -1509,9 +1517,12 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     const h = history.current;
     if (!h || !h.canRedo) return;
     await h.redo();
+    userEditedRef.current = true;
     bumpRevision();
     inkEpochRef.current += 1;
     syncHistoryButtons();
+    scheduleSave();
+    updateCanvasEmptyState();
     if (engine && syncManager.current) {
       const snapshot = serializeSnapshot(
         engine,
@@ -2712,6 +2723,8 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     };
   }, [engine]);
 
+  const canvasLoadedIdRef = useRef<string | null | undefined>(undefined);
+
   useEffect(() => {
     if (!engine) return;
     let cancelled = false;
@@ -2719,15 +2732,22 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       const session = getStoredP2PSession();
       if (session?.role === "joiner") return;
 
-      const localSaved = await loadAutosave(canvasId);
-      if (localSaved && !cancelled) {
-        await restoreSnapshot(
-          engine,
-          widgets.current,
-          objects.current,
-          localSaved,
-        );
-        history.current?.reset();
+      const isFirstLoadForThisCanvas = canvasLoadedIdRef.current !== canvasId;
+      let localSaved: ProjectSnapshot | null = null;
+
+      if (isFirstLoadForThisCanvas) {
+        canvasLoadedIdRef.current = canvasId;
+        userEditedRef.current = false;
+        localSaved = await loadAutosave(canvasId);
+        if (localSaved && !cancelled && !userEditedRef.current) {
+          await restoreSnapshot(
+            engine,
+            widgets.current,
+            objects.current,
+            localSaved,
+          );
+          history.current?.reset();
+        }
       }
 
       if (isAuthenticated && canvasId) {
@@ -2745,7 +2765,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
 
             if (cloudHash === localHash) {
               cloudSync.current?.setLastSyncedHash(cloudHash);
-            } else if (cloudSavedAt > localSavedAt) {
+            } else if (!userEditedRef.current && cloudSavedAt > localSavedAt) {
               await restoreSnapshot(
                 engine,
                 widgets.current,
@@ -3483,7 +3503,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     <div className="flex h-dvh w-full flex-col overflow-hidden bg-background">
       <div className={cn("shrink-0", viewMode && "hidden")}>
         <CanvasHeader
-          canvasId={canvasId}
+          canvasId={activeCanvasId}
           onOpenSaveDialog={() => setSaveDialogOpen(true)}
           onOpenPublishDialog={() => setPublishDialogOpen(true)}
           onOpenSidebar={() => setSidebarOpen(true)}
@@ -3825,7 +3845,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       <CanvasSidebar
         open={sidebarOpen}
         onOpenChange={setSidebarOpen}
-        currentCanvasId={canvasId ?? null}
+        currentCanvasId={activeCanvasId ?? null}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenModelSelect={() => setModelSelectOpen(true)}
         activeModelName={activeModel || undefined}

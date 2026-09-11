@@ -200,6 +200,16 @@ export class CloudSyncEngine {
     this.lastSyncedHash = hash;
   }
 
+  public markSynced(hash: string | null) {
+    this.lastSyncedHash = hash;
+    this.pendingSnapshot = null;
+    this.setStatus("synced");
+    if (this.syncClearTimer) clearTimeout(this.syncClearTimer);
+    this.syncClearTimer = setTimeout(() => {
+      if (this.status === "synced") this.setStatus("idle");
+    }, 3000);
+  }
+
   public getLastSyncedHash(): string | null {
     return this.lastSyncedHash;
   }
