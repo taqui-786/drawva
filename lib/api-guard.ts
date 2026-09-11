@@ -37,6 +37,16 @@ export async function requireSession(req: Request): Promise<{ userId: string } |
   return { userId };
 }
 
+export async function getOptionalSession(req: Request): Promise<{ userId?: string }> {
+  try {
+    const session = await auth.api.getSession({ headers: req.headers });
+    return { userId: session?.user?.id };
+  } catch {
+    return {};
+  }
+}
+
+
 const RATE_CAPACITY = 30;
 const RATE_REFILL_PER_SEC = 0.5;
 const buckets = new Map<string, { tokens: number; last: number }>();

@@ -368,6 +368,114 @@
           var ctx2d = canvas.getContext('2d');
           ctx2d.scale(scale, scale);
 
+          // 1. Draw backgrounds and borders of containers
+          var allEls = document.body ? document.body.querySelectorAll('*') : [];
+          for (var eIdx = 0; eIdx < allEls.length; eIdx++) {
+            var el = allEls[eIdx];
+            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'SVG' || isInsideSvg(el)) continue;
+            var r = el.getBoundingClientRect();
+            if (r.width <= 0 || r.height <= 0) continue;
+            var style = window.getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden') continue;
+
+            var bg = style.backgroundColor;
+            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
+              ctx2d.fillStyle = bg;
+              var radius = parseFloat(style.borderRadius) || 0;
+              if (radius > 0 && typeof ctx2d.roundRect === 'function') {
+                ctx2d.beginPath();
+                ctx2d.roundRect(r.left, r.top, r.width, r.height, radius);
+                ctx2d.fill();
+              } else {
+                ctx2d.fillRect(r.left, r.top, r.width, r.height);
+              }
+            }
+
+            var bbW = parseFloat(style.borderBottomWidth) || 0;
+            if (bbW > 0 && style.borderBottomStyle !== 'none') {
+              ctx2d.strokeStyle = style.borderBottomColor || 'rgba(0,0,0,0.1)';
+              ctx2d.lineWidth = bbW;
+              ctx2d.beginPath();
+              ctx2d.moveTo(r.left, r.bottom - bbW / 2);
+              ctx2d.lineTo(r.right, r.bottom - bbW / 2);
+              ctx2d.stroke();
+            }
+            var btW = parseFloat(style.borderTopWidth) || 0;
+            if (btW > 0 && style.borderTopStyle !== 'none') {
+              ctx2d.strokeStyle = style.borderTopColor || 'rgba(0,0,0,0.1)';
+              ctx2d.lineWidth = btW;
+              ctx2d.beginPath();
+              ctx2d.moveTo(r.left, r.top + btW / 2);
+              ctx2d.lineTo(r.right, r.top + btW / 2);
+              ctx2d.stroke();
+            }
+            var blW = parseFloat(style.borderLeftWidth) || 0;
+            if (blW > 0 && style.borderLeftStyle !== 'none') {
+              ctx2d.strokeStyle = style.borderLeftColor || 'rgba(0,0,0,0.1)';
+              ctx2d.lineWidth = blW;
+              ctx2d.beginPath();
+              ctx2d.moveTo(r.left + blW / 2, r.top);
+              ctx2d.lineTo(r.left + blW / 2, r.bottom);
+              ctx2d.stroke();
+            }
+            var brW = parseFloat(style.borderRightWidth) || 0;
+            if (brW > 0 && style.borderRightStyle !== 'none') {
+              ctx2d.strokeStyle = style.borderRightColor || 'rgba(0,0,0,0.1)';
+              ctx2d.lineWidth = brW;
+              ctx2d.beginPath();
+              ctx2d.moveTo(r.right - brW / 2, r.top);
+              ctx2d.lineTo(r.right - brW / 2, r.bottom);
+              ctx2d.stroke();
+            }
+          }
+
+          // 2. Draw text nodes with computed typography
+          if (document.body) {
+            var walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+            var textNode;
+            while ((textNode = walker.nextNode())) {
+              var text = (textNode.textContent || '').trim();
+              if (!text) continue;
+              var parentEl = textNode.parentElement;
+              if (!parentEl || parentEl.tagName === 'SCRIPT' || parentEl.tagName === 'STYLE' || parentEl.tagName === 'SVG' || isInsideSvg(parentEl)) continue;
+              var pStyle = window.getComputedStyle(parentEl);
+              if (pStyle.display === 'none' || pStyle.visibility === 'hidden') continue;
+
+              var range = document.createRange();
+              range.selectNodeContents(textNode);
+              var rects = range.getClientRects();
+              if (!rects.length) continue;
+
+              var weight = pStyle.fontWeight || '400';
+              var size = pStyle.fontSize || '14px';
+              var family = pStyle.fontFamily || 'system-ui, -apple-system, sans-serif';
+              ctx2d.font = weight + ' ' + size + ' ' + family;
+              ctx2d.fillStyle = pStyle.color || '#1c1f27';
+              ctx2d.textBaseline = 'top';
+
+              if (rects.length === 1) {
+                ctx2d.fillText(text, rects[0].left, rects[0].top);
+              } else {
+                var words = text.split(/\s+/);
+                var wordIdx = 0;
+                for (var ri = 0; ri < rects.length && wordIdx < words.length; ri++) {
+                  var tr = rects[ri];
+                  var lineText = '';
+                  while (wordIdx < words.length) {
+                    var testLine = lineText ? lineText + ' ' + words[wordIdx] : words[wordIdx];
+                    if (ctx2d.measureText(testLine).width > tr.width + 4 && lineText) {
+                      break;
+                    }
+                    lineText = testLine;
+                    wordIdx++;
+                  }
+                  if (lineText) ctx2d.fillText(lineText, tr.left, tr.top);
+                }
+              }
+            }
+          }
+
+          // 3. Draw SVGs
           var svgs = document.querySelectorAll('svg');
           for (var s = 0; s < svgs.length; s++) {
             var svg = svgs[s];
@@ -378,6 +486,7 @@
             if (img) ctx2d.drawImage(img, r.left, r.top, r.width, r.height);
           }
 
+          // 4. Draw Canvases
           var canvases = document.querySelectorAll('canvas');
           for (var c = 0; c < canvases.length; c++) {
             var el = canvases[c];
@@ -386,6 +495,7 @@
             try { ctx2d.drawImage(el, r.left, r.top, r.width, r.height); } catch (e) {}
           }
 
+          // 5. Draw Images
           var images = document.querySelectorAll('img');
           for (var m = 0; m < images.length; m++) {
             var el = images[m];
@@ -422,9 +532,23 @@
             var imgs = document.querySelectorAll('img');
             var extra = canvases.length + imgs.length;
             var shot = null;
-            if (svgs.length === 1 && extra === 0) {
+
+            // Check if there is text outside the SVG
+            var hasOuterText = false;
+            if (svgs.length === 1 && document.body) {
+              var bodyClone = document.body.cloneNode(true);
+              var svgClones = bodyClone.querySelectorAll('svg');
+              for (var k = 0; k < svgClones.length; k++) svgClones[k].remove();
+              var scriptClones = bodyClone.querySelectorAll('script, style');
+              for (var k = 0; k < scriptClones.length; k++) scriptClones[k].remove();
+              if ((bodyClone.textContent || '').trim().length > 0) {
+                hasOuterText = true;
+              }
+            }
+
+            if (svgs.length === 1 && extra === 0 && !hasOuterText) {
               shot = await rasterizeSingleSvg(svgs[0]);
-            } else if (svgs.length === 0 && canvases.length === 1 && imgs.length === 0) {
+            } else if (svgs.length === 0 && canvases.length === 1 && imgs.length === 0 && !hasOuterText) {
               var el = canvases[0];
               if (el.width > 2 && el.height > 2) {
                 postSnapshotResult(reqId, canvasToDataUrl(el), el.width, el.height);

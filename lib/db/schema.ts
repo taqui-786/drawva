@@ -1,5 +1,5 @@
-import { relations } from "drizzle-orm";
-import { pgTable, text, timestamp, boolean, integer, index } from "drizzle-orm/pg-core";
+import { relations, sql } from "drizzle-orm";
+import { pgTable, text, timestamp, boolean, integer, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -128,6 +128,9 @@ export const userRelations = relations(user, ({ many }) => ({
   accounts: many(account),
   canvases: many(canvas),
   aiUsages: many(aiUsage),
+  dravs: many(drav),
+  dravLikes: many(dravLike),
+  dravComments: many(dravComment),
 }));
 
 export const sessionRelations = relations(session, ({ one }) => ({
@@ -144,11 +147,12 @@ export const accountRelations = relations(account, ({ one }) => ({
   }),
 }));
 
-export const canvasRelations = relations(canvas, ({ one }) => ({
+export const canvasRelations = relations(canvas, ({ one, many }) => ({
   user: one(user, {
     fields: [canvas.userId],
     references: [user.id],
   }),
+  dravs: many(drav),
 }));
 
 export const aiUsageRelations = relations(aiUsage, ({ one }) => ({
@@ -194,3 +198,154 @@ export const p2pRequest = pgTable(
     index("p2p_request_fromPeerId_idx").on(table.fromPeerId),
   ],
 );
+
+export const drav = pgTable(
+  "drav",
+  {
+    id: text("id").primaryKey(),
+    canvasId: text("canvas_id")
+      .notNull()
+      .references(() => canvas.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    title: text("title").notNull(),
+    description: text("description"),
+    snapshot: text("snapshot").notNull(),
+    thumbnailUrl: text("thumbnail_url"),
+    category: text("category").default("other").notNull(),
+    tags: text("tags")
+      .array()
+      .default(sql`'{}'::text[]`)
+      .notNull(),
+    visibility: text("visibility").default("public").notNull(), // "public" | "unlisted" | "private"
+    status: text("status").default("published").notNull(), // "published" | "draft" | "unpublished"
+    likesCount: integer("likes_count").default(0).notNull(),
+    commentsCount: integer("comments_count").default(0).notNull(),
+    viewsCount: integer("views_count").default(0).notNull(),
+    rankingScore: integer("ranking_score").default(0).notNull(),
+    publishedAt: timestamp("published_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+  },
+  (table) => [
+    index("drav_userId_idx").on(table.userId),
+    index("drav_canvasId_idx").on(table.canvasId),
+    index("drav_visibility_status_idx").on(table.visibility, table.status),
+    index("drav_category_idx").on(table.category),
+    index("drav_publishedAt_idx").on(table.publishedAt),
+    index("drav_rankingScore_idx").on(table.rankingScore),
+  ],
+);
+
+export const dravLike = pgTable(
+  "drav_like",
+  {
+    id: text("id").primaryKey(),
+    dravId: text("drav_id")
+      .notNull()
+      .references(() => drav.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [
+    uniqueIndex("drav_like_drav_user_unique").on(table.dravId, table.userId),
+    index("drav_like_userId_idx").on(table.userId),
+    index("drav_like_dravId_idx").on(table.dravId),
+  ],
+);
+
+export const dravComment = pgTable(
+  "drav_comment",
+  {
+    id: text("id").primaryKey(),
+    dravId: text("drav_id")
+      .notNull()
+      .references(() => drav.id, { onDelete: "cascade" }),
+    userId: text("user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    body: text("body").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at")
+      .defaultNow()
+      .$onUpdate(() => /* @__PURE__ */ new Date())
+      .notNull(),
+    deletedAt: timestamp("deleted_at"),
+  },
+  (table) => [
+    index("drav_comment_dravId_idx").on(table.dravId),
+    index("drav_comment_userId_idx").on(table.userId),
+    index("drav_comment_createdAt_idx").on(table.createdAt),
+  ],
+);
+
+export const dravReport = pgTable(
+  "drav_report",
+  {
+    id: text("id").primaryKey(),
+    dravId: text("drav_id")
+      .notNull()
+      .references(() => drav.id, { onDelete: "cascade" }),
+    reporterUserId: text("reporter_user_id")
+      .notNull()
+      .references(() => user.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull(),
+    status: text("status").default("pending").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => [index("drav_report_dravId_idx").on(table.dravId)],
+);
+
+export const dravRelations = relations(drav, ({ one, many }) => ({
+  user: one(user, {
+    fields: [drav.userId],
+    references: [user.id],
+  }),
+  canvas: one(canvas, {
+    fields: [drav.canvasId],
+    references: [canvas.id],
+  }),
+  likes: many(dravLike),
+  comments: many(dravComment),
+  reports: many(dravReport),
+}));
+
+export const dravLikeRelations = relations(dravLike, ({ one }) => ({
+  drav: one(drav, {
+    fields: [dravLike.dravId],
+    references: [drav.id],
+  }),
+  user: one(user, {
+    fields: [dravLike.userId],
+    references: [user.id],
+  }),
+}));
+
+export const dravCommentRelations = relations(dravComment, ({ one }) => ({
+  drav: one(drav, {
+    fields: [dravComment.dravId],
+    references: [drav.id],
+  }),
+  user: one(user, {
+    fields: [dravComment.userId],
+    references: [user.id],
+  }),
+}));
+
+export const dravReportRelations = relations(dravReport, ({ one }) => ({
+  drav: one(drav, {
+    fields: [dravReport.dravId],
+    references: [drav.id],
+  }),
+  reporter: one(user, {
+    fields: [dravReport.reporterUserId],
+    references: [user.id],
+  }),
+}));
+

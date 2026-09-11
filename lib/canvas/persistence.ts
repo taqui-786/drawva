@@ -1,11 +1,11 @@
-import { CanvasEngine } from "./engine";
+import { CanvasEngine, getThemePalette } from "./engine";
 import { TILE } from "./constants";
 import { WidgetManager, type WidgetItem } from "./widgets";
 import { ObjectManager, type ObjectItem } from "./objects";
 import { renderTextBlock } from "./textTool";
 import { renderFormula } from "./formulas";
 import { plotCommand } from "./plotter";
-import { renderWidgetToContext } from "./atlas";
+import { renderWidgetToContext, contentBounds } from "./atlas";
 import { renderAnimationScene } from "./animation";
 import type { AiLogEntry } from "@/lib/ai/types";
 
@@ -641,6 +641,32 @@ export async function exportPng(
   for (const o of objectList) {
     if (o.image) {
       q.drawImage(o.image, o.x, o.y, o.w, o.h);
+    } else if (o.kind === "text" && o.source) {
+      const r = renderTextBlock(
+        o.source,
+        o.color || "#000000",
+        o.fontSize || 24,
+        o.maxWidth ?? Math.max(o.fontSize || 24, o.w)
+      );
+      q.drawImage(r.canvas, o.x, o.y, o.w, o.h);
+    } else if (o.kind === "formula" && o.source) {
+      const r = await renderFormula(o.source, o.fontSize || 24, o.color || "#000000");
+      if (r.canvas.width > 0 && r.canvas.height > 0) {
+        q.drawImage(r.canvas, o.x, o.y, o.w, o.h);
+      }
+    } else if (o.kind === "plot" && o.source) {
+      const canvas = plotCommand({
+        tool: "plot_function",
+        x: o.x,
+        y: o.y,
+        w: o.w,
+        h: o.h,
+        expression: o.source,
+        color: o.color || "#2563eb",
+      });
+      if (canvas.width > 0 && canvas.height > 0) {
+        q.drawImage(canvas, o.x, o.y, o.w, o.h);
+      }
     } else if (o.kind === "animation" && o.animationScene) {
       q.save();
       q.translate(o.x, o.y);
@@ -660,6 +686,167 @@ export async function exportPng(
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }, "image/png");
 }
+
+export async function generateCanvasThumbnail(
+  engine: CanvasEngine,
+  widgets: WidgetManager | null = null,
+  objects: ObjectManager | null = null,
+  targetWidth = 1200,
+  targetHeight = 675
+): Promise<string> {
+  // 1. Refresh widgets snapshots if WidgetManager is provided
+  if (widgets) {
+    const widgetList = widgets.all();
+    if (widgetList.length > 0) {
+      await Promise.all(
+        widgetList.map((w) => widgets.refreshSnapshot(w.id, 1200))
+      );
+    }
+  }
+
+  // 2. Synchronize theme: match user's current canvas theme
+  const isDark =
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
+  const palette = engine.palette || getThemePalette(isDark);
+
+  const out = document.createElement("canvas");
+  out.width = targetWidth;
+  out.height = targetHeight;
+  const ctx = out.getContext("2d");
+  if (!ctx) return "";
+
+  // 3. Draw theme paper background
+  ctx.fillStyle = palette.paper;
+  ctx.fillRect(0, 0, targetWidth, targetHeight);
+
+  // 4. Calculate content bounds across ink tiles, widgets, and objects
+  const bounds = contentBounds(engine, widgets, objects);
+
+  // If empty canvas, return a clean themed placeholder with subtle branding
+  if (!bounds || bounds.w <= 0 || bounds.h <= 0) {
+    ctx.fillStyle = isDark ? "rgba(255, 255, 255, 0.25)" : "rgba(0, 0, 0, 0.25)";
+    ctx.font = "bold 28px sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Drawva Canvas", targetWidth / 2, targetHeight / 2);
+    return out.toDataURL("image/webp", 0.88);
+  }
+
+  // 5. Draw subtle grid in theme color
+  ctx.strokeStyle = palette.paperGrid;
+  ctx.lineWidth = 1;
+  for (let x = 0; x < targetWidth; x += 40) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, targetHeight);
+    ctx.stroke();
+  }
+  for (let y = 0; y < targetHeight; y += 40) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(targetWidth, y);
+    ctx.stroke();
+  }
+
+  // 6. Scale and center content nicely (capped to prevent extreme blowup of tiny items)
+  const pad = 48;
+  const contentW = Math.max(120, bounds.w);
+  const contentH = Math.max(80, bounds.h);
+
+  const rawScale = Math.min(
+    (targetWidth - pad * 2) / contentW,
+    (targetHeight - pad * 2) / contentH
+  );
+  const scale = Math.min(1.4, rawScale);
+  const drawW = contentW * scale;
+  const drawH = contentH * scale;
+  const offsetX = (targetWidth - drawW) / 2 - bounds.x * scale;
+  const offsetY = (targetHeight - drawH) / 2 - bounds.y * scale;
+
+  ctx.save();
+  ctx.translate(offsetX, offsetY);
+  ctx.scale(scale, scale);
+
+  // 7. Draw raster tiles (ink strokes)
+  const keys = engine.tiles.keys();
+  for (const k of keys) {
+    const [tx, ty] = parseKey(k);
+    const c = engine.tiles.get(tx, ty);
+    if (c) ctx.drawImage(c, tx * TILE, ty * TILE);
+  }
+
+  // 8. Draw widgets (with container background card & crisp snapshot)
+  const widgetList = widgets ? widgets.all() : [];
+  for (const w of widgetList) {
+    // Draw subtle card border and background for the widget so it looks like a real card on canvas
+    ctx.save();
+    ctx.fillStyle = isDark ? "#141720" : "#ffffff";
+    ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.1)";
+    ctx.lineWidth = 1;
+    if (typeof ctx.roundRect === "function") {
+      ctx.beginPath();
+      ctx.roundRect(w.x, w.y, w.w, w.h, 6);
+      ctx.fill();
+      ctx.stroke();
+    } else {
+      ctx.fillRect(w.x, w.y, w.w, w.h);
+      ctx.strokeRect(w.x, w.y, w.w, w.h);
+    }
+    ctx.restore();
+
+    await renderWidgetToContext(w, ctx);
+  }
+
+  // 9. Draw objects (text, formula, plot, animation)
+  const objectList = objects ? objects.all() : [];
+  for (const o of objectList) {
+    if (o.image) {
+      ctx.drawImage(o.image, o.x, o.y, o.w, o.h);
+    } else if (o.kind === "text" && o.source) {
+      const textColor = o.color || (isDark ? "#ffffff" : "#000000");
+      const r = renderTextBlock(
+        o.source,
+        textColor,
+        o.fontSize || 24,
+        o.maxWidth ?? Math.max(o.fontSize || 24, o.w)
+      );
+      ctx.drawImage(r.canvas, o.x, o.y, o.w, o.h);
+    } else if (o.kind === "formula" && o.source) {
+      const formulaColor = o.color || (isDark ? "#ffffff" : "#000000");
+      const r = await renderFormula(o.source, o.fontSize || 24, formulaColor);
+      if (r.canvas.width > 0 && r.canvas.height > 0) {
+        ctx.drawImage(r.canvas, o.x, o.y, o.w, o.h);
+      }
+    } else if (o.kind === "plot" && o.source) {
+      const canvas = plotCommand({
+        tool: "plot_function",
+        x: o.x,
+        y: o.y,
+        w: o.w,
+        h: o.h,
+        expression: o.source,
+        color: o.color || (isDark ? "#60a5fa" : "#2563eb"),
+      });
+      if (canvas.width > 0 && canvas.height > 0) {
+        ctx.drawImage(canvas, o.x, o.y, o.w, o.h);
+      }
+    } else if (o.kind === "animation" && o.animationScene) {
+      ctx.save();
+      ctx.translate(o.x, o.y);
+      ctx.scale(o.w / o.animationScene.w, o.h / o.animationScene.h);
+      renderAnimationScene(ctx, o.animationScene, o.playheadMs ?? 0);
+      ctx.restore();
+    }
+  }
+
+  ctx.restore();
+
+  return out.toDataURL("image/webp", 0.88);
+}
+
+
+
 
 export function exportJson(
   engine: CanvasEngine,

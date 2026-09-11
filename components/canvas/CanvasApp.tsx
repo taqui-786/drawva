@@ -37,6 +37,7 @@ import { CanvasToolbar } from "./CanvasToolbar";
 import { CanvasZoomBar } from "./CanvasZoomBar";
 import { CanvasSidebar } from "./CanvasSidebar";
 import { SaveCanvasDialog } from "./SaveCanvasDialog";
+import { PublishDravDialog } from "./PublishDravDialog";
 
 export interface GenerationTickerState {
   status: "idle" | "running" | "done" | "error";
@@ -53,6 +54,7 @@ import { bakePlot, plotCommand } from "@/lib/canvas/plotter";
 import { unionRect } from "@/lib/canvas/engine";
 import {
   serializeSnapshot,
+  generateCanvasThumbnail,
   restoreSnapshot,
   saveAutosave,
   loadAutosave,
@@ -278,6 +280,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   const [connectOpen, setConnectOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [publishDialogOpen, setPublishDialogOpen] = useState(false);
   const { data: session } = useSession();
   const isAuthenticated = !!session?.user;
   const isAuthenticatedRef = useRef(isAuthenticated);
@@ -3421,6 +3424,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         <CanvasHeader
           canvasId={canvasId}
           onOpenSaveDialog={() => setSaveDialogOpen(true)}
+          onOpenPublishDialog={() => setPublishDialogOpen(true)}
           onOpenSidebar={() => setSidebarOpen(true)}
           onZoomIn={() => zoomBy(-100)}
           onZoomOut={() => zoomBy(100)}
@@ -3764,6 +3768,21 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         open={saveDialogOpen}
         onOpenChange={setSaveDialogOpen}
         onSave={handleSaveToCloud}
+      />
+
+      <PublishDravDialog
+        open={publishDialogOpen}
+        onOpenChange={setPublishDialogOpen}
+        canvasId={canvasId ?? null}
+        defaultTitle="Untitled Drav"
+        getCanvasSnapshot={() => {
+          if (!engine) return "";
+          return serializeSnapshot(engine, widgets.current, objects.current);
+        }}
+        getCanvasThumbnail={() => {
+          if (!engine) return Promise.resolve("");
+          return generateCanvasThumbnail(engine, widgets.current, objects.current);
+        }}
       />
     </div>
   );

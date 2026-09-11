@@ -34,10 +34,10 @@ import {
   CloudOffIcon,
   CloudCheckIcon,
   SteeringIcon,
-  Target02Icon,
   Shield01Icon,
   PeerToPeer01Icon,
   LayoutRightIcon,
+  Share01Icon,
 } from "@hugeicons/core-free-icons";
 import { useSession } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
@@ -58,6 +58,7 @@ export interface AiRunState {
 export interface CanvasHeaderProps {
   canvasId?: string | null;
   onOpenSaveDialog?: () => void;
+  onOpenPublishDialog?: () => void;
   onOpenSidebar?: () => void;
   onExportPng?: () => void;
   onExportJson?: () => void;
@@ -112,6 +113,7 @@ export interface CanvasHeaderProps {
 export function CanvasHeader({
   canvasId,
   onOpenSaveDialog,
+  onOpenPublishDialog,
   onOpenSidebar,
   aiStatus,
   aiRun,
@@ -126,7 +128,6 @@ export function CanvasHeader({
   onOpenConnect,
   cloudStatus = "idle",
   onTriggerCloudSync,
-  onReset,
 }: CanvasHeaderProps) {
   const { data: session } = useSession();
   const { center } = useSnapshot(appState);
@@ -139,7 +140,7 @@ export function CanvasHeader({
     <header
       className={cn(
         "fixed top-0 left-0 right-0 z-40 flex items-center justify-between",
-        "h-12 sm:h-13 px-2 sm:px-4",
+        "h-10 sm:h-11 px-2.5 sm:px-4",
         "border-b border-border/80 bg-background/95 backdrop-blur-md shadow-2xs select-none",
       )}
     >
@@ -339,7 +340,7 @@ export function CanvasHeader({
                     `}</style>
                     <div
                       className={cn(
-                        "flex gap-1 border p-1 rounded-sm bg-background/90 shadow-xs transition-colors duration-500 shrink-0",
+                        "flex gap-1 border py-0.5 px-1 rounded-sm bg-background/90 shadow-xs transition-colors duration-500 shrink-0",
                         containerBorderClass,
                       )}
                       title="Drawva AI is thinking and generating..."
@@ -373,12 +374,12 @@ export function CanvasHeader({
                         <PopoverTrigger
                           render={
                             <Button
-                              size="icon-lg"
+                              size="icon-sm"
                               variant={isSteerOpen ? "secondary" : "ghost"}
                               data-icon="true"
                               aria-label="Steer agent"
                               className={cn(
-                                "shrink-0 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
+                                "shrink-0 size-7 sm:size-7.5 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
                                 isSteerOpen && "text-primary bg-primary/10",
                               )}
                             >
@@ -487,6 +488,26 @@ export function CanvasHeader({
                 </motion.div>
               )}
 
+              {/* Publish Drav to Community Button */}
+              {onOpenPublishDialog && (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <Button
+                        variant="outline"
+                        size="xs"
+                        onClick={onOpenPublishDialog}
+                        className="h-7 gap-1.5 px-2 text-xs font-medium shrink-0 border-primary/30 text-primary hover:bg-primary/10 hover:text-primary cursor-pointer"
+                      >
+                        <HugeiconsIcon icon={Share01Icon} className="size-3.5" />
+                        <span className="hidden sm:inline">Share</span>
+                      </Button>
+                    }
+                  />
+                  <TooltipContent>Publish Drav to Community</TooltipContent>
+                </Tooltip>
+              )}
+
               {/* Thinking / Reasoning Effort Selector */}
               <div className="hidden sm:block shrink-0">
                 <Select
@@ -562,7 +583,7 @@ export function CanvasHeader({
                   onClick={onOpenSidebar}
                   data-icon="true"
                   aria-label="Open Canvases & Menu"
-                  className="shrink-0 size-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer ml-0.5"
+                  className="shrink-0 size-7 sm:size-7.5 p-0 text-muted-foreground hover:text-foreground cursor-pointer ml-0.5"
                 >
                   <HugeiconsIcon icon={LayoutRightIcon} className="size-4" />
                 </Button>
