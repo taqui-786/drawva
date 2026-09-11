@@ -96,6 +96,7 @@ export function buildConnectionProfile(options: {
                       low: "low",
                       medium: "medium",
                       high: "high",
+                      max: "max",
                     },
                   }
                 : {}),

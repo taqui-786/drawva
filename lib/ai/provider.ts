@@ -323,6 +323,7 @@ export function setProviderConfig(config: ProviderConfig | null): void {
       window.localStorage.removeItem(PROVIDER_KEY);
     } catch {}
   }
+  write(REASONING_EFFORT_KEY, "medium");
   notify();
 }
 
@@ -356,6 +357,7 @@ export function setActiveModel(model: string | null): void {
       window.localStorage.removeItem(MODEL_KEY);
     } catch {}
   }
+  write(REASONING_EFFORT_KEY, "medium");
   notify();
 }
 

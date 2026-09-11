@@ -537,6 +537,8 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   const handleModelChange = (model: string | null) => {
     setActiveModel(model);
     setActiveModelState(model);
+    setReasoningEffort("medium");
+    setReasoningEffortState("medium");
     conductorRef.current?.cancel(true);
   };
 

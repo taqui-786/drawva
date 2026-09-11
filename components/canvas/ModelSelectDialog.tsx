@@ -34,6 +34,7 @@ import {
   getModelCapabilitiesCached,
   setCachedModelCapabilities,
   getCachedModelCapabilities,
+  setReasoningEffort,
 } from "@/lib/ai/provider";
 import type { ModelCapabilities } from "@/lib/ai/capabilities";
 import { cn } from "@/lib/utils";
@@ -358,6 +359,7 @@ export function ModelSelectDialog({
 
   const handleSelect = useCallback(
     async (item: ModelItem) => {
+      setReasoningEffort("medium");
       if (item.capabilities.vision && item.capabilities.status === "verified_vision") {
         onSelectModel(item.id);
         if (item.capabilities.reasoning) {

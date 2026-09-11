@@ -51,6 +51,7 @@ import {
   setCachedModels,
   setCachedModelCapabilities,
   setActiveModel,
+  setReasoningEffort,
   getModelCapabilitiesCached,
   getWebSearchEnabled,
   setWebSearchEnabled,
@@ -444,6 +445,7 @@ function ProviderTabContent({
       };
 
       setProviderConfig(config);
+      setReasoningEffort("medium");
       onConfigSaved(config, getActiveModel());
       toast.success("Credentials saved", {
         description: `Saved to browser storage for ${PROVIDER_INFOS[providerType].name}.`,
@@ -521,6 +523,7 @@ function ProviderTabContent({
       if (nextActive) {
         setActiveModel(nextActive);
       }
+      setReasoningEffort("medium");
 
       onConfigSaved(config, nextActive);
 
@@ -701,6 +704,7 @@ function ModelsTabContent({
     if (!val) return;
     setActiveModel(val);
     setActive(val);
+    setReasoningEffort("medium");
     onModelChanged(val);
     toast.success(`Active model switched to ${val}`);
   };
