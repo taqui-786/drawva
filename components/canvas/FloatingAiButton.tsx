@@ -48,71 +48,71 @@ const AI_QUICK_ACTIONS: QuickActionItem[] = [
     title: "Continue",
     subtitle: "Elaborate drawings & next steps",
     prompt:
-      "Continue and elaborate on what is currently drawn or written on the canvas. Complete the missing steps, drawings, or sequence.",
+      "Do not only describe the next steps. Continue and elaborate on what is currently drawn or written on the canvas: complete the missing steps, drawings, or sequence directly on the board.",
     icon: PlayIcon,
   },
   {
     id: "follow-cues",
     title: "Follow canvas cues",
-    subtitle: "Follow latest drawings & notes",
+    subtitle: "Continue from latest drawings & cues",
     prompt:
-      "Follow my latest Canvas drawings, images, text boxes, and annotations. Continue and refine them with clean visual structures.",
+      "Follow my latest Canvas drawings, images, text boxes, and annotations. Continue and refine the work directly on Canvas without changing unmarked content; ask if unclear.",
     icon: CursorMagicSelection01Icon,
   },
   {
     id: "enhance",
     title: "Enhance",
-    subtitle: "Keep handwriting, add overlays",
+    subtitle: "Preserve handwriting, add visual layers",
     prompt:
-      "Keep the current handwriting completely unchanged—do not edit, erase, or move it. Add a transparent overlay or polished diagrams, formulas, and visual notes around it.",
+      "Keep the current handwriting completely unchanged—do not edit, erase, or move it. Add a transparent explanatory visual layer around it with annotations, connectors, diagrams, or formulas to make the notes more vivid and intuitive.",
     icon: AiMagicIcon,
   },
   {
     id: "revise",
     title: "Revise",
-    subtitle: "Apply marked annotations",
+    subtitle: "Apply marked annotations & sketches",
     prompt:
-      "Apply my new Canvas annotations and sketches: add, remove, move, resize, or reconnect only clearly marked elements.",
+      "Apply my new Canvas annotations and sketches: add, remove, move, resize, or reconnect only clearly marked content, and ask about ambiguity first.",
     icon: PencilEdit01Icon,
   },
   {
     id: "simplify",
     title: "Simplify",
-    subtitle: "Core concepts & minimal diagram",
+    subtitle: "Simple diagram of core concepts",
     prompt:
-      "Make a separate, simple diagram of the core concepts, relationships, and essential labels without visual clutter.",
+      "Do not only describe the content. Create and display a separate, simple visual diagram on Canvas showing the core concepts, relationships, and essential labels without visual clutter.",
     icon: AiViewIcon,
   },
   {
     id: "sequence",
     title: "Sequence",
-    subtitle: "Workflow diagram & source code",
+    subtitle: "Convert into editable sequence diagram",
     prompt:
-      "Convert the current diagram into a sequence diagram and return editable diagram source code, such as Mermaid.",
+      "Do not return only source code. Create and display the rendered sequence diagram on Canvas showing actors and interactions, then provide its editable Mermaid diagram source.",
     icon: HierarchyCircle01Icon,
   },
   {
     id: "architecture",
     title: "Architecture",
-    subtitle: "Map modules, flow & directories",
+    subtitle: "Map modules, dependencies & flow",
     prompt:
-      "Map the current project's core modules, dependencies, data flow, and key directories into a clean architectural diagram.",
+      "Do not return only text. Create and display a visual architecture map on Canvas showing the core modules, services, dependencies, data flow, and key boundaries.",
     icon: GroupLayersIcon,
   },
   {
     id: "organize",
     title: "Organize",
-    subtitle: "Visual notes & hierarchy",
+    subtitle: "Visual notes with hierarchy & themes",
     prompt:
-      "Turn the current canvas into clear visual notes, with themes, hierarchy, structured grouping boxes, and information gaps.",
+      "Do not only describe how to organize it. Reorganize and display the current Canvas content as clear visual notes with themes, visual hierarchy, structured grouping boxes, and highlighted information gaps.",
     icon: SlidersHorizontalIcon,
   },
   {
     id: "explain",
     title: "Explain",
-    subtitle: "Purpose, structure & details",
+    subtitle: "Visual overview of structure & details",
     prompt:
-      "Explain the current canvas content's purpose, structure, key relationships, and details with clear annotations and visuals.",
+      "Do not return only a written explanation. Create and display a visual overview on Canvas showing the purpose, structure, key relationships, and important details of what is drawn or written.",
     icon: AiFileIcon,
   },
   {
@@ -120,31 +120,31 @@ const AI_QUICK_ACTIONS: QuickActionItem[] = [
     title: "Learn",
     subtitle: "Layered diagram & pseudocode",
     prompt:
-      "Explain the concept with a layered diagram and pseudocode, including data flow, key principles, and tensor/state shapes.",
+      "Do not only explain the concept in text. Create and display a layered visual diagram on Canvas with pseudocode or key formulas, data flow, and intuitive step-by-step breakdown.",
     icon: AiBookIcon,
   },
   {
     id: "analyze",
     title: "Analyze",
-    subtitle: "Chart metrics & conclusions",
+    subtitle: "Chart key metrics, trends & anomalies",
     prompt:
-      "Analyze the data, formulas, or numbers on the canvas: identify key metrics, trends, and anomalies, and plot or chart the results with clear conclusions.",
+      "Do not return only a written analysis. Create and display visual charts, plots, or graphs on Canvas for key metrics, trends, anomalies, and conclusions based on the canvas data.",
     icon: BarChartIcon,
   },
   {
     id: "slides",
     title: "Slides",
-    subtitle: "Presentation-ready layout",
+    subtitle: "Presentation-ready visual layout",
     prompt:
-      "Turn the current view into a presentation-ready layout and structured visual slide format with headers, bullets, and diagrams.",
+      "Turn the current canvas view into a clean, presentation-ready layout with structured visual slide sections, titles, and diagrams.",
     icon: SlideIcon,
   },
   {
     id: "plan",
     title: "Plan",
-    subtitle: "Roadmap, routes & milestones",
+    subtitle: "Visual roadmap, routes & milestones",
     prompt:
-      "Create a structured plan and visual roadmap with daily milestones, tasks, dependencies, routes, and highlights.",
+      "Do not return only a written plan. Create and display a visual roadmap or journey map on Canvas with daily milestones, tasks, dependencies, routes, and highlights.",
     icon: Task01Icon,
   },
 ];
