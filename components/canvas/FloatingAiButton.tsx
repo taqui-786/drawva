@@ -160,6 +160,8 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const singleTapTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastTapTimeRef = useRef<number>(0);
 
   const showMenu = isMenuOpen && !isRunning;
 
@@ -187,14 +189,25 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [isMenuOpen]);
 
-  // Clean up timer on unmount
+  // Clean up timers on unmount
   useEffect(() => {
     return () => {
       if (closeTimerRef.current) {
         clearTimeout(closeTimerRef.current);
       }
+      if (singleTapTimerRef.current) {
+        clearTimeout(singleTapTimerRef.current);
+      }
     };
   }, []);
+
+  // Clear single tap timer when agent begins running
+  useEffect(() => {
+    if (isRunning && singleTapTimerRef.current) {
+      clearTimeout(singleTapTimerRef.current);
+      singleTapTimerRef.current = null;
+    }
+  }, [isRunning]);
 
   // Desktop hover handling with smooth buffer to transition between button and menu
   const handleMouseEnter = () => {
@@ -228,8 +241,12 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
     onAskAi?.(promptText);
   };
 
-  const handleMainButtonClick = () => {
+  const handleMainButtonClick = (e: React.MouseEvent<HTMLButtonElement>) => {
     if (isRunning) {
+      if (singleTapTimerRef.current) {
+        clearTimeout(singleTapTimerRef.current);
+        singleTapTimerRef.current = null;
+      }
       onCancelAi?.();
       setIsMenuOpen(false);
       return;
@@ -239,17 +256,54 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
       return;
     }
 
-    const isTouch =
+    const isTouchPointer =
+      typeof window !== "undefined" &&
+      window.PointerEvent &&
+      e.nativeEvent instanceof PointerEvent &&
+      e.nativeEvent.pointerType === "touch";
+    const isCoarse =
       typeof window !== "undefined" &&
       (window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768);
+    const isTouch = isTouchPointer || isCoarse;
 
-    // On touch devices without cursor hover, first tap opens the menu
-    if (isTouch && !isMenuOpen) {
-      setIsMenuOpen(true);
+    // On touch devices: 1 tap runs AI as usual, double tap opens menu without running AI
+    if (isTouch) {
+      const now = Date.now();
+      const timeSinceLastTap = now - lastTapTimeRef.current;
+
+      // Double-tap detected (second tap within 280ms) -> Open menu without running AI
+      if (timeSinceLastTap > 0 && timeSinceLastTap < 280) {
+        if (singleTapTimerRef.current) {
+          clearTimeout(singleTapTimerRef.current);
+          singleTapTimerRef.current = null;
+        }
+        lastTapTimeRef.current = 0;
+        setIsMenuOpen(true);
+        return;
+      }
+
+      // If menu is already open, single tap closes it
+      if (isMenuOpen) {
+        setIsMenuOpen(false);
+        lastTapTimeRef.current = 0;
+        return;
+      }
+
+      // First tap -> start timer to trigger AI if no second tap arrives
+      lastTapTimeRef.current = now;
+      if (singleTapTimerRef.current) {
+        clearTimeout(singleTapTimerRef.current);
+      }
+      singleTapTimerRef.current = setTimeout(() => {
+        singleTapTimerRef.current = null;
+        lastTapTimeRef.current = 0;
+        setIsMenuOpen(false);
+        onAskAi?.();
+      }, 260);
       return;
     }
 
-    // On desktop, or when tapped again on mobile, execute default Ask AI action
+    // On desktop (mouse pointer), single click executes default Ask AI directly
     setIsMenuOpen(false);
     onAskAi?.();
   };
@@ -337,7 +391,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
               type="button"
               onClick={handleMainButtonClick}
               className={cn(
-                "group relative flex size-14 sm:size-15 items-center justify-center rounded-full cursor-pointer outline-none",
+                "group relative flex size-14 sm:size-15 items-center justify-center rounded-full cursor-pointer outline-none touch-manipulation",
                 "transition-transform duration-300 ease-out",
                 "hover:scale-110 active:scale-95",
                 // Elevated drop shadows with vibrant neon spill
