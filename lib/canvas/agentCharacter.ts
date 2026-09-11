@@ -5,6 +5,23 @@ import type { ObjectManager } from "./objects";
 import type { Rect } from "./types";
 import { SIZE } from "./constants";
 import { getSpriteFrame, SPRITE_H, SPRITE_W, type SpriteFrameName } from "./pixelSprites";
+import { isMobileDevice } from "./orientation";
+
+export function isMobileView(engine: CanvasEngine): boolean {
+  if (typeof window === "undefined") return false;
+  const w = engine.cssWidth;
+  const h = engine.cssHeight;
+  const small = w > 0 && h > 0 && (Math.min(w, h) < 600 || h < 520);
+  return isMobileDevice() || small;
+}
+
+export function isHorizontalView(engine: CanvasEngine): boolean {
+  if (typeof window === "undefined") return false;
+  const w = engine.cssWidth;
+  const h = engine.cssHeight;
+  if (w > 0 && h > 0) return w > h;
+  return window.innerWidth > window.innerHeight;
+}
 
 export interface ToolTargetHint {
   objectId?: string;
@@ -436,6 +453,7 @@ interface SpeechBubbleLayout {
   beakWidth: number;
   beakTipX: number;
   beakTipY: number;
+  isBelow?: boolean;
 }
 
 export class AgentCharacterController {
@@ -510,6 +528,8 @@ export class AgentCharacterController {
         if (this.overlay.width !== w || this.overlay.height !== h) {
           this.overlay.width = w;
           this.overlay.height = h;
+          this.overlay.style.width = `${rect.width}px`;
+          this.overlay.style.height = `${rect.height}px`;
         }
         const now = performance.now();
         const dt = clamp((now - this.lastT) / 1000, 0, 0.05);
@@ -659,7 +679,44 @@ export class AgentCharacterController {
     );
   }
 
+  private getSafeViewportBounds(): { minX: number; maxX: number; minY: number; maxY: number } {
+    const engine = this.deps.engine;
+    const cam = engine.camera;
+    const v = cam.visibleWorldRect();
+    const scale = cam.scale || 1;
+    const mobile = isMobileView(engine);
+    const horizontal = isHorizontalView(engine);
+
+    // Screen pixel insets for UI bars (header, zoom bar, floating AI button)
+    const insetTop = (mobile ? (horizontal ? 48 : 56) : 60) / scale;
+    const insetBottom = (mobile ? (horizontal ? 50 : 68) : 52) / scale;
+    const insetLeft = (mobile ? 16 : 24) / scale;
+    const insetRight = (mobile ? (horizontal ? 64 : 52) : 56) / scale;
+
+    const charW = this.charWorldWidth();
+    const m = charW / 2 + 8;
+
+    let minX = Math.max(m, v.x + insetLeft);
+    let maxX = Math.min(SIZE - m, v.x + v.w - insetRight);
+    let minY = Math.max(m, v.y + insetTop);
+    let maxY = Math.min(SIZE - m, v.y + v.h - insetBottom);
+
+    if (minX > maxX) {
+      const midX = clamp(v.x + v.w / 2, m, SIZE - m);
+      minX = midX;
+      maxX = midX;
+    }
+    if (minY > maxY) {
+      const midY = clamp(v.y + v.h / 2, m, SIZE - m);
+      minY = midY;
+      maxY = midY;
+    }
+
+    return { minX, maxX, minY, maxY };
+  }
+
   hitTest(world: { x: number; y: number }): boolean {
+    const scale = this.deps.engine.camera.scale || 1;
     for (const ch of this.chars.values()) {
       if (ch.alpha <= 0.1) continue;
       if (ch.speech && this.hitTestSpeechBubble(ch, world)) {
@@ -667,17 +724,13 @@ export class AgentCharacterController {
       }
       const w = this.charWorldWidth();
       const h = w * (SPRITE_H / SPRITE_W);
-      const box = {
-        x: ch.pos.x - w * 0.7,
-        y: ch.pos.y - h,
-        w: w * 1.4,
-        h: h,
-      };
+      const hitHalfW = Math.max(w * 0.7, 18 / scale);
+      const hitH = Math.max(h, 28 / scale);
       if (
-        world.x >= box.x &&
-        world.x <= box.x + box.w &&
-        world.y >= box.y &&
-        world.y <= box.y + box.h
+        world.x >= ch.pos.x - hitHalfW &&
+        world.x <= ch.pos.x + hitHalfW &&
+        world.y >= ch.pos.y - hitH &&
+        world.y <= ch.pos.y + 6 / scale
       ) {
         return true;
       }
@@ -690,6 +743,7 @@ export class AgentCharacterController {
   }
 
   beginDrag(world: { x: number; y: number }): boolean {
+    const scale = this.deps.engine.camera.scale || 1;
     for (const [id, ch] of this.chars.entries()) {
       if (ch.alpha <= 0.1) continue;
       if (ch.speech && this.hitTestSpeechBubble(ch, world)) {
@@ -699,11 +753,13 @@ export class AgentCharacterController {
       }
       const w = this.charWorldWidth();
       const h = w * (SPRITE_H / SPRITE_W);
+      const hitHalfW = Math.max(w * 0.7, 18 / scale);
+      const hitH = Math.max(h, 28 / scale);
       if (
-        world.x >= ch.pos.x - w * 0.7 &&
-        world.x <= ch.pos.x + w * 0.7 &&
-        world.y >= ch.pos.y - h &&
-        world.y <= ch.pos.y
+        world.x >= ch.pos.x - hitHalfW &&
+        world.x <= ch.pos.x + hitHalfW &&
+        world.y >= ch.pos.y - hitH &&
+        world.y <= ch.pos.y + 6 / scale
       ) {
         this.dragId = id;
         this.dragStartPos = { x: world.x, y: world.y };
@@ -726,11 +782,11 @@ export class AgentCharacterController {
   dragTo(world: { x: number; y: number }): void {
     const ch = this.dragId ? this.chars.get(this.dragId) : null;
     if (!ch) return;
-    const m = this.charWorldWidth() / 2 + 8;
-    const nextX = clamp(world.x, m, SIZE - m);
+    const bounds = this.getSafeViewportBounds();
+    const nextX = clamp(world.x, bounds.minX, bounds.maxX);
     if (Math.abs(nextX - ch.pos.x) > 1) ch.facing = nextX < ch.pos.x ? -1 : 1;
     ch.pos.x = nextX;
-    ch.pos.y = clamp(world.y, m, SIZE - m);
+    ch.pos.y = clamp(world.y, bounds.minY, bounds.maxY);
     this.ensureLoop();
   }
 
@@ -993,13 +1049,18 @@ export class AgentCharacterController {
 
     const v = this.deps.engine.camera.visibleWorldRect();
     if (v.w > 0 && v.h > 0) {
-      const focus: Rect = {
-        x: v.x + v.w * 0.3,
-        y: v.y + v.h * 0.55,
-        w: v.w * 0.4,
-        h: v.h * 0.3,
-      };
-      return { box: focus, source: "viewport" };
+      const bounds = this.getSafeViewportBounds();
+      const bw = bounds.maxX - bounds.minX;
+      const bh = bounds.maxY - bounds.minY;
+      if (bw > 0 && bh > 0) {
+        const focus: Rect = {
+          x: bounds.minX + bw * 0.25,
+          y: bounds.minY + bh * 0.2,
+          w: bw * 0.5,
+          h: bh * 0.55,
+        };
+        return { box: focus, source: "viewport" };
+      }
     }
     return null;
   }
@@ -1007,8 +1068,9 @@ export class AgentCharacterController {
   private standPad(anim: CharState): number {
     const charW = this.charWorldWidth();
     const scale = this.deps.engine.camera.scale || 1;
-    const closeness = anim === "working" ? 0.42 : 0.68;
-    return charW * closeness + clamp(16 / scale, 8, 140);
+    const mobile = isMobileView(this.deps.engine);
+    const closeness = anim === "working" ? 0.38 : (mobile ? 0.5 : 0.68);
+    return charW * closeness + clamp((mobile ? 8 : 16) / scale, 6, 120);
   }
 
   private landingFor(box: Rect, ch: Character, anim: CharState = "thinking"): { x: number; y: number } {
@@ -1046,8 +1108,11 @@ export class AgentCharacterController {
     };
 
     const best = pickStandPoint(ch.pos, box, pad, collidesOther);
-    const m = this.charWorldWidth() / 2 + 8;
-    return { x: clamp(best.x, m, SIZE - m), y: clamp(best.y, m, SIZE - m) };
+    const bounds = this.getSafeViewportBounds();
+    return {
+      x: clamp(best.x, bounds.minX, bounds.maxX),
+      y: clamp(best.y, bounds.minY, bounds.maxY),
+    };
   }
 
   private setRoute(ch: Character, dest: { x: number; y: number }, obstacle: Rect | null): void {
@@ -1112,15 +1177,22 @@ export class AgentCharacterController {
   }
 
   private spawnFromAskAi(): { x: number; y: number } {
-    const cam = this.deps.engine.camera;
-    const v = cam.visibleWorldRect();
-    const scale = cam.scale || 1;
-    const insetX = clamp(52 / scale, 28, 1400);
-    const insetY = clamp(44 / scale, 24, 1200);
-    const m = this.charWorldWidth() / 2 + 8;
+    const engine = this.deps.engine;
+    const bounds = this.getSafeViewportBounds();
+    const mobile = isMobileView(engine);
+    const horizontal = isHorizontalView(engine);
+    const scale = engine.camera.scale || 1;
+
+    // In horizontal mobile, vertical space is precious (~360px) and the header occupies the top.
+    // Spawn near the bottom-right (matching FloatingAiButton position), clear of bottom/header bars.
+    const x = bounds.maxX - (mobile ? 14 : 28) / scale;
+    const y = mobile && horizontal
+      ? bounds.minY + (bounds.maxY - bounds.minY) * 0.65
+      : bounds.maxY - (mobile ? 16 : 28) / scale;
+
     return {
-      x: clamp(v.x + v.w - insetX, m, SIZE - m),
-      y: clamp(v.y + insetY, m, SIZE - m),
+      x: clamp(x, bounds.minX, bounds.maxX),
+      y: clamp(y, bounds.minY, bounds.maxY),
     };
   }
 
@@ -1131,8 +1203,10 @@ export class AgentCharacterController {
   ): void {
     ch.queuedState = anim;
     if (!target) {
-      const v = this.deps.engine.camera.visibleWorldRect();
-      this.setRoute(ch, { x: v.x + v.w * 0.55, y: v.y + v.h * 0.62 }, null);
+      const bounds = this.getSafeViewportBounds();
+      const destX = bounds.minX + (bounds.maxX - bounds.minX) * 0.55;
+      const destY = bounds.minY + (bounds.maxY - bounds.minY) * 0.58;
+      this.setRoute(ch, { x: destX, y: destY }, null);
       this.setState(ch, "walking");
       ch.facing = -1;
       this.userInteractingUntil = 0;
@@ -1192,8 +1266,27 @@ export class AgentCharacterController {
 
   private charWorldWidth(): number {
     const engine = this.deps.engine;
-    const target = engine.cssWidth > 0 && engine.cssWidth < 640 ? SPRITE_W * 2 : SPRITE_W * 3;
-    return clamp(target / (engine.camera.scale || 1), SPRITE_W, 6000);
+    const mobile = isMobileView(engine);
+    const horizontal = isHorizontalView(engine);
+
+    let targetCssPx: number;
+    if (mobile && horizontal) {
+      // Mobile horizontal view has short vertical height (typically 320-390px).
+      // Keep character compact (~32px) so it's crisp pixel art and doesn't block drawings.
+      targetCssPx = Math.round(SPRITE_W * 1.35); // ~32px
+    } else if (mobile) {
+      // Mobile portrait
+      targetCssPx = Math.round(SPRITE_W * 1.75); // ~42px
+    } else if (engine.cssWidth < 1024 || engine.cssHeight < 700) {
+      // Tablet / small laptop
+      targetCssPx = SPRITE_W * 2.25; // 54px
+    } else {
+      // Standard desktop
+      targetCssPx = SPRITE_W * 3; // 72px
+    }
+
+    const scale = engine.camera.scale || 1;
+    return clamp(targetCssPx / scale, SPRITE_W * 0.75, 4000);
   }
 
   /**
@@ -1207,7 +1300,8 @@ export class AgentCharacterController {
       ch.followGlide = false;
       return false;
     }
-    const cam = this.deps.engine.camera;
+    const engine = this.deps.engine;
+    const cam = engine.camera;
     const view = cam.visibleWorldRect();
     if (view.w <= 0 || view.h <= 0) return false;
 
@@ -1218,9 +1312,16 @@ export class AgentCharacterController {
 
     const charW = this.charWorldWidth();
     const charH = charW * (SPRITE_H / SPRITE_W);
-    // Margin keeps the sprite plus its bubble comfortably inside the frame.
-    const marginX = charW * 0.8;
-    const marginY = charH * 1.6;
+    const mobile = isMobileView(engine);
+    const horizontal = isHorizontalView(engine);
+    const scale = cam.scale || 1;
+
+    // On mobile horizontal view, margins must be tighter to prevent violent camera pans
+    const marginX = mobile ? charW * 0.5 : charW * 0.8;
+    const marginY = mobile && horizontal
+      ? Math.min(charH * 0.55, 32 / scale)
+      : charH * 1.5;
+
     // Below this much residual shift the glide is considered settled.
     const settleX = Math.max(1, charW * 0.02);
     const settleY = Math.max(1, charH * 0.02);
@@ -1245,10 +1346,31 @@ export class AgentCharacterController {
     if (ch.state !== "walking" && !ch.followGlide) return false;
 
     // Convert the world shift to CSS pixels and ease toward it.
-    const scale = cam.scale || 1;
     const k = this.reduced ? 1 : clamp(dt * 6, 0, 1);
+
+    // Bounded camera pan: ensure the paper playground [0, 0, SIZE, SIZE] never leaves viewport
+    const proposedPanX = cam.panX - shiftX * scale * k;
+    const proposedPanY = cam.panY - shiftY * scale * k;
+
+    const minVisiblePaperPx = Math.min(180, Math.min(engine.cssWidth, engine.cssHeight) * 0.25);
+    const minPanX = minVisiblePaperPx - SIZE * scale;
+    const maxPanX = engine.cssWidth - minVisiblePaperPx;
+    const minPanY = minVisiblePaperPx - SIZE * scale;
+    const maxPanY = engine.cssHeight - minVisiblePaperPx;
+
+    const clampedPanX = clamp(proposedPanX, minPanX, maxPanX);
+    const clampedPanY = clamp(proposedPanY, minPanY, maxPanY);
+
+    const actualShiftX = clampedPanX - cam.panX;
+    const actualShiftY = clampedPanY - cam.panY;
+
+    if (Math.abs(actualShiftX) < 0.2 && Math.abs(actualShiftY) < 0.2) {
+      ch.followGlide = false;
+      return false;
+    }
+
     this.isProgrammaticPan = true;
-    cam.panBy(-shiftX * scale * k, -shiftY * scale * k);
+    cam.panBy(actualShiftX, actualShiftY);
     this.isProgrammaticPan = false;
     this.lastCamState = { panX: cam.panX, panY: cam.panY, scale: cam.scale };
     this.deps.engine.requestRender();
@@ -1413,7 +1535,9 @@ export class AgentCharacterController {
     now: number
   ): void {
     const w = this.charWorldWidth();
-    const px = clamp(4 / (this.deps.engine.camera.scale || 1), 2, 60);
+    const scale = this.deps.engine.camera.scale || 1;
+    const mobile = isMobileView(this.deps.engine);
+    const px = clamp((mobile ? 3 : 4) / scale, 1.5, 45);
     const cx = ch.pos.x;
     const cy = ch.pos.y - w * (SPRITE_H / SPRITE_W) - px * 2;
     ctx.save();
@@ -1461,12 +1585,25 @@ export class AgentCharacterController {
     if (!ch.speech || ch.dragging || (ch.state === "walking" && !isStreamingThought(ch))) {
       return null;
     }
-    const scale = this.deps.engine.camera.scale || 1;
-    const fs = clamp(13 / scale, 6, 450);
-    const lineH = fs * 1.35;
-    const padH = fs * 0.95;
-    const padV = fs * 0.75;
-    const maxW = clamp(260 / scale, fs * 12, 10000);
+    const engine = this.deps.engine;
+    const mobile = isMobileView(engine);
+    const horizontal = isHorizontalView(engine);
+    const scale = engine.camera.scale || 1;
+
+    const fsPx = mobile && horizontal ? 10.5 : mobile ? 11.5 : 13;
+    const fs = clamp(fsPx / scale, 6, 350);
+    const lineH = fs * 1.32;
+    const padH = fs * 0.85;
+    const padV = fs * 0.65;
+
+    const maxWPx = mobile && horizontal
+      ? Math.min(180, engine.cssWidth * 0.38)
+      : mobile
+      ? Math.min(220, engine.cssWidth * 0.72)
+      : 260;
+    const maxW = clamp(maxWPx / scale, fs * 8, 8000);
+    const maxLines = mobile && horizontal ? 3 : 4;
+
     const font = `600 ${fs}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif`;
     const lines: string[] = [];
 
@@ -1482,18 +1619,18 @@ export class AgentCharacterController {
         } else {
           if (currentLine) lines.push(currentLine);
           currentLine = word;
-          if (lines.length >= 4) break;
+          if (lines.length >= maxLines) break;
         }
       }
-      if (currentLine && lines.length < 4) {
+      if (currentLine && lines.length < maxLines) {
         lines.push(currentLine);
       }
-      if (lines.length === 4) {
-        let last = lines[3];
+      if (lines.length === maxLines) {
+        let last = lines[maxLines - 1];
         while (last.length > 1 && measureCtx.measureText(`${last}…`).width > maxW) {
           last = last.slice(0, -1).trim();
         }
-        lines[3] = `${last}…`;
+        lines[maxLines - 1] = `${last}…`;
       }
     } else {
       lines.push(ch.speech.text);
@@ -1501,7 +1638,7 @@ export class AgentCharacterController {
 
     if (lines.length === 0) return null;
 
-    let maxLineWidth = fs * 6;
+    let maxLineWidth = fs * 5;
     if (measureCtx) {
       for (const line of lines) {
         const lw = measureCtx.measureText(line).width;
@@ -1513,22 +1650,38 @@ export class AgentCharacterController {
     const h = padV * 2 + lines.length * lineH;
     const charW = this.charWorldWidth();
     const charH = charW * (SPRITE_H / SPRITE_W);
-    const gap = fs * 1.8;
+    const gap = fs * 1.5;
+
+    const bounds = this.getSafeViewportBounds();
 
     let left =
       ch.facing === 1
         ? ch.pos.x + charW * 0.15
         : ch.pos.x - charW * 0.15 - w;
-    let top = ch.pos.y - charH - gap - h;
 
-    left = clamp(left, 10, SIZE - w - 10);
-    top = clamp(top, 10, SIZE - h - 10);
+    const aboveTop = ch.pos.y - charH - gap - h;
+    let top = aboveTop;
+    let isBelow = false;
+
+    // If placing above would clip beyond the safe top (e.g. under the mobile header),
+    // flip the bubble to display below the character
+    if (aboveTop < bounds.minY) {
+      top = ch.pos.y + gap * 0.7;
+      isBelow = true;
+    }
+
+    left = clamp(left, bounds.minX, bounds.maxX - w);
+    top = clamp(top, bounds.minY, bounds.maxY - h);
 
     const r = fs * 0.55;
-    const beakWidth = fs * 0.9;
-    const beakTipX = ch.pos.x + (ch.facing === 1 ? charW * 0.12 : -charW * 0.12);
-    const beakTipY = ch.pos.y - charH * 0.85;
-    const beakBaseX = clamp(beakTipX, left + r + beakWidth, left + w - r - beakWidth);
+    const beakWidth = fs * 0.85;
+    const beakTipX = clamp(
+      ch.pos.x + (ch.facing === 1 ? charW * 0.12 : -charW * 0.12),
+      left + r + beakWidth,
+      left + w - r - beakWidth
+    );
+    const beakTipY = isBelow ? ch.pos.y + fs * 0.2 : ch.pos.y - charH * 0.85;
+    const beakBaseX = beakTipX;
 
     return {
       rect: { x: left, y: top, w, h },
@@ -1541,6 +1694,7 @@ export class AgentCharacterController {
       beakWidth,
       beakTipX,
       beakTipY,
+      isBelow,
     };
   }
 
@@ -1556,17 +1710,27 @@ export class AgentCharacterController {
     const ty = b.beakTipY;
 
     ctx.beginPath();
-    ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r);
-    ctx.arcTo(x + w, y + h, x, y + h, r);
-
-    // Bottom edge with beak pointer pointing to character
-    ctx.lineTo(bx + bw / 2, y + h);
-    ctx.lineTo(tx, ty);
-    ctx.lineTo(bx - bw / 2, y + h);
-
-    ctx.arcTo(x, y + h, x, y, r);
-    ctx.arcTo(x, y, x + w, y, r);
+    if (b.isBelow) {
+      // Beak on top edge pointing UP to character
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(bx - bw / 2, y);
+      ctx.lineTo(tx, ty);
+      ctx.lineTo(bx + bw / 2, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + r, y, r);
+    } else {
+      // Beak on bottom edge pointing DOWN to character
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.lineTo(bx + bw / 2, y + h);
+      ctx.lineTo(tx, ty);
+      ctx.lineTo(bx - bw / 2, y + h);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+    }
     ctx.closePath();
   }
 
@@ -1610,19 +1774,32 @@ export class AgentCharacterController {
   private bubbleFor(
     ch: Character,
     measureCtx: CanvasRenderingContext2D | null
-  ): { rect: Rect; lines: string[]; fs: number; pad: number; lineH: number } | null {
+  ): { rect: Rect; lines: string[]; fs: number; pad: number; lineH: number; isBelow: boolean } | null {
     const thought = resolveThoughtText(ch);
     const streamingThought = isStreamingThought(ch);
     if (!thought || ch.dragging || (ch.state === "walking" && !streamingThought && !ch.turnActive)) {
       return null;
     }
-    const scale = this.deps.engine.camera.scale || 1;
-    const fs = clamp(11 / scale, 4, 400);
-    const lineH = fs * 1.35;
-    const pad = fs * 0.65;
-    const maxW = clamp(230 / scale, fs * 10, 6000);
+    const engine = this.deps.engine;
+    const mobile = isMobileView(engine);
+    const horizontal = isHorizontalView(engine);
+    const scale = engine.camera.scale || 1;
+
+    const fsPx = mobile && horizontal ? 9.5 : mobile ? 10 : 11;
+    const fs = clamp(fsPx / scale, 4, 300);
+    const lineH = fs * 1.32;
+    const pad = fs * 0.55;
+
+    const maxWPx = mobile && horizontal
+      ? Math.min(160, engine.cssWidth * 0.35)
+      : mobile
+      ? Math.min(200, engine.cssWidth * 0.7)
+      : 230;
+    const maxW = clamp(maxWPx / scale, fs * 8, 5000);
+    const maxLines = mobile && horizontal ? 2 : 3;
+
     const font = `600 ${fs}px ui-monospace, SFMono-Regular, Menlo, monospace`;
-    const lines = wrapThoughtLines(thought, maxW, 3, measureCtx, font);
+    const lines = wrapThoughtLines(thought, maxW, maxLines, measureCtx, font);
     if (lines.length === 0) return null;
 
     let maxLineWidth = fs * 4;
@@ -1638,15 +1815,30 @@ export class AgentCharacterController {
     const charW = this.charWorldWidth();
     const charH = charW * (SPRITE_H / SPRITE_W);
     const hasGlyph = ch.state === "celebrating" || ch.state === "working" || ch.state === "sad" || ch.state === "stumble";
-    const px = clamp(4 / scale, 2, 60);
-    const gap = fs * 1.9 + (hasGlyph ? px * 4.5 : 0);
+    const px = clamp((mobile ? 3 : 4) / scale, 1.5, 45);
+    const gap = fs * 1.6 + (hasGlyph ? px * 3.5 : 0);
     const h = pad * 2 + lines.length * lineH;
-    const left =
+
+    const bounds = this.getSafeViewportBounds();
+
+    let left =
       ch.facing === 1
         ? ch.pos.x + charW * 0.35
         : ch.pos.x - charW * 0.35 - w;
-    const top = ch.pos.y - charH - gap - h;
-    return { rect: { x: left, y: top, w, h }, lines, fs, pad, lineH };
+
+    const aboveTop = ch.pos.y - charH - gap - h;
+    let top = aboveTop;
+    let isBelow = false;
+
+    if (aboveTop < bounds.minY) {
+      top = ch.pos.y + gap * 0.6;
+      isBelow = true;
+    }
+
+    left = clamp(left, bounds.minX, bounds.maxX - w);
+    top = clamp(top, bounds.minY, bounds.maxY - h);
+
+    return { rect: { x: left, y: top, w, h }, lines, fs, pad, lineH, isBelow };
   }
 
   private drawThoughtBubble(ctx: CanvasRenderingContext2D, ch: Character): void {
@@ -1665,8 +1857,17 @@ export class AgentCharacterController {
     const tailX = ch.facing === 1 ? b.rect.x + b.fs * 0.6 : b.rect.x + b.rect.w - b.fs * 0.6;
     const r1 = b.fs * 0.42;
     const r2 = b.fs * 0.24;
-    const c2y = b.rect.y + b.rect.h + b.fs * 0.35;
-    const c1y = (ch.pos.y - charH + c2y) / 2;
+
+    let c2y: number;
+    let c1y: number;
+    if (b.isBelow) {
+      c2y = b.rect.y - b.fs * 0.35;
+      c1y = (ch.pos.y + c2y) / 2;
+    } else {
+      c2y = b.rect.y + b.rect.h + b.fs * 0.35;
+      c1y = (ch.pos.y - charH + c2y) / 2;
+    }
+
     ctx.beginPath();
     ctx.arc(tailX, c2y, r2, 0, Math.PI * 2);
     ctx.fill();

@@ -310,6 +310,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
 
   return (
     <motion.div
+      data-guide="ai-button"
       ref={containerRef}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}

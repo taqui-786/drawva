@@ -45,6 +45,7 @@ export interface GenerationTickerState {
   detail?: string;
 }
 import { FloatingAiButton } from "./FloatingAiButton";
+import { CanvasHelpGuide } from "./CanvasHelpGuide";
 import { WidgetManager, type WidgetItem } from "@/lib/canvas/widgets";
 import { ObjectManager, type ObjectItem } from "@/lib/canvas/objects";
 import { diagramDocument, copyLabel } from "@/lib/canvas/diagram";
@@ -476,6 +477,17 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   const [modelSelectOpen, setModelSelectOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
+  const [isCanvasEmpty, setIsCanvasEmpty] = useState(true);
+  const [guideDismissed, setGuideDismissed] = useState(false);
+
+  const updateCanvasEmptyState = useCallback(() => {
+    if (!engine) return;
+    const tileCount = engine.tiles.keys().length;
+    const widgetCount = widgets.current?.all().length ?? 0;
+    const objectCount = objects.current?.all().length ?? 0;
+    const empty = tileCount === 0 && widgetCount === 0 && objectCount === 0;
+    setIsCanvasEmpty(empty);
+  }, [engine]);
   const [logs, setLogs] = useState<AiLogEntry[]>([]);
   useEffect(() => {
     let cancelled = false;
@@ -1433,6 +1445,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     history.current?.commit();
     syncHistoryButtons();
     scheduleSave();
+    updateCanvasEmptyState();
   }
   const afterBoardChangeRef = useRef(afterBoardChange);
   useEffect(() => {
@@ -1504,6 +1517,8 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       durationStage: "normal",
     });
     syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
+    setIsCanvasEmpty(true);
+    setGuideDismissed(false);
     afterBoardChange();
   }
 
@@ -2720,11 +2735,12 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           console.warn("Cloud sync initial resolution:", err);
         }
       }
+      updateCanvasEmptyState();
     })();
     return () => {
       cancelled = true;
     };
-  }, [engine, canvasId, isAuthenticated]);
+  }, [engine, canvasId, isAuthenticated, updateCanvasEmptyState]);
 
   useEffect(() => {
     tools.current?.setMode(mode);
@@ -3101,6 +3117,9 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (!engine) return;
+    if (!guideDismissed) {
+      setGuideDismissed(true);
+    }
     if (textOpen) {
       if (textValue.trim()) {
         commitText();
@@ -3719,6 +3738,12 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       />
 
       <MobileOrientationPrompt />
+
+      <CanvasHelpGuide
+        isVisible={isCanvasEmpty && !guideDismissed && !viewMode && !agentRunning}
+        onDismiss={() => setGuideDismissed(true)}
+        onImportJson={() => jsonFileRef.current?.click()}
+      />
 
       <ModelSelectDialog
         open={modelSelectOpen}

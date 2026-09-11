@@ -225,6 +225,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   return (
     <div
       role="toolbar"
+      data-guide="toolbar"
       aria-label="Canvas Drawing Tools"
       className={cn(
         "fixed bottom-2 sm:bottom-5 left-1/2 -translate-x-1/2 z-40 select-none transition-all duration-300 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-5rem)]",

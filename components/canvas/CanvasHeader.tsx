@@ -233,6 +233,7 @@ export function CanvasHeader({
                 <TooltipTrigger
                   render={
                     <Button
+                      data-guide="save"
                       variant="outline"
                       size="xs"
                       onClick={onOpenSaveDialog}
@@ -255,6 +256,7 @@ export function CanvasHeader({
                 <TooltipTrigger
                   render={
                     <Button
+                      data-guide="save"
                       variant="ghost"
                       size="sm"
                       onClick={onTriggerCloudSync}
@@ -520,6 +522,7 @@ export function CanvasHeader({
                   <TooltipTrigger
                     render={
                       <Button
+                        data-guide="share"
                         variant="outline"
                         size="xs"
                         onClick={onOpenPublishDialog}
@@ -535,7 +538,7 @@ export function CanvasHeader({
               )}
 
               {/* Thinking / Reasoning Effort Selector */}
-              <div className="hidden sm:block shrink-0">
+              <div data-guide="reasoning" className="hidden sm:block shrink-0">
                 <Select
                   value={reasoningEffort}
                   onValueChange={(val) =>
@@ -586,7 +589,7 @@ export function CanvasHeader({
               </div>
 
               {/* Auto AI Switch */}
-              <label className="hidden md:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none shrink-0">
+              <label data-guide="auto-ai" className="hidden md:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none shrink-0">
                 <Switch
                   size="sm"
                   checked={autoOn}
@@ -604,6 +607,7 @@ export function CanvasHeader({
             <TooltipTrigger
               render={
                 <Button
+                  data-guide="sidebar"
                   size="icon-sm"
                   variant="ghost"
                   onClick={onOpenSidebar}
