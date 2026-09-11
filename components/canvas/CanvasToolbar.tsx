@@ -227,11 +227,11 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       role="toolbar"
       aria-label="Canvas Drawing Tools"
       className={cn(
-        "fixed bottom-5 left-1/2 -translate-x-1/2 z-40 select-none transition-all duration-300 max-w-[calc(100vw-5rem)]",
+        "fixed bottom-2 sm:bottom-5 left-1/2 -translate-x-1/2 z-40 select-none transition-all duration-300 max-w-[calc(100vw-1rem)] sm:max-w-[calc(100vw-5rem)]",
         className
       )}
     >
-      <div className="flex items-center gap-0.5 sm:gap-1 rounded-2xl border border-border/80 bg-background/95 dark:bg-zinc-950/90 backdrop-blur-md px-1.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
+      <div className="flex items-center gap-0.5 sm:gap-1 rounded-xl sm:rounded-2xl border border-border/80 bg-background/95 dark:bg-zinc-950/90 backdrop-blur-md p-1 sm:px-1.5 sm:py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
         {/* Select */}
         <ToolButton
           mode={mode}

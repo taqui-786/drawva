@@ -267,7 +267,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
       }}
       className={cn(
         "fixed z-40 select-none",
-        viewMode ? "bottom-4 right-4" : "bottom-5 right-5 sm:right-6",
+        viewMode ? "bottom-2 right-2 sm:bottom-4 sm:right-4" : "bottom-2 right-2.5 sm:bottom-5 sm:right-6",
         className
       )}
     >
@@ -281,7 +281,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
             transition={{ duration: 0.16, ease: "easeOut" }}
             className={cn(
               "absolute bottom-[calc(100%+14px)] right-0 z-50 pointer-events-auto",
-              "w-[340px] sm:w-[430px] max-w-[calc(100vw-24px)]",
+              "w-[340px] sm:w-[430px] max-w-[calc(100vw-20px)]",
               "rounded-2xl p-2",
               // Frosted glass with subtle specular highlight
               "bg-white/95 dark:bg-zinc-950/90 backdrop-blur-2xl",

@@ -46,7 +46,7 @@ export const CanvasZoomBar: React.FC<CanvasZoomBarProps> = ({
       aria-label="Canvas Zoom and Navigation Controls"
       className={cn(
         "fixed z-40 select-none transition-all duration-300",
-        viewMode ? "bottom-3 left-3" : "bottom-4 left-3 sm:left-5",
+        viewMode ? "bottom-2 left-2 sm:bottom-3 sm:left-3" : "bottom-2 left-2 sm:bottom-5 sm:left-5",
         className
       )}
     >
