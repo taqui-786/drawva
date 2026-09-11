@@ -84,12 +84,116 @@ export function DravViewer({ drav }: DravViewerProps) {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Sync mode with managers
+  // Global window pointerup/cancel safety listener
   React.useEffect(() => {
-    const targetMode = viewerMode === "drag" ? "hand" : "select";
-    widgetManagerRef.current?.setMode(targetMode);
-    objectManagerRef.current?.setMode(targetMode);
-  }, [viewerMode]);
+    const handleGlobalPointerUp = () => {
+      if (isDragging.current) {
+        isDragging.current = false;
+        setIsDraggingState(false);
+      }
+    };
+    window.addEventListener("pointerup", handleGlobalPointerUp);
+    window.addEventListener("pointercancel", handleGlobalPointerUp);
+    return () => {
+      window.removeEventListener("pointerup", handleGlobalPointerUp);
+      window.removeEventListener("pointercancel", handleGlobalPointerUp);
+    };
+  }, []);
+
+  // Forward mouse wheel events from widget iframes to canvas camera
+  React.useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      if (e.data?.type !== "drawva-widget-wheel") return;
+      const engine = engineRef.current;
+      if (!engine) return;
+
+      let screenX = window.innerWidth / 2;
+      let screenY = window.innerHeight / 2;
+
+      if (e.data.isScreenCoord) {
+        screenX = typeof e.data.clientX === "number" ? e.data.clientX : screenX;
+        screenY = typeof e.data.clientY === "number" ? e.data.clientY : screenY;
+      } else {
+        const pt = widgetManagerRef.current?.getIframeScreenPoint(
+          e.source,
+          typeof e.data.clientX === "number" ? e.data.clientX : 0,
+          typeof e.data.clientY === "number" ? e.data.clientY : 0
+        );
+        if (pt) {
+          screenX = pt.x;
+          screenY = pt.y;
+        } else if (
+          typeof e.data.clientX === "number" &&
+          typeof e.data.clientY === "number"
+        ) {
+          screenX = e.data.clientX;
+          screenY = e.data.clientY;
+        }
+      }
+
+      const deltaY = typeof e.data.deltaY === "number" ? e.data.deltaY : 0;
+      if (deltaY === 0) return;
+
+      if (e.data.ctrlKey || e.data.metaKey) {
+        engine.camera.handleWheel({
+          clientX: screenX,
+          clientY: screenY,
+          deltaX: 0,
+          deltaY,
+          ctrlKey: true,
+          metaKey: false,
+        });
+      } else if (
+        Math.abs(deltaY) < 60 &&
+        (e.data.deltaMode === 0 || !e.data.deltaMode)
+      ) {
+        engine.camera.handleWheel({
+          clientX: screenX,
+          clientY: screenY,
+          deltaX: 0,
+          deltaY: deltaY * 2.5,
+          ctrlKey: true,
+          metaKey: false,
+        });
+      } else {
+        engine.camera.zoomAt(screenX, screenY, deltaY);
+      }
+      engine.requestRender();
+      setZoomPercent(Math.round(engine.camera.scale * 100));
+    };
+
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  const gestureOverlayRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Non-passive wheel handler on overlay for smooth pinch-to-zoom and trackpad pan
+  React.useEffect(() => {
+    const el = gestureOverlayRef.current;
+    if (!el) return;
+
+    const onNativeWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      const engine = engineRef.current;
+      if (!engine) return;
+
+      engine.camera.handleWheel({
+        clientX: e.clientX,
+        clientY: e.clientY,
+        deltaX: e.deltaX,
+        deltaY: e.deltaY,
+        ctrlKey: e.ctrlKey,
+        metaKey: e.metaKey,
+        deltaMode: e.deltaMode,
+      });
+      engine.requestRender();
+      setZoomPercent(Math.round(engine.camera.scale * 100));
+    };
+
+    el.addEventListener("wheel", onNativeWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onNativeWheel);
+  }, []);
 
   // Initialize CanvasEngine and restore snapshot
   React.useEffect(() => {
@@ -125,11 +229,25 @@ export function DravViewer({ drav }: DravViewerProps) {
 
     // Restore snapshot safely
     try {
-      const parsedSnapshot =
+      const raw =
         typeof drav.snapshot === "string" ? JSON.parse(drav.snapshot) : drav.snapshot;
+
+      const parsedSnapshot = raw && typeof raw === "object"
+        ? {
+            ...raw,
+            widgets: Array.isArray(raw.widgets)
+              ? raw.widgets.map((w: Record<string, unknown>) => ({ ...w, status: "accepted" }))
+              : raw.widgets,
+            objects: Array.isArray(raw.objects)
+              ? raw.objects.map((o: Record<string, unknown>) => ({ ...o, status: "accepted" }))
+              : raw.objects,
+          }
+        : raw;
 
       restoreSnapshot(engine, wm, om, parsedSnapshot).then(() => {
         if (cancelled) return;
+        wm.setMode("hand");
+        om.setMode("hand");
         // Center camera on content
         const bounds = contentBounds(engine, wm, om);
         if (bounds && bounds.w > 0 && bounds.h > 0) {
@@ -168,17 +286,18 @@ export function DravViewer({ drav }: DravViewerProps) {
   }, [drav.snapshot]);
 
   // Pointer interactions for panning
-  const handlePointerDown = (e: React.PointerEvent) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (e.button !== 0 && e.button !== 1) return;
+    e.preventDefault();
     isDragging.current = true;
     setIsDraggingState(true);
     lastPoint.current = { x: e.clientX, y: e.clientY };
     try {
-      (e.target as HTMLElement).setPointerCapture(e.pointerId);
+      e.currentTarget.setPointerCapture(e.pointerId);
     } catch {}
   };
 
-  const handlePointerMove = (e: React.PointerEvent) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging.current || !engineRef.current) return;
     const dx = e.clientX - lastPoint.current.x;
     const dy = e.clientY - lastPoint.current.y;
@@ -189,32 +308,14 @@ export function DravViewer({ drav }: DravViewerProps) {
     engine.requestRender();
   };
 
-  const handlePointerUp = (e: React.PointerEvent) => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (isDragging.current) {
       isDragging.current = false;
       setIsDraggingState(false);
       try {
-        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        e.currentTarget.releasePointerCapture(e.pointerId);
       } catch {}
     }
-  };
-
-  // Wheel interaction for zoom and trackpad pan
-  const handleWheel = (e: React.WheelEvent) => {
-    const engine = engineRef.current;
-    if (!engine) return;
-
-    engine.camera.handleWheel({
-      clientX: e.clientX,
-      clientY: e.clientY,
-      deltaX: e.deltaX,
-      deltaY: e.deltaY,
-      ctrlKey: e.ctrlKey,
-      metaKey: e.metaKey,
-      deltaMode: e.deltaMode,
-    });
-    engine.requestRender();
-    setZoomPercent(Math.round(engine.camera.scale * 100));
   };
 
   // Zoom controls
@@ -262,18 +363,26 @@ export function DravViewer({ drav }: DravViewerProps) {
 
         {/* Gesture Overlay: z-30 in drag mode to pan anywhere; z-10 in eye mode to allow widget clicks */}
         <div
+          ref={gestureOverlayRef}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
-          onWheel={handleWheel}
           style={{
             position: "absolute",
             inset: 0,
             zIndex: viewerMode === "drag" ? 30 : 10,
             pointerEvents: "auto",
             touchAction: "none",
-            cursor: viewerMode === "drag" ? (isDraggingState ? "grabbing" : "grab") : "default",
+            userSelect: "none",
+            cursor:
+              viewerMode === "drag"
+                ? isDraggingState
+                  ? "grabbing"
+                  : "grab"
+                : isDraggingState
+                  ? "grabbing"
+                  : "default",
           }}
         />
       </div>
