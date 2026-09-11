@@ -38,6 +38,8 @@ import {
   PeerToPeer01Icon,
   LayoutRightIcon,
   Share07Icon,
+  Compass01Icon,
+  BookOpen01Icon,
 } from "@hugeicons/core-free-icons";
 import { useSession } from "@/lib/auth-client";
 import type { CloudSyncStatus } from "@/lib/canvas/cloudSync";
@@ -144,11 +146,34 @@ export function CanvasHeader({
         "border-b border-border/80 bg-background/95 backdrop-blur-md shadow-2xs select-none",
       )}
     >
-      {/* Left side: Brand, Save/Cloud Status, P2P, Zoom */}
+      {/* Left side: Brand, Navlinks, P2P Sync */}
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-        <span className="brand-wordmark pr-1 text-base sm:text-lg font-bold leading-none select-none">
+        <Link
+          href="/canvas"
+          className="brand-wordmark pr-1 text-base sm:text-lg font-bold leading-none select-none hover:opacity-85 transition-opacity"
+        >
           Drawva
-        </span>
+        </Link>
+
+        {/* Navlinks */}
+        <nav className="flex items-center gap-0.5 sm:gap-1 ml-1.5 sm:ml-3 pl-1.5 sm:pl-3 border-l border-border/60">
+          <Link
+            href="/community"
+            title="Explore Community Dravs"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+          >
+            <HugeiconsIcon icon={Compass01Icon} className="size-3.5" />
+            <span className="hidden sm:inline">Community</span>
+          </Link>
+          <Link
+            href="/manual"
+            title="Drawva User Manual"
+            className="flex items-center gap-1 sm:gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+          >
+            <HugeiconsIcon icon={BookOpen01Icon} className="size-3.5" />
+            <span className="hidden sm:inline">Manual</span>
+          </Link>
+        </nav>
 
 
         {/* P2P Sync Status */}
