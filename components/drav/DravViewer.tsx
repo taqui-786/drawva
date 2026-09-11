@@ -52,7 +52,7 @@ export function DravViewer({ drav }: DravViewerProps) {
   const [zoomPercent, setZoomPercent] = React.useState(100);
 
   // Viewer modes: "drag" (canvas pan) vs "eye" (direct widget/canvas interaction)
-  const [viewerMode, setViewerMode] = React.useState<"drag" | "eye">("drag");
+  const [viewerMode, setViewerMode] = React.useState<"drag" | "eye">("eye");
   const [isDraggingState, setIsDraggingState] = React.useState(false);
 
   // Track dragging state for pan
