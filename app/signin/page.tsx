@@ -3,9 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
-import { signIn, useSession } from "@/lib/auth-client";
+import { signIn, signOut, useSession } from "@/lib/auth-client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { HugeiconsIcon } from "@hugeicons/react";
 import { ArrowLeft02Icon } from "@hugeicons/core-free-icons";
 
@@ -46,12 +47,6 @@ function SignInContent() {
   const [error, setError] = React.useState<string | null>(null);
 
   const callbackUrl = searchParams.get("callbackUrl") || "/canvas";
-
-  React.useEffect(() => {
-    if (session?.user) {
-      router.replace(callbackUrl);
-    }
-  }, [session, callbackUrl, router]);
 
   const handleGoogleSignIn = async () => {
     try {
@@ -119,21 +114,68 @@ function SignInContent() {
               </div>
             )}
 
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              onClick={handleGoogleSignIn}
-              disabled={isLoading || isPending}
-              className="w-full gap-3 py-6 rounded-xl border-border hover:bg-accent/60 transition-all font-medium text-sm shadow-xs cursor-pointer"
-            >
-              {isLoading ? (
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              ) : (
-                <GoogleIcon className="h-5 w-5" />
-              )}
-              <span>{isLoading ? "Connecting to Google…" : "Continue with Google"}</span>
-            </Button>
+            {session?.user ? (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-border/80 bg-muted/30 p-3.5 flex items-center gap-3">
+                  <Avatar className="size-10 shrink-0">
+                    {session.user.image && (
+                      <AvatarImage src={session.user.image} alt={session.user.name || "User"} />
+                    )}
+                    <AvatarFallback className="text-xs bg-primary/10 text-primary font-bold">
+                      {session.user.name?.[0]?.toUpperCase() || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-foreground truncate">
+                      {session.user.name}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {session.user.email}
+                    </p>
+                  </div>
+                </div>
+
+                <Button
+                  type="button"
+                  size="lg"
+                  onClick={() => router.push(callbackUrl)}
+                  className="w-full py-5 rounded-xl text-xs font-medium cursor-pointer"
+                >
+                  Continue to Canvas
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  onClick={async () => {
+                    await signOut();
+                    handleGoogleSignIn();
+                  }}
+                  disabled={isLoading}
+                  className="w-full gap-2.5 py-5 rounded-xl border-border text-xs font-medium cursor-pointer"
+                >
+                  <GoogleIcon className="h-4 w-4" />
+                  <span>Switch account / Sign in as someone else</span>
+                </Button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="lg"
+                onClick={handleGoogleSignIn}
+                disabled={isLoading || isPending}
+                className="w-full gap-3 py-6 rounded-xl border-border hover:bg-accent/60 transition-all font-medium text-sm shadow-xs cursor-pointer"
+              >
+                {isLoading ? (
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+                ) : (
+                  <GoogleIcon className="h-5 w-5" />
+                )}
+                <span>{isLoading ? "Connecting to Google…" : "Continue with Google"}</span>
+              </Button>
+            )}
 
             <p className="text-center text-[11px] text-muted-foreground leading-relaxed pt-2">
               By continuing, you agree to Drawva&apos;s Terms of Service and Privacy Policy.

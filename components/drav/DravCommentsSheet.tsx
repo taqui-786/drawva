@@ -12,16 +12,18 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { DravCommentData } from "@/lib/dravs/types";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/lib/auth-client";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
-  Comment01Icon,
   SentIcon,
   Delete02Icon,
   Loading03Icon,
 } from "@hugeicons/core-free-icons";
+
+import { DravCommentIcon } from "@/components/drav/DravIcons";
+import { useCommentMutation, useDeleteCommentMutation } from "@/lib/dravs/useDravMutations";
 
 interface DravCommentsSheetProps {
   open: boolean;
@@ -35,7 +37,6 @@ export function DravCommentsSheet({
   dravId,
 }: DravCommentsSheetProps) {
   const { data: session } = useSession();
-  const queryClient = useQueryClient();
   const [newComment, setNewComment] = React.useState("");
 
   // TanStack Query for comments
@@ -52,84 +53,9 @@ export function DravCommentsSheet({
 
   const comments = data?.comments || [];
 
-  // TanStack Query mutation for posting comment
-  const postMutation = useMutation({
-    mutationFn: async (bodyText: string) => {
-      const res = await fetch(`/api/dravs/${dravId}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: bodyText }),
-      });
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to post comment");
-      }
-      return res.json();
-    },
-    onMutate: async (bodyText) => {
-      // Optimistic update
-      await queryClient.cancelQueries({ queryKey: ["drav-comments", dravId] });
-      const previous = queryClient.getQueryData<{ comments: DravCommentData[] }>([
-        "drav-comments",
-        dravId,
-      ]);
-
-      if (previous && session?.user) {
-        const optimisticComment: DravCommentData = {
-          id: `temp-${Date.now()}`,
-          dravId,
-          userId: session.user.id,
-          body: bodyText,
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
-          author: {
-            id: session.user.id,
-            name: session.user.name || "You",
-            image: session.user.image,
-          },
-          isOwner: true,
-        };
-
-        queryClient.setQueryData(["drav-comments", dravId], {
-          comments: [...previous.comments, optimisticComment],
-        });
-      }
-
-      setNewComment("");
-      return { previous };
-    },
-    onError: (err: Error, _vars, context) => {
-      if (context?.previous) {
-        queryClient.setQueryData(["drav-comments", dravId], context.previous);
-      }
-      toast.error(err.message || "Failed to post comment");
-    },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ["drav-comments", dravId] });
-      queryClient.invalidateQueries({ queryKey: ["drav", dravId] });
-      queryClient.invalidateQueries({ queryKey: ["dravs"] });
-    },
-  });
-
-  // Delete comment mutation
-  const deleteMutation = useMutation({
-    mutationFn: async (commentId: string) => {
-      const res = await fetch(`/api/dravs/${dravId}/comments/${commentId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete comment");
-      return res.json();
-    },
-    onSuccess: () => {
-      toast.success("Comment deleted");
-      queryClient.invalidateQueries({ queryKey: ["drav-comments", dravId] });
-      queryClient.invalidateQueries({ queryKey: ["drav", dravId] });
-      queryClient.invalidateQueries({ queryKey: ["dravs"] });
-    },
-    onError: () => {
-      toast.error("Failed to delete comment");
-    },
-  });
+  // TanStack Query mutations for posting & deleting with optimistic count updates
+  const postMutation = useCommentMutation(dravId, session?.user);
+  const deleteMutation = useDeleteCommentMutation(dravId);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -146,7 +72,7 @@ export function DravCommentsSheet({
       <SheetContent side="right" className="w-full sm:max-w-md flex flex-col p-0 h-full">
         <SheetHeader className="p-4 border-b border-border/70">
           <div className="flex items-center gap-2 text-primary font-semibold text-xs tracking-wider uppercase">
-            <HugeiconsIcon icon={Comment01Icon} className="size-4" />
+            <DravCommentIcon filled className="size-4" />
             <span>Discussion</span>
           </div>
           <SheetTitle className="text-base font-bold">Comments</SheetTitle>
@@ -165,7 +91,7 @@ export function DravCommentsSheet({
           ) : comments.length === 0 ? (
             <div className="py-16 text-center space-y-2 max-w-xs mx-auto">
               <div className="size-10 rounded-full bg-muted/40 mx-auto flex items-center justify-center text-muted-foreground/60">
-                <HugeiconsIcon icon={Comment01Icon} className="size-5" />
+                <DravCommentIcon className="size-5" />
               </div>
               <h4 className="text-xs font-semibold text-foreground">No comments yet</h4>
               <p className="text-[11px] text-muted-foreground">

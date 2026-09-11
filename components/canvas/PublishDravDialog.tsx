@@ -36,7 +36,8 @@ import {
   CloudCheckIcon,
   Login01Icon,
 } from "@hugeicons/core-free-icons";
-import { useSession } from "@/lib/auth-client";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { useSession, signOut } from "@/lib/auth-client";
 import { useRouter } from "next/navigation";
 
 interface PublishDravDialogProps {
@@ -355,6 +356,41 @@ export function PublishDravDialog({
                 <span className="text-[11px] text-muted-foreground">No preview available</span>
               )}
             </div>
+
+            {/* Publishing Author Identity */}
+            {session?.user && (
+              <div className="flex items-center justify-between rounded-lg border border-border/70 bg-muted/30 px-2.5 py-1.5 text-xs">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Avatar className="size-5.5 shrink-0">
+                    {session.user.image && (
+                      <AvatarImage src={session.user.image} alt={session.user.name || "User"} />
+                    )}
+                    <AvatarFallback className="text-[9px] bg-primary/10 text-primary font-semibold">
+                      {session.user.name?.[0]?.toUpperCase() || "U"}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground truncate text-[11px] leading-tight">
+                      Publishing as <span className="text-primary font-semibold">{session.user.name}</span>
+                    </p>
+                    <p className="text-[10px] text-muted-foreground truncate leading-tight">{session.user.email}</p>
+                  </div>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  onClick={async () => {
+                    await signOut();
+                    router.push("/signin?callbackUrl=" + encodeURIComponent(window.location.pathname));
+                  }}
+                  className="text-[10px] text-muted-foreground hover:text-foreground h-6 px-2 shrink-0 cursor-pointer"
+                  title="Sign in with a different account"
+                >
+                  Switch
+                </Button>
+              </div>
+            )}
 
             {/* Title Input */}
             <div className="space-y-1">

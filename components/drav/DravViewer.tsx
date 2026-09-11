@@ -19,6 +19,8 @@ import {
   HandIcon,
   ViewIcon,
 } from "@hugeicons/core-free-icons";
+import { useQuery } from "@tanstack/react-query";
+import { dravQueryKeys } from "@/lib/dravs/useDravMutations";
 import { cn } from "@/lib/utils";
 
 interface DravViewerProps {
@@ -26,6 +28,18 @@ interface DravViewerProps {
 }
 
 export function DravViewer({ drav }: DravViewerProps) {
+  // Live reactive TanStack Query for real-time like/comment updates
+  const { data: currentDrav = drav } = useQuery<DravDetailData>({
+    queryKey: dravQueryKeys.detail(drav.id),
+    queryFn: async () => {
+      const res = await fetch(`/api/dravs/${drav.id}`);
+      if (!res.ok) throw new Error("Failed to fetch Drav");
+      return res.json();
+    },
+    initialData: drav,
+    staleTime: 60 * 1000,
+  });
+
   const mountRef = React.useRef<HTMLDivElement | null>(null);
   const engineRef = React.useRef<CanvasEngine | null>(null);
   const widgetManagerRef = React.useRef<WidgetManager | null>(null);
@@ -236,7 +250,7 @@ export function DravViewer({ drav }: DravViewerProps) {
       {/* Top Header */}
       <div className="shrink-0 h-13">
         <DravHeader
-          drav={drav}
+          drav={currentDrav}
           onOpenComments={() => setCommentsOpen(true)}
           onOpenReport={() => setReportOpen(true)}
         />

@@ -4,6 +4,9 @@ import { publishDravSchema } from "@/lib/dravs/validation";
 import { listDravs, createDrav } from "@/lib/dravs/queries";
 import { uploadThumbnailToR2 } from "@/lib/dravs/r2";
 import { DravSortOption, DravVisibility } from "@/lib/dravs/types";
+import { db } from "@/lib/db";
+import { canvas } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 export async function GET(req: NextRequest) {
   try {
@@ -64,6 +67,16 @@ export async function POST(req: NextRequest) {
       snapshot,
       thumbnailBase64,
     } = parseResult.data;
+
+    // Sync canvas record ownership to the active publisher
+    try {
+      await db
+        .update(canvas)
+        .set({ userId })
+        .where(eq(canvas.id, canvasId));
+    } catch (e) {
+      console.warn("Could not sync canvas owner:", e);
+    }
 
     // Upload thumbnail to Cloudflare R2 if thumbnailBase64 is provided
     let thumbnailUrl: string | undefined = undefined;

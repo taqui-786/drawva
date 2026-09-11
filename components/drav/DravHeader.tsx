@@ -17,8 +17,6 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ArrowLeft01Icon,
-  FavouriteIcon,
-  Comment01Icon,
   Share07Icon,
   SparklesIcon,
   MoreVerticalIcon,
@@ -26,9 +24,12 @@ import {
   Loading03Icon,
 } from "@hugeicons/core-free-icons";
 import { useSession } from "@/lib/auth-client";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+
+import { DravLikeIcon, DravCommentIcon } from "./DravIcons";
+import { useLikeMutation } from "@/lib/dravs/useDravMutations";
 
 interface DravHeaderProps {
   drav: DravDetailData;
@@ -43,38 +44,11 @@ export function DravHeader({
 }: DravHeaderProps) {
   const router = useRouter();
   const { data: session } = useSession();
-  const queryClient = useQueryClient();
 
-  const [prevProps, setPrevProps] = React.useState({
-    id: drav.id,
-    likedByMe: drav.likedByMe,
-    likesCount: drav.likesCount,
-  });
-  const [isLiked, setIsLiked] = React.useState(!!drav.likedByMe);
-  const [likesCount, setLikesCount] = React.useState(drav.likesCount || 0);
-  const [serverLiked, setServerLiked] = React.useState(!!drav.likedByMe);
-  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
-
-  if (
-    prevProps.id !== drav.id ||
-    prevProps.likedByMe !== drav.likedByMe ||
-    prevProps.likesCount !== drav.likesCount
-  ) {
-    setPrevProps({
-      id: drav.id,
-      likedByMe: drav.likedByMe,
-      likesCount: drav.likesCount,
-    });
-    setIsLiked(!!drav.likedByMe);
-    setLikesCount(drav.likesCount || 0);
-    setServerLiked(!!drav.likedByMe);
-  }
-
-  React.useEffect(() => {
-    return () => {
-      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
-    };
-  }, []);
+  // Optimistic real-time like mutation synced with TanStack Query cache
+  const likeMutation = useLikeMutation(drav.id);
+  const isLiked = !!drav.likedByMe;
+  const likesCount = drav.likesCount;
 
   // Remix mutation
   const remixMutation = useMutation({
@@ -105,37 +79,7 @@ export function DravHeader({
       toast.info("Please sign in to like this Drav.");
       return;
     }
-
-    // Immediate real-time UI toggle
-    const nextLiked = !isLiked;
-    const nextCount = nextLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
-    setIsLiked(nextLiked);
-    setLikesCount(nextCount);
-
-    if (debounceTimerRef.current) {
-      clearTimeout(debounceTimerRef.current);
-    }
-
-    const currentServerLiked = serverLiked;
-    debounceTimerRef.current = setTimeout(async () => {
-      // If user toggled even times and is back to current server state, no-op
-      if (nextLiked === currentServerLiked) return;
-
-      try {
-        const res = await fetch(`/api/dravs/${drav.id}/like`, { method: "POST" });
-        if (!res.ok) throw new Error("Failed to update like");
-        const data = await res.json();
-        setIsLiked(data.liked);
-        setLikesCount(data.likesCount);
-        setServerLiked(data.liked);
-        queryClient.invalidateQueries({ queryKey: ["dravs"] });
-      } catch {
-        // Revert on error
-        setIsLiked(currentServerLiked);
-        setLikesCount(drav.likesCount || 0);
-        toast.error("Failed to update like");
-      }
-    }, 350);
+    likeMutation.mutate();
   };
 
   const handleShare = () => {
@@ -203,14 +147,15 @@ export function DravHeader({
                 variant="outline"
                 size="sm"
                 onClick={handleLike}
+                disabled={likeMutation.isPending}
                 className={cn(
-                  "h-8 px-2.5 text-xs gap-1.5 border-border/70 cursor-pointer",
+                  "h-8 px-2.5 text-xs gap-1.5 border-border/70 cursor-pointer transition-all",
                   isLiked && "text-red-500 border-red-500/30 bg-red-500/5 hover:bg-red-500/10 hover:text-red-500"
                 )}
               >
-                <HugeiconsIcon
-                  icon={FavouriteIcon}
-                  className={cn("size-3.5 transition-transform active:scale-125", isLiked && "text-red-500")}
+                <DravLikeIcon
+                  filled={isLiked}
+                  className={cn("size-3.5 transition-transform", isLiked && "text-red-500 scale-110")}
                 />
                 <span className="font-mono">{likesCount}</span>
               </Button>
@@ -227,9 +172,12 @@ export function DravHeader({
                 variant="outline"
                 size="sm"
                 onClick={onOpenComments}
-                className="h-8 px-2.5 text-xs gap-1.5 border-border/70 cursor-pointer"
+                className="h-8 px-2.5 text-xs gap-1.5 border-border/70 cursor-pointer hover:text-foreground"
               >
-                <HugeiconsIcon icon={Comment01Icon} className="size-3.5 text-muted-foreground" />
+                <DravCommentIcon
+                  filled={drav.commentsCount > 0}
+                  className={cn("size-3.5", drav.commentsCount > 0 ? "text-primary" : "text-muted-foreground")}
+                />
                 <span className="font-mono hidden sm:inline">{drav.commentsCount}</span>
               </Button>
             }
