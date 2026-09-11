@@ -59,15 +59,15 @@ export function DravCard({ drav }: DravCardProps) {
     : "D";
 
   return (
-    <Card className="group overflow-hidden rounded-2xl border border-border/70 bg-card/60 hover:bg-card/90 transition-all duration-300 hover:shadow-xl hover:shadow-primary/5 hover:border-border flex flex-col h-full">
+    <Card className="group overflow-hidden rounded-xl border border-border/70 bg-card/60 hover:bg-card/90 transition-all duration-300 hover:shadow-xl hover:shadow-primary/5 hover:border-border flex flex-col h-full">
       {/* Upper Area wrapped entirely in Link */}
       <Link
         href={`/drav/${drav.id}`}
         className="flex flex-col flex-1 group/link select-none cursor-pointer"
         aria-label={`Open ${drav.title}`}
       >
-        {/* Thumbnail Preview Area */}
-        <div className="relative aspect-video w-full overflow-hidden bg-neutral-950 block">
+        {/* Thumbnail Preview Area - completely clear and unobstructed */}
+        <div className="relative aspect-video w-full overflow-hidden bg-muted/15 border-b border-border/40 block">
           {drav.thumbnailUrl ? (
             <>
               {!imageLoaded && (
@@ -94,51 +94,53 @@ export function DravCard({ drav }: DravCardProps) {
               <span className="text-[11px] font-mono tracking-wider uppercase opacity-60">Drawva Canvas</span>
             </div>
           )}
+        </div>
 
-          {/* Category Pill Overlay */}
-          <div className="absolute top-2.5 left-2.5 z-10">
-            <Badge
-              variant="secondary"
-              className="text-[10px] font-medium tracking-wide uppercase px-2 py-0.5 bg-background/80 backdrop-blur-md border border-border/50 text-foreground/90 shadow-xs"
-            >
-              {drav.category}
-            </Badge>
-          </div>
+        {/* Card Body - Ultra compact, zero useless whitespace */}
+        <div className="p-3 flex flex-col flex-1 gap-2">
+          {/* Top Line: Category Pill + Title + Quick Share */}
+          <div className="flex items-center justify-between gap-2 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 flex-1">
+              <Badge
+                variant="secondary"
+                className="text-[9px] sm:text-[10px] font-medium tracking-wide uppercase px-1.5 py-0.5 bg-muted/80 text-muted-foreground border-border/50 shrink-0"
+              >
+                {drav.category}
+              </Badge>
+              <h3
+                className="font-semibold text-xs sm:text-sm truncate leading-snug tracking-tight text-foreground group-hover/link:text-primary transition-colors flex-1"
+                title={drav.title}
+              >
+                {drav.title}
+              </h3>
+            </div>
 
-          {/* Quick Share Overlay Button */}
-          <div className="absolute top-2.5 right-2.5 z-10 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+            {/* Quick Share Button */}
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Button
-                    variant="secondary"
+                    variant="ghost"
                     size="icon"
                     onClick={handleShareClick}
-                    className="size-7 rounded-full bg-background/90 backdrop-blur-md border border-border/60 hover:bg-background shadow-xs text-foreground/80 cursor-pointer"
+                    className="size-6 rounded-md text-muted-foreground hover:text-foreground cursor-pointer opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                   >
                     <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
                   </Button>
                 }
               />
-              <TooltipContent>Share Drav link</TooltipContent>
+              <TooltipContent side="top">Share Drav link</TooltipContent>
             </Tooltip>
           </div>
-        </div>
 
-        {/* Card Body (compact padding: p-3 sm:p-3.5) */}
-        <div className="p-3 sm:p-3.5 flex flex-col flex-1 justify-between gap-2.5">
-          <div className="space-y-1">
-            <h3 className="font-semibold text-xs sm:text-sm line-clamp-1 leading-snug tracking-tight text-foreground group-hover/link:text-primary transition-colors">
-              {drav.title}
-            </h3>
-            {drav.description && (
-              <p className="text-[11px] sm:text-xs text-muted-foreground line-clamp-2 leading-relaxed">
-                {drav.description}
-              </p>
-            )}
-          </div>
+          {/* Description (if present) */}
+          {drav.description && (
+            <p className="text-[11px] sm:text-xs text-muted-foreground line-clamp-1 leading-relaxed">
+              {drav.description}
+            </p>
+          )}
 
-          {/* Tags */}
+          {/* Tags (if present) */}
           {drav.tags && drav.tags.length > 0 && (
             <div className="flex flex-wrap gap-1 items-center pt-0.5">
               {drav.tags.slice(0, 3).map((tag) => (
@@ -160,7 +162,7 @@ export function DravCard({ drav }: DravCardProps) {
       </Link>
 
       {/* Footer: Author & Metrics (outside main link so actions don't navigate) */}
-      <div className="px-3 sm:px-3.5 pb-3 pt-2 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground mt-auto">
+      <div className="px-3 py-2 border-t border-border/50 flex items-center justify-between text-xs text-muted-foreground mt-auto bg-muted/5">
         {/* Creator Attribution */}
         <div className="flex items-center gap-1.5 min-w-0 pr-2">
           <Avatar className="size-4.5 sm:size-5 shrink-0">

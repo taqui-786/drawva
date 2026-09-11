@@ -5,9 +5,9 @@ import { SparklesIcon } from "@hugeicons/core-free-icons";
 
 export function DravCardSkeleton() {
   return (
-    <Card className="overflow-hidden rounded-2xl border border-border/70 bg-card/50 flex flex-col h-full shadow-xs">
+    <Card className="overflow-hidden rounded-xl border border-border/70 bg-card/50 flex flex-col h-full shadow-xs">
       {/* Thumbnail Skeleton with realistic canvas grid watermark */}
-      <div className="relative aspect-video w-full overflow-hidden bg-muted/40 flex items-center justify-center">
+      <div className="relative aspect-video w-full overflow-hidden bg-muted/20 border-b border-border/40 flex items-center justify-center">
         {/* Infinite canvas grid simulation */}
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_20%,rgba(0,0,0,0.15)_100%)] opacity-30" />
         <div className="absolute inset-0 bg-[linear-gradient(to_right,#8881_1px,transparent_1px),linear-gradient(to_bottom,#8881_1px,transparent_1px)] bg-[size:16px_16px] opacity-40" />
@@ -19,20 +19,15 @@ export function DravCardSkeleton() {
         <div className="absolute inset-0 flex flex-col items-center justify-center text-muted-foreground/30 pointer-events-none">
           <HugeiconsIcon icon={SparklesIcon} className="size-6 animate-pulse opacity-50" />
         </div>
-
-        {/* Category Pill Skeleton */}
-        <div className="absolute top-2.5 left-2.5 z-10">
-          <Skeleton className="h-4 w-14 rounded-full" />
-        </div>
       </div>
 
-      {/* Card Body Skeleton (compact) */}
-      <div className="p-3 sm:p-3.5 flex flex-col flex-1 justify-between gap-2.5">
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-3/4 rounded" />
-          <Skeleton className="h-3 w-full rounded opacity-70" />
-          <Skeleton className="h-3 w-2/3 rounded opacity-50" />
+      {/* Card Body Skeleton (compact, zero wasted space) */}
+      <div className="p-3 flex flex-col flex-1 gap-2">
+        <div className="flex items-center gap-2">
+          <Skeleton className="h-4 w-14 rounded-md shrink-0" />
+          <Skeleton className="h-4 flex-1 rounded" />
         </div>
+        <Skeleton className="h-3 w-3/4 rounded opacity-70" />
 
         {/* Tags Skeleton */}
         <div className="flex gap-1.5 pt-0.5">
@@ -57,9 +52,9 @@ export function DravCardSkeleton() {
   );
 }
 
-export function DravGridSkeleton({ count = 8 }: { count?: number }) {
+export function DravGridSkeleton({ count = 6 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6">
       {Array.from({ length: count }).map((_, i) => (
         <DravCardSkeleton key={i} />
       ))}

@@ -11,6 +11,8 @@ import { DravHeader } from "./DravHeader";
 import { DravCommentsSheet } from "./DravCommentsSheet";
 import { DravReportDialog } from "./DravReportDialog";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { HugeiconsIcon } from "@hugeicons/react";
 import {
   ZoomInAreaIcon,
@@ -387,77 +389,142 @@ export function DravViewer({ drav }: DravViewerProps) {
         />
       </div>
 
-      {/* Floating Bottom Toolbar: Tool Modes & Zoom */}
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-1.5 rounded-full border border-border/80 bg-background/95 px-2.5 py-1.5 shadow-lg backdrop-blur-md">
-        {/* Tool Mode: Drag (H) vs Eye (V) */}
-        <div className="flex items-center gap-0.5 bg-muted/60 p-0.5 rounded-full">
-          <Button
-            variant={viewerMode === "drag" ? "secondary" : "ghost"}
-            size="icon-sm"
-            onClick={() => setViewerMode("drag")}
-            className={cn(
-              "size-7 rounded-full cursor-pointer transition-all",
-              viewerMode === "drag" && "bg-background text-primary shadow-xs font-semibold"
-            )}
-            title="Drag Tool (Pan Canvas) [H]"
-            aria-label="Drag Tool"
-          >
-            <HugeiconsIcon icon={HandIcon} className="size-3.5" />
-          </Button>
+      {/* Floating Bottom Toolbar: Tool Modes & Zoom (1:1 styling and behavior with CanvasToolbar) */}
+      <div
+        role="toolbar"
+        aria-label="Drav Viewer Controls"
+        className="fixed bottom-5 left-1/2 -translate-x-1/2 z-40 select-none transition-all duration-300"
+      >
+        <div className="flex items-center gap-0.5 sm:gap-1 rounded-2xl border border-border/80 bg-background/95 dark:bg-zinc-950/90 backdrop-blur-md px-1.5 py-1.5 shadow-[0_8px_30px_rgba(0,0,0,0.12)]">
+          {/* Hand Tool (Pan Canvas) */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant={viewerMode === "drag" ? "secondaryPrimary" : "ghost"}
+                  aria-pressed={viewerMode === "drag"}
+                  onClick={() => setViewerMode("drag")}
+                  data-icon="true"
+                  aria-label="Hand Tool (Pan)"
+                  className={cn(
+                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl transition-all cursor-pointer",
+                    viewerMode === "drag" && "shadow-xs"
+                  )}
+                >
+                  <HugeiconsIcon icon={HandIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">
+              Hand <span className="kbd">H</span>
+            </TooltipContent>
+          </Tooltip>
 
-          <Button
-            variant={viewerMode === "eye" ? "secondary" : "ghost"}
-            size="icon-sm"
-            onClick={() => setViewerMode("eye")}
-            className={cn(
-              "size-7 rounded-full cursor-pointer transition-all",
-              viewerMode === "eye" && "bg-background text-primary shadow-xs font-semibold"
-            )}
-            title="Eye Tool (Interact with Canvas) [V]"
-            aria-label="Eye Tool"
-          >
-            <HugeiconsIcon icon={ViewIcon} className="size-3.5" />
-          </Button>
+          {/* View Canvas (Interact with Applets) */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant={viewerMode === "eye" ? "secondaryPrimary" : "ghost"}
+                  aria-pressed={viewerMode === "eye"}
+                  onClick={() => setViewerMode("eye")}
+                  data-icon="true"
+                  aria-label="View Canvas only"
+                  className={cn(
+                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl transition-all cursor-pointer",
+                    viewerMode === "eye" && "shadow-xs"
+                  )}
+                >
+                  <HugeiconsIcon icon={ViewIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">
+              View Canvas <span className="kbd">V</span>
+            </TooltipContent>
+          </Tooltip>
+
+          <Separator orientation="vertical" className="mx-0.5 h-5 self-center opacity-50" />
+
+          {/* Zoom Out */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => handleZoomBy(100)}
+                  data-icon="true"
+                  aria-label="Zoom out"
+                  className="shrink-0 size-8 sm:size-9 p-0 rounded-xl text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  <HugeiconsIcon icon={ZoomOutAreaIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">Zoom out</TooltipContent>
+          </Tooltip>
+
+          {/* Zoom Percentage / Quick Reset */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  onClick={handleResetView}
+                  aria-label="Reset zoom and fit content"
+                  className="h-8 px-1.5 min-w-10 justify-center font-mono tabular-nums text-xs font-medium text-foreground/85 hover:text-foreground hover:bg-muted rounded-xl cursor-pointer transition-colors"
+                >
+                  {zoomPercent}%
+                </Button>
+              }
+            />
+            <TooltipContent side="top">Fit to Content</TooltipContent>
+          </Tooltip>
+
+          {/* Zoom In */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={() => handleZoomBy(-100)}
+                  data-icon="true"
+                  aria-label="Zoom in"
+                  className="shrink-0 size-8 sm:size-9 p-0 rounded-xl text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  <HugeiconsIcon icon={ZoomInAreaIcon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">Zoom in</TooltipContent>
+          </Tooltip>
+
+          <Separator orientation="vertical" className="mx-0.5 h-5 self-center opacity-50" />
+
+          {/* Reset View / Fit Content */}
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  onClick={handleResetView}
+                  data-icon="true"
+                  aria-label="Fit Content"
+                  className="shrink-0 size-8 sm:size-9 p-0 rounded-xl text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                >
+                  <HugeiconsIcon icon={RotateLeft01Icon} className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent side="top">Fit to Content</TooltipContent>
+          </Tooltip>
         </div>
-
-        <div className="w-px h-4 bg-border/80 mx-0.5" />
-
-        {/* Zoom Controls */}
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => handleZoomBy(100)}
-          className="size-7 rounded-full cursor-pointer"
-          title="Zoom out"
-        >
-          <HugeiconsIcon icon={ZoomOutAreaIcon} className="size-3.5" />
-        </Button>
-
-        <span className="w-12 text-center text-xs font-mono font-medium text-muted-foreground select-none">
-          {zoomPercent}%
-        </span>
-
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={() => handleZoomBy(-100)}
-          className="size-7 rounded-full cursor-pointer"
-          title="Zoom in"
-        >
-          <HugeiconsIcon icon={ZoomInAreaIcon} className="size-3.5" />
-        </Button>
-
-        <div className="w-px h-4 bg-border/80 mx-0.5" />
-
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={handleResetView}
-          className="size-7 rounded-full cursor-pointer text-muted-foreground hover:text-foreground"
-          title="Reset View / Fit Content"
-        >
-          <HugeiconsIcon icon={RotateLeft01Icon} className="size-3.5" />
-        </Button>
       </div>
 
       {/* Comments Sheet */}
