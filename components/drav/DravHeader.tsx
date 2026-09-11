@@ -45,39 +45,36 @@ export function DravHeader({
   const { data: session } = useSession();
   const queryClient = useQueryClient();
 
-  const [optimisticLike, setOptimisticLike] = React.useState<{ liked: boolean; count: number } | null>(null);
-
-  const isLiked = optimisticLike !== null ? optimisticLike.liked : !!drav.likedByMe;
-  const likesCount = optimisticLike !== null ? optimisticLike.count : drav.likesCount;
-
-  // Fast optimistic like mutation
-  const likeMutation = useMutation({
-    mutationFn: async () => {
-      const res = await fetch(`/api/dravs/${drav.id}/like`, { method: "POST" });
-      if (!res.ok) throw new Error("Failed to update like");
-      return res.json();
-    },
-    onMutate: async () => {
-      const prevLiked = isLiked;
-      const prevCount = likesCount;
-      setOptimisticLike({
-        liked: !prevLiked,
-        count: prevLiked ? Math.max(0, prevCount - 1) : prevCount + 1,
-      });
-      return { prevLiked, prevCount };
-    },
-    onError: (_err, _vars, context) => {
-      if (context) {
-        setOptimisticLike({ liked: context.prevLiked, count: context.prevCount });
-      }
-      toast.error("Failed to update like");
-    },
-    onSettled: () => {
-      setOptimisticLike(null);
-      queryClient.invalidateQueries({ queryKey: ["drav", drav.id] });
-      queryClient.invalidateQueries({ queryKey: ["dravs"] });
-    },
+  const [prevProps, setPrevProps] = React.useState({
+    id: drav.id,
+    likedByMe: drav.likedByMe,
+    likesCount: drav.likesCount,
   });
+  const [isLiked, setIsLiked] = React.useState(!!drav.likedByMe);
+  const [likesCount, setLikesCount] = React.useState(drav.likesCount || 0);
+  const [serverLiked, setServerLiked] = React.useState(!!drav.likedByMe);
+  const debounceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+
+  if (
+    prevProps.id !== drav.id ||
+    prevProps.likedByMe !== drav.likedByMe ||
+    prevProps.likesCount !== drav.likesCount
+  ) {
+    setPrevProps({
+      id: drav.id,
+      likedByMe: drav.likedByMe,
+      likesCount: drav.likesCount,
+    });
+    setIsLiked(!!drav.likedByMe);
+    setLikesCount(drav.likesCount || 0);
+    setServerLiked(!!drav.likedByMe);
+  }
+
+  React.useEffect(() => {
+    return () => {
+      if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    };
+  }, []);
 
   // Remix mutation
   const remixMutation = useMutation({
@@ -108,7 +105,37 @@ export function DravHeader({
       toast.info("Please sign in to like this Drav.");
       return;
     }
-    likeMutation.mutate();
+
+    // Immediate real-time UI toggle
+    const nextLiked = !isLiked;
+    const nextCount = nextLiked ? likesCount + 1 : Math.max(0, likesCount - 1);
+    setIsLiked(nextLiked);
+    setLikesCount(nextCount);
+
+    if (debounceTimerRef.current) {
+      clearTimeout(debounceTimerRef.current);
+    }
+
+    const currentServerLiked = serverLiked;
+    debounceTimerRef.current = setTimeout(async () => {
+      // If user toggled even times and is back to current server state, no-op
+      if (nextLiked === currentServerLiked) return;
+
+      try {
+        const res = await fetch(`/api/dravs/${drav.id}/like`, { method: "POST" });
+        if (!res.ok) throw new Error("Failed to update like");
+        const data = await res.json();
+        setIsLiked(data.liked);
+        setLikesCount(data.likesCount);
+        setServerLiked(data.liked);
+        queryClient.invalidateQueries({ queryKey: ["dravs"] });
+      } catch {
+        // Revert on error
+        setIsLiked(currentServerLiked);
+        setLikesCount(drav.likesCount || 0);
+        toast.error("Failed to update like");
+      }
+    }, 350);
   };
 
   const handleShare = () => {
