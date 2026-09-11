@@ -34,6 +34,7 @@ import { ModelSelectDialog } from "./ModelSelectDialog";
 import { LogsDialog } from "./LogsDialog";
 import { UserManualDialog } from "./UserManualDialog";
 import { CanvasToolbar } from "./CanvasToolbar";
+import { CanvasZoomBar } from "./CanvasZoomBar";
 import { CanvasSidebar } from "./CanvasSidebar";
 import { SaveCanvasDialog } from "./SaveCanvasDialog";
 
@@ -3664,6 +3665,13 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         onOpenManual={() => setManualOpen(true)}
         onOpenModelSelect={() => setModelSelectOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+      />
+
+      <CanvasZoomBar
+        onZoomIn={() => zoomBy(-100)}
+        onZoomOut={() => zoomBy(100)}
+        onReset={resetView}
+        viewMode={viewMode}
       />
 
       <FloatingAiButton

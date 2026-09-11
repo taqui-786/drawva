@@ -6,8 +6,6 @@ import { useSnapshot } from "valtio";
 import { motion, AnimatePresence } from "motion/react";
 import { appState } from "@/lib/state";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import {
   Popover,
@@ -36,9 +34,7 @@ import {
   CloudOffIcon,
   CloudCheckIcon,
   SteeringIcon,
-  ZoomInAreaIcon,
-  ZoomOutAreaIcon,
-  Refresh01Icon,
+  Target02Icon,
   Shield01Icon,
   PeerToPeer01Icon,
   LayoutRightIcon,
@@ -130,12 +126,10 @@ export function CanvasHeader({
   onOpenConnect,
   cloudStatus = "idle",
   onTriggerCloudSync,
-  onZoomIn,
-  onZoomOut,
   onReset,
 }: CanvasHeaderProps) {
   const { data: session } = useSession();
-  const { zoom, center } = useSnapshot(appState);
+  const { center } = useSnapshot(appState);
   const isGenerating = agentRunning || aiStatus === "thinking";
   const [steerOpen, setSteerOpen] = useState(false);
   const [steerInput, setSteerInput] = useState("");
@@ -146,7 +140,7 @@ export function CanvasHeader({
       className={cn(
         "fixed top-0 left-0 right-0 z-40 flex items-center justify-between",
         "h-12 sm:h-13 px-2 sm:px-4",
-        "border-b border-border/80 bg-background/95 backdrop-blur-md shadow-2xs select-none"
+        "border-b border-border/80 bg-background/95 backdrop-blur-md shadow-2xs select-none",
       )}
     >
       {/* Left side: Brand, Save/Cloud Status, P2P, Zoom */}
@@ -166,14 +160,19 @@ export function CanvasHeader({
                       variant="outline"
                       size="xs"
                       onClick={onOpenSaveDialog}
-                      className="gap-1.5 px-2.5 h-7 text-xs font-medium border-primary/30 text-primary hover:bg-primary/10 shadow-2xs cursor-pointer"
+                      className="gap-1.5 px-2.5 h-7 text-xs font-medium animate-pulse text-green-500 bg-green-500/10 cursor-pointer"
                     >
-                      <HugeiconsIcon icon={CloudCheckIcon} className="size-3.5" />
+                      <HugeiconsIcon
+                        icon={CloudCheckIcon}
+                        className="size-3.5"
+                      />
                       <span>Save</span>
                     </Button>
                   }
                 />
-                <TooltipContent>Save canvas to cloud & enable autosync</TooltipContent>
+                <TooltipContent>
+                  Save canvas to cloud & enable autosync
+                </TooltipContent>
               </Tooltip>
             ) : (
               <Tooltip>
@@ -187,28 +186,53 @@ export function CanvasHeader({
                     >
                       {cloudStatus === "syncing" ? (
                         <>
-                          <HugeiconsIcon icon={CloudSyncIcon} className="size-3.5 animate-spin text-primary" />
-                          <span className="hidden xl:inline text-[11px]">Saving…</span>
+                          <HugeiconsIcon
+                            icon={CloudSyncIcon}
+                            className="size-3.5 animate-spin text-primary"
+                          />
+                          <span className="hidden xl:inline text-[11px]">
+                            Saving…
+                          </span>
                         </>
                       ) : cloudStatus === "synced" ? (
                         <>
-                          <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-emerald-500" />
-                          <span className="hidden xl:inline text-[11px] text-emerald-600 dark:text-emerald-400">Synced</span>
+                          <HugeiconsIcon
+                            icon={CloudSavingDone01Icon}
+                            className="size-3.5 text-emerald-500"
+                          />
+                          <span className="hidden xl:inline text-[11px] text-emerald-600 dark:text-emerald-400">
+                            Synced
+                          </span>
                         </>
                       ) : cloudStatus === "error" ? (
                         <>
-                          <HugeiconsIcon icon={CloudAlertIcon} className="size-3.5 text-destructive" />
-                          <span className="hidden xl:inline text-[11px] text-destructive">Sync retry</span>
+                          <HugeiconsIcon
+                            icon={CloudAlertIcon}
+                            className="size-3.5 text-destructive"
+                          />
+                          <span className="hidden xl:inline text-[11px] text-destructive">
+                            Sync retry
+                          </span>
                         </>
                       ) : cloudStatus === "offline" ? (
                         <>
-                          <HugeiconsIcon icon={CloudOffIcon} className="size-3.5 text-muted-foreground" />
-                          <span className="hidden xl:inline text-[11px]">Offline</span>
+                          <HugeiconsIcon
+                            icon={CloudOffIcon}
+                            className="size-3.5 text-muted-foreground"
+                          />
+                          <span className="hidden xl:inline text-[11px]">
+                            Offline
+                          </span>
                         </>
                       ) : (
                         <>
-                          <HugeiconsIcon icon={CloudSavingDone01Icon} className="size-3.5 text-muted-foreground/70" />
-                          <span className="hidden xl:inline text-[11px]">Cloud</span>
+                          <HugeiconsIcon
+                            icon={CloudSavingDone01Icon}
+                            className="size-3.5 text-muted-foreground/70"
+                          />
+                          <span className="hidden xl:inline text-[11px]">
+                            Cloud
+                          </span>
                         </>
                       )}
                     </Button>
@@ -218,12 +242,12 @@ export function CanvasHeader({
                   {cloudStatus === "syncing"
                     ? "Syncing canvas to cloud…"
                     : cloudStatus === "synced"
-                    ? "All changes saved to cloud"
-                    : cloudStatus === "error"
-                    ? "Cloud sync failed (Click to retry)"
-                    : cloudStatus === "offline"
-                    ? "Working offline — cached locally in IndexedDB"
-                    : "Cloud Sync Active (Click to sync now)"}
+                      ? "All changes saved to cloud"
+                      : cloudStatus === "error"
+                        ? "Cloud sync failed (Click to retry)"
+                        : cloudStatus === "offline"
+                          ? "Working offline — cached locally in IndexedDB"
+                          : "Cloud Sync Active (Click to sync now)"}
                 </TooltipContent>
               </Tooltip>
             )}
@@ -247,103 +271,37 @@ export function CanvasHeader({
                 </Button>
               }
             />
-            <TooltipContent>P2P connected with {syncPeerCount} peer(s)</TooltipContent>
+            <TooltipContent>
+              P2P connected with {syncPeerCount} peer(s)
+            </TooltipContent>
           </Tooltip>
-        )}
-
-        {/* Integrated Zoom Controls */}
-        {onZoomIn && onZoomOut && (
-          <>
-            <Separator orientation="vertical" className="mx-0.5 sm:mx-1 h-4 sm:h-5 self-center" />
-            <div className="flex items-center gap-0.5 sm:gap-1 shrink-0">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={onZoomOut}
-                      aria-label="Zoom out"
-                      data-icon="true"
-                      className="size-7 sm:size-8 p-0"
-                    >
-                      <HugeiconsIcon icon={ZoomOutAreaIcon} className="size-3.5 sm:size-4" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Zoom out</TooltipContent>
-              </Tooltip>
-
-              <Badge
-                variant="secondary"
-                className="w-12 sm:w-13 justify-center font-mono tabular-nums text-[11px] px-1"
-              >
-                {zoom}%
-              </Badge>
-
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={onZoomIn}
-                      aria-label="Zoom in"
-                      data-icon="true"
-                      className="size-7 sm:size-8 p-0"
-                    >
-                      <HugeiconsIcon icon={ZoomInAreaIcon} className="size-3.5 sm:size-4" />
-                    </Button>
-                  }
-                />
-                <TooltipContent>Zoom in</TooltipContent>
-              </Tooltip>
-
-              {onReset && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        onClick={onReset}
-                        aria-label="Re-center board"
-                        data-icon="true"
-                        className="size-7 sm:size-8 p-0"
-                      >
-                        <HugeiconsIcon icon={Refresh01Icon} className="size-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>Re-center board</TooltipContent>
-                </Tooltip>
-              )}
-            </div>
-          </>
         )}
       </div>
 
-      {/* Center: Canvas Coordinates (clean & minimalist) */}
-      <div className="hidden lg:flex items-center gap-1.5 text-xs text-muted-foreground font-mono tabular-nums select-none">
-        <span className="text-muted-foreground/50 text-[10px] uppercase tracking-wider font-sans">center</span>
-        <span className="text-foreground/75 text-[11px]">
+      {/* Center: Canvas Coordinates (plain text, no interaction) */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:flex items-center gap-1.5 pointer-events-none select-none font-mono text-[11px] tabular-nums text-muted-foreground/70">
+        <span className="text-[10px] uppercase font-sans tracking-wider font-semibold text-muted-foreground/50">
+          Center
+        </span>
+        <span className="font-medium text-foreground/65">
           {center.x}, {center.y}
         </span>
       </div>
 
       {/* Right side: Admin link, AI Controls, Thinking depth, Auto switch, Sidebar trigger */}
       <div className="flex shrink-0 items-center gap-1 sm:gap-1.5 ml-auto">
-        {session?.user && (session.user as { role?: string }).role === "admin" && (
-          <Button
-            variant="outline"
-            size="xs"
-            render={<Link href="/admin" />}
-            className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans mr-1"
-          >
-            <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
-            <span>Admin</span>
-          </Button>
-        )}
+        {session?.user &&
+          (session.user as { role?: string }).role === "admin" && (
+            <Button
+              variant="outline"
+              size="xs"
+              render={<Link href="/admin" />}
+              className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans mr-1"
+            >
+              <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
+              <span>Admin</span>
+            </Button>
+          )}
 
         <AnimatePresence mode="wait">
           {agentRunning || aiStatus === "thinking" ? (
@@ -361,14 +319,14 @@ export function CanvasHeader({
                   stage === "critical"
                     ? "bg-rose-500 transition-colors duration-500"
                     : stage === "slow"
-                    ? "bg-amber-500 transition-colors duration-500"
-                    : "bg-primary transition-colors duration-500";
+                      ? "bg-amber-500 transition-colors duration-500"
+                      : "bg-primary transition-colors duration-500";
                 const containerBorderClass =
                   stage === "critical"
                     ? "border-rose-500/50 shadow-rose-500/10"
                     : stage === "slow"
-                    ? "border-amber-500/50 shadow-amber-500/10"
-                    : "border-primary/40";
+                      ? "border-amber-500/50 shadow-amber-500/10"
+                      : "border-primary/40";
 
                 return (
                   <>
@@ -382,7 +340,7 @@ export function CanvasHeader({
                     <div
                       className={cn(
                         "flex gap-1 border p-1 rounded-sm bg-background/90 shadow-xs transition-colors duration-500 shrink-0",
-                        containerBorderClass
+                        containerBorderClass,
                       )}
                       title="Drawva AI is thinking and generating..."
                     >
@@ -391,7 +349,7 @@ export function CanvasHeader({
                           key={index}
                           className={cn(
                             "h-5 w-2 sm:w-2.5 rounded-[1px] [animation:bars-fill_1s_ease-in-out_infinite]",
-                            barColorClass
+                            barColorClass,
                           )}
                           style={{ animationDelay: `${index * 0.08}s` }}
                         />
@@ -421,10 +379,13 @@ export function CanvasHeader({
                               aria-label="Steer agent"
                               className={cn(
                                 "shrink-0 p-0 text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors",
-                                isSteerOpen && "text-primary bg-primary/10"
+                                isSteerOpen && "text-primary bg-primary/10",
                               )}
                             >
-                              <HugeiconsIcon icon={SteeringIcon} className="size-4" />
+                              <HugeiconsIcon
+                                icon={SteeringIcon}
+                                className="size-4"
+                              />
                             </Button>
                           }
                         />
@@ -441,7 +402,10 @@ export function CanvasHeader({
                     <div className="flex flex-col gap-2.5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-1.5 text-xs font-semibold">
-                          <HugeiconsIcon icon={SteeringIcon} className="size-4 text-primary" />
+                          <HugeiconsIcon
+                            icon={SteeringIcon}
+                            className="size-4 text-primary"
+                          />
                           <span>Steer Agent</span>
                         </div>
                         <span className="text-[10px] text-muted-foreground font-mono bg-muted px-1.5 py-0.5 rounded">
@@ -449,7 +413,8 @@ export function CanvasHeader({
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground leading-snug">
-                        Give real-time instructions to steer the agent without stopping or resetting its progress.
+                        Give real-time instructions to steer the agent without
+                        stopping or resetting its progress.
                       </p>
                       <form
                         onSubmit={(e) => {
@@ -476,7 +441,10 @@ export function CanvasHeader({
                           disabled={!steerInput.trim()}
                           className="h-8 px-2.5 text-xs gap-1 shrink-0"
                         >
-                          <HugeiconsIcon icon={ArrowRight01Icon} className="size-3.5" />
+                          <HugeiconsIcon
+                            icon={ArrowRight01Icon}
+                            className="size-3.5"
+                          />
                           <span>Steer</span>
                         </Button>
                       </form>
@@ -523,24 +491,46 @@ export function CanvasHeader({
               <div className="hidden sm:block shrink-0">
                 <Select
                   value={reasoningEffort}
-                  onValueChange={(val) => onReasoningEffortChange((val as ReasoningEffort) || "medium")}
-                  items={REASONING_EFFORT_OPTIONS.map((opt) => ({ label: opt.label, value: opt.value }))}
+                  onValueChange={(val) =>
+                    onReasoningEffortChange(
+                      (val as ReasoningEffort) || "medium",
+                    )
+                  }
+                  items={REASONING_EFFORT_OPTIONS.map((opt) => ({
+                    label: opt.label,
+                    value: opt.value,
+                  }))}
                 >
                   <SelectTrigger
                     size="sm"
                     className="h-7 w-auto gap-1 px-2 text-xs font-medium shrink-0"
                     title="Reasoning / Thinking Depth"
                   >
-                    <HugeiconsIcon icon={AiBrain01Icon} className="size-3.5 shrink-0 text-primary" />
-                    <span className="hidden lg:inline text-muted-foreground mr-0.5">Thinking:</span>
+                    <HugeiconsIcon
+                      icon={AiBrain01Icon}
+                      className="size-3.5 shrink-0 text-primary"
+                    />
+                    <span className="hidden lg:inline text-muted-foreground mr-0.5">
+                      Thinking:
+                    </span>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent align="end" alignItemWithTrigger={false} className="w-56 text-xs">
+                  <SelectContent
+                    align="end"
+                    alignItemWithTrigger={false}
+                    className="w-56 text-xs"
+                  >
                     {REASONING_EFFORT_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value} className="text-xs cursor-pointer">
+                      <SelectItem
+                        key={opt.value}
+                        value={opt.value}
+                        className="text-xs cursor-pointer"
+                      >
                         <div className="flex flex-col py-0.5">
                           <span className="font-medium">{opt.label}</span>
-                          <span className="text-[10px] text-muted-foreground">{opt.description}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {opt.description}
+                          </span>
                         </div>
                       </SelectItem>
                     ))}
@@ -572,7 +562,7 @@ export function CanvasHeader({
                   onClick={onOpenSidebar}
                   data-icon="true"
                   aria-label="Open Canvases & Menu"
-                  className="shrink-0 size-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer ml-1"
+                  className="shrink-0 size-8 p-0 text-muted-foreground hover:text-foreground cursor-pointer ml-0.5"
                 >
                   <HugeiconsIcon icon={LayoutRightIcon} className="size-4" />
                 </Button>

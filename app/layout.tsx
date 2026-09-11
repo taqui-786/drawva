@@ -129,7 +129,7 @@ export default function RootLayout({
         <QueryProvider>
           <TooltipProvider>{children}</TooltipProvider>
         </QueryProvider>
-        <Toaster richColors position="bottom-right" />
+        <Toaster richColors position="top-center" />
       </body>
     </html>
   );

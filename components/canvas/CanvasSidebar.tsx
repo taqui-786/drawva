@@ -172,7 +172,6 @@ export function CanvasSidebar({
           </div>
           <div className="flex items-center gap-1">
             <Button
-              variant="outline"
               size="xs"
               onClick={handleNewCanvas}
               className="gap-1 text-xs"
