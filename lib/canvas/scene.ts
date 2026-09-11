@@ -1,4 +1,4 @@
-import type { Rect } from "./types";
+import { intersects, type Rect } from "./types";
 import type { WidgetManager } from "./widgets";
 import type { ObjectManager } from "./objects";
 import { detectDiagramFormat } from "./diagram";
@@ -71,12 +71,6 @@ export function visibleScene(
   visibleRect: Rect
 ): SceneJson {
   const all = buildScene(widgets, objects);
-  const inside = all.items.filter(
-    (i) =>
-      i.x < visibleRect.x + visibleRect.w &&
-      i.x + i.w > visibleRect.x &&
-      i.y < visibleRect.y + visibleRect.h &&
-      i.y + i.h > visibleRect.y
-  );
+  const inside = all.items.filter((i) => intersects(i, visibleRect));
   return { items: inside, count: inside.length };
 }

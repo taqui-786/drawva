@@ -126,15 +126,6 @@ export async function deleteCloudCanvas(id: string, signal?: AbortSignal): Promi
   }
 }
 
-// Backward compatibility helper
-export async function saveCloudCanvas(
-  snapshot: ProjectSnapshot,
-  title?: string,
-  signal?: AbortSignal
-): Promise<{ success: boolean; savedAt?: number }> {
-  return createCloudCanvas(snapshot, title, signal);
-}
-
 export class CloudSyncEngine {
   private status: CloudSyncStatus = "idle";
   private listeners = new Set<(status: CloudSyncStatus) => void>();

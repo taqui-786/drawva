@@ -1,5 +1,5 @@
 import { SIZE } from "./constants";
-import type { Rect } from "./types";
+import { intersects, type Rect } from "./types";
 
 export const PLACE_GAP = 48;
 const MAX_SLOT_ATTEMPTS = 20;
@@ -40,9 +40,7 @@ export interface TidyResult {
   partialFailures: number;
 }
 
-export function rectsIntersect(a: Rect, b: Rect): boolean {
-  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
-}
+export const rectsIntersect = intersects;
 
 export function getItemCreatedAt(item: { id: string; createdAt?: number }): number {
   if (typeof item.createdAt === "number" && Number.isFinite(item.createdAt)) return item.createdAt;

@@ -1,4 +1,7 @@
-export const CANVAS_SIZE = 20000;
+import { SIZE } from "@/lib/canvas/constants";
+import { fitAspectLocked } from "@/lib/canvas/placement";
+
+export const CANVAS_SIZE = SIZE;
 export const MIN_WIDGET_WIDTH = 300;
 export const DEFAULT_WIDGET_WIDTH = 2400;
 export const MODEL_MAX_WIDGET_WIDTH = 5000;
@@ -16,8 +19,6 @@ export interface WidgetGeometrySpec {
   max: { w: number; h: number };
   sizingPolicy: string;
 }
-
-import { fitAspectLocked } from "@/lib/canvas/placement";
 
 export function widgetGeometryForViewport(visibleRect?: { w?: number; h?: number } | null): WidgetGeometrySpec {
   const viewW = Math.max(1, Math.min(CANVAS_SIZE, Number(visibleRect?.w) || DEFAULT_WIDGET_WIDTH * 2));

@@ -36,9 +36,9 @@ function parseKey(k: string): [number, number] {
 
 function serializeObjects(om: ObjectManager): ObjectItem[] {
   return om.all().map((o) => {
-    const { image, ...rest } = o;
-    void image;
-    return rest;
+    const copy = { ...o };
+    delete copy.image;
+    return copy;
   });
 }
 

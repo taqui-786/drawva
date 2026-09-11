@@ -30,17 +30,6 @@ export interface ProviderConfig {
   customName?: string;
 }
 
-export interface TokenUsageRecord {
-  id: string;
-  timestamp: number;
-  providerType: ProviderType;
-  modelId: string;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  intent?: string;
-}
-
 export interface ProviderInfo {
   type: ProviderType;
   name: string;

@@ -46,13 +46,6 @@ export async function placeImageAt(
   const w = Math.max(1, Math.round(preview.width * scale));
   const h = Math.max(1, Math.round(preview.height * scale));
 
-  const off = document.createElement("canvas");
-  off.width = preview.width;
-  off.height = preview.height;
-  const ctx = off.getContext("2d")!;
-  ctx.drawImage(preview, 0, 0);
-  preview.close();
-
   const r = {
     x: Math.max(0, world.x),
     y: Math.max(0, world.y),
@@ -63,7 +56,8 @@ export async function placeImageAt(
   snapshot.width = Math.max(1, Math.ceil(w));
   snapshot.height = Math.max(1, Math.ceil(h));
   const sctx = snapshot.getContext("2d")!;
-  sctx.drawImage(off, 0, 0, snapshot.width, snapshot.height);
+  sctx.drawImage(preview, 0, 0, snapshot.width, snapshot.height);
+  preview.close();
   pasteRegion(engine, snapshot, r.x, r.y);
 
   let dataUrl: string;

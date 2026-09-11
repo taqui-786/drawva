@@ -214,9 +214,4 @@ async function isCompatibleModel(m: Record<string, unknown> | string): Promise<b
   return caps.vision || caps.status !== "verified_no_vision";
 }
 
-function json(body: unknown, status = 200): NextResponse {
-  return NextResponse.json(body, {
-    status,
-    headers: { "content-type": "application/json" },
-  });
-}
+const json = (body: unknown, status = 200) => NextResponse.json(body, { status });

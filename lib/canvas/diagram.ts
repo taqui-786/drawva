@@ -1,6 +1,6 @@
-import { DIAGRAM_SOURCE_FORMATS } from "./commands";
+import { DIAGRAM_SOURCE_FORMATS, type DiagramFormat } from "./commands";
 
-export type DiagramFormat = (typeof DIAGRAM_SOURCE_FORMATS extends Set<infer T> ? T : never);
+export type { DiagramFormat };
 
 interface FormatRecord {
   id: string;

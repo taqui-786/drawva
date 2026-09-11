@@ -17,6 +17,7 @@
  * - Saturated headroom estimation for exact y-band sweeping
  * - Stratified candidate lattice solver with uncapped escalation
  */
+import { SIZE } from "./constants";
 
 export interface Box {
   x: number;
@@ -54,7 +55,7 @@ export interface PlacementResult {
   score?: number;
 }
 
-export const CANVAS_SIZE = 20000;
+export const CANVAS_SIZE = SIZE;
 export const DEFAULT_CANVAS_BOUNDS: Box = { x: 0, y: 0, w: CANVAS_SIZE, h: CANVAS_SIZE };
 /**
  * Breakpoint budget PER AXIS. Swept over {6,8,12,16,24,32,48}: quality saturates
