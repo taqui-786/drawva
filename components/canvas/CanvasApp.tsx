@@ -478,7 +478,39 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [logsOpen, setLogsOpen] = useState(false);
   const [isCanvasEmpty, setIsCanvasEmpty] = useState(true);
-  const [guideDismissed, setGuideDismissed] = useState(false);
+  const [guideDismissed, setGuideDismissed] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      const key = `drawva_guide_shown_${canvasId || "new"}`;
+      return sessionStorage.getItem(key) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const dismissGuide = useCallback(() => {
+    setGuideDismissed(true);
+    if (typeof window !== "undefined") {
+      try {
+        const key = `drawva_guide_shown_${canvasId || "new"}`;
+        sessionStorage.setItem(key, "true");
+      } catch {
+        // ignore
+      }
+    }
+  }, [canvasId]);
+
+
+  useEffect(() => {
+    if (isCanvasEmpty && !guideDismissed && typeof window !== "undefined") {
+      try {
+        const key = `drawva_guide_shown_${canvasId || "new"}`;
+        sessionStorage.setItem(key, "true");
+      } catch {
+        // ignore
+      }
+    }
+  }, [isCanvasEmpty, guideDismissed, canvasId]);
 
   const updateCanvasEmptyState = useCallback(() => {
     if (!engine) return;
@@ -1518,7 +1550,6 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     });
     syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
     setIsCanvasEmpty(true);
-    setGuideDismissed(false);
     afterBoardChange();
   }
 
@@ -3118,7 +3149,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   const onPointerDown = (e: React.PointerEvent) => {
     if (!engine) return;
     if (!guideDismissed) {
-      setGuideDismissed(true);
+      dismissGuide();
     }
     if (textOpen) {
       if (textValue.trim()) {
@@ -3741,7 +3772,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
 
       <CanvasHelpGuide
         isVisible={isCanvasEmpty && !guideDismissed && !viewMode && !agentRunning}
-        onDismiss={() => setGuideDismissed(true)}
+        onDismiss={dismissGuide}
         onImportJson={() => jsonFileRef.current?.click()}
       />
 
