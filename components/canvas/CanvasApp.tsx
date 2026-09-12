@@ -434,6 +434,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   const inkSnapshotRef = useRef<HTMLCanvasElement | null>(null);
   const refreshRefineRectRef = useRef<() => void>(() => {});
   const handleContinueAiRef = useRef<() => void>(() => {});
+  const autoContinueTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inkBoxRef = useRef<Rect | null>(null);
   // The arrow carries its OWN timestamp. Deriving its lifetime from
   // lastStrokeTimeRef would be wrong: that ref is also refreshed by the text
@@ -576,10 +577,20 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     };
     refresh();
     window.addEventListener("storage", refresh);
-    return () => window.removeEventListener("storage", refresh);
+    return () => {
+      window.removeEventListener("storage", refresh);
+      if (autoContinueTimerRef.current) {
+        clearTimeout(autoContinueTimerRef.current);
+        autoContinueTimerRef.current = null;
+      }
+    };
   }, []);
 
   const handleModelChange = (model: string | null) => {
+    if (autoContinueTimerRef.current) {
+      clearTimeout(autoContinueTimerRef.current);
+      autoContinueTimerRef.current = null;
+    }
     setActiveModel(model);
     setActiveModelState(model);
     setReasoningEffort("medium");
@@ -588,6 +599,10 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   };
 
   const handleReasoningEffortChange = (effort: ReasoningEffort) => {
+    if (autoContinueTimerRef.current) {
+      clearTimeout(autoContinueTimerRef.current);
+      autoContinueTimerRef.current = null;
+    }
     setReasoningEffort(effort);
     setReasoningEffortState(effort);
     conductorRef.current?.cancel(true);
@@ -734,27 +749,51 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           detail: undefined,
         }));
         if (e.isTimeout) {
-          toast("5-minute duration reached. You can continue from where it stopped.", {
-            action: {
-              label: "Continue it",
-              onClick: () => {
-                handleContinueAiRef.current();
+          if (autoContinueTimerRef.current) {
+            clearTimeout(autoContinueTimerRef.current);
+          }
+          const toastId = toast(
+            "5-minute duration reached. Continuing automatically…",
+            {
+              description:
+                "Sending a new request in 3 seconds to finish the task.",
+              action: {
+                label: "Cancel it",
+                onClick: () => {
+                  if (autoContinueTimerRef.current) {
+                    clearTimeout(autoContinueTimerRef.current);
+                    autoContinueTimerRef.current = null;
+                  }
+                  toast.dismiss(toastId);
+                  setAiStatus("idle");
+                  setAiRun((prev) =>
+                    prev.phase === "error" ? { ...prev, phase: "idle" } : prev,
+                  );
+                  setTickerState((prev) =>
+                    prev.status === "error" ? { ...prev, status: "idle" } : prev,
+                  );
+                },
               },
+              duration: 4000,
             },
-            duration: 25000,
-          });
+          );
+          autoContinueTimerRef.current = setTimeout(() => {
+            autoContinueTimerRef.current = null;
+            toast.dismiss(toastId);
+            handleContinueAiRef.current();
+          }, 3000);
         } else {
           toast.error(e.error || "Agent turn failed.");
+          setTimeout(() => {
+            setAiStatus("idle");
+            setAiRun((prev) =>
+              prev.phase === "error" ? { ...prev, phase: "idle" } : prev,
+            );
+            setTickerState((prev) =>
+              prev.status === "error" ? { ...prev, status: "idle" } : prev,
+            );
+          }, 5000);
         }
-        setTimeout(() => {
-          setAiStatus("idle");
-          setAiRun((prev) =>
-            prev.phase === "error" ? { ...prev, phase: "idle" } : prev,
-          );
-          setTickerState((prev) =>
-            prev.status === "error" ? { ...prev, status: "idle" } : prev,
-          );
-        }, 5000);
       } else {
         setAiStatus("idle");
         setAiRun({
@@ -834,6 +873,10 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
   }, []);
 
   const handleContinueAi = useCallback(() => {
+    if (autoContinueTimerRef.current) {
+      clearTimeout(autoContinueTimerRef.current);
+      autoContinueTimerRef.current = null;
+    }
     const agent = conductorRef.current;
     if (!agent) {
       toast.error("AI Conductor is initializing, please wait a moment.");
