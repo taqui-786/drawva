@@ -163,7 +163,10 @@ export async function POST(req: Request) {
               if (typeof textDelta === "string") accumulatedResponse += textDelta;
             } else if (e.event === "tool_end") {
               const d = e.data as Record<string, unknown>;
-              if (typeof d?.summary === "string") {
+              if (d.ok === false && d.error) {
+                const err = d.error as { message?: string };
+                accumulatedResponse += `\n[Tool failed: ${err.message || "Error"}]`;
+              } else if (typeof d?.summary === "string") {
                 accumulatedResponse += `\n[Tool ${d.name || "call"}: ${d.summary}]`;
               }
             }

@@ -82,8 +82,13 @@ export function dispatchBridgeCall(
       call.signal.removeEventListener("abort", onAbort);
       clearTimeout(timer);
       if (early.isError) {
-        const message = (early.result as { message?: string } | null)?.message || "Canvas tool failed in the browser.";
-        reject(new Error(String(message)));
+        const resObj = early.result && typeof early.result === "object" ? (early.result as Record<string, unknown>) : null;
+        const message = resObj?.message || (typeof early.result === "string" ? early.result : "Canvas tool failed in the browser.");
+        const err = new Error(String(message));
+        const errObj = err as unknown as Record<string, unknown>;
+        if (resObj?.code) errObj.code = String(resObj.code);
+        if (resObj?.rejected) errObj.details = resObj.rejected;
+        reject(err);
       } else {
         resolve(early.result);
       }
@@ -125,8 +130,13 @@ export function resolveBridgeCall(conversationId: string, toolCallId: string, re
     return false;
   }
   if (isError) {
-    const message = (result as { message?: string } | null)?.message || "Canvas tool failed in the browser.";
-    entry.reject(new Error(String(message)));
+    const resObj = result && typeof result === "object" ? (result as Record<string, unknown>) : null;
+    const message = resObj?.message || (typeof result === "string" ? result : "Canvas tool failed in the browser.");
+    const err = new Error(String(message));
+    const errObj = err as unknown as Record<string, unknown>;
+    if (resObj?.code) errObj.code = String(resObj.code);
+    if (resObj?.rejected) errObj.details = resObj.rejected;
+    entry.reject(err);
   } else {
     entry.resolve(result);
   }

@@ -39,11 +39,19 @@ export interface OpenTurnOptions {
   mode: "followup" | "steer";
 }
 
+export interface ToolErrorDetail {
+  type: string;
+  message: string;
+  code?: string;
+  details?: unknown;
+  args?: unknown;
+}
+
 export type StreamEvent =
   | { event: "text_delta"; data: { text: string } }
   | { event: "reasoning"; data: { text: string } }
   | { event: "tool_request"; data: { toolCallId: string; name: string; args: unknown } }
-  | { event: "tool_end"; data: { toolCallId: string; ok: boolean } }
+  | { event: "tool_end"; data: { toolCallId: string; ok: boolean; error?: ToolErrorDetail; summary?: string } }
   | { event: "usage"; data: { inputTokens: number; outputTokens: number } }
   | { event: "final"; data: { text: string; outcome?: TurnOutcome; reasoningOnly?: boolean } }
   | { event: "agent_status"; data: { status: string } }
@@ -73,6 +81,7 @@ interface Conversation {
    * on R1-style models) from "the model returned nothing at all".
    */
   lastReasoning: string;
+  activeToolArgs?: Map<string, unknown>;
   disposers: (() => void)[];
 }
 
@@ -416,6 +425,12 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
     if (callName === CANVAS_DECISION_FEEDBACK_TOOL || isDecisionFeedbackCall(callId)) return;
     conversation.lastText = "";
     conversation.lastReasoning = "";
+    const callArgs =
+      (payload as { args?: unknown; arguments?: unknown }).args ??
+      (payload as { arguments?: unknown }).arguments;
+    if (callId && callArgs !== undefined) {
+      conversation.activeToolArgs?.set(callId, callArgs);
+    }
     return;
   }
   if (type === "tool/result") {
@@ -425,8 +440,71 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
       pruneDecisionFeedback(toolCallId);
       return;
     }
+    const capturedArgs =
+      conversation.activeToolArgs?.get(toolCallId) ??
+      (payload as { args?: unknown }).args ??
+      (payload.error as { args?: unknown })?.args ??
+      (payload.error as { arguments?: unknown })?.arguments;
+    conversation.activeToolArgs?.delete(toolCallId);
+
     const failed = payload.error !== undefined && payload.error !== null;
-    emit({ event: "tool_end", data: { toolCallId, ok: !failed } });
+    let errorDetail: ToolErrorDetail | undefined;
+    if (failed) {
+      const err = payload.error as Record<string, unknown> | string | Error;
+      if (typeof err === "string") {
+        errorDetail = { type: "tool_error", message: err };
+      } else if (err instanceof Error) {
+        errorDetail = {
+          type: err.name || "Error",
+          message: err.message,
+          code: (err as { code?: string }).code,
+          details: (err as { details?: unknown }).details,
+        };
+      } else if (err && typeof err === "object") {
+        errorDetail = {
+          type: String(err.type || err.name || "tool_error"),
+          message: String(err.message || err.error || "Tool execution failed."),
+          code: typeof err.code === "string" ? err.code : undefined,
+          details: err.details,
+        };
+      }
+
+      if (errorDetail) {
+        const isArgError =
+          errorDetail.code === "INVALID_ARGS" ||
+          errorDetail.code === "INVALID_ARGUMENT" ||
+          errorDetail.type === "ToolArgsError" ||
+          errorDetail.type.toLowerCase().includes("arg") ||
+          errorDetail.message.toLowerCase().includes("argument");
+
+        if (capturedArgs !== undefined) {
+          let formattedArgs = "";
+          try {
+            formattedArgs = typeof capturedArgs === "string" ? capturedArgs : JSON.stringify(capturedArgs);
+          } catch {
+            formattedArgs = String(capturedArgs);
+          }
+          if (formattedArgs.length > 2500) {
+            formattedArgs = formattedArgs.slice(0, 2500) + "… (truncated)";
+          }
+          if (isArgError || errorDetail.message === "Tool execution failed.") {
+            errorDetail.message = `${errorDetail.message} Invalid arguments: ${formattedArgs}`;
+          }
+          errorDetail.args = capturedArgs;
+        }
+      }
+    }
+    emit({
+      event: "tool_end",
+      data: {
+        toolCallId,
+        ok: !failed,
+        ...(errorDetail ? { error: errorDetail } : {}),
+        ...(typeof (payload as { summary?: unknown }).summary === "string"
+          ? { summary: String((payload as { summary?: unknown }).summary) }
+          : {}),
+      },
+    });
     return;
   }
   if (type === "turn/end") {
@@ -504,7 +582,9 @@ export async function runConversationTurn(
   conversation.emit = emit;
   conversation.lastText = "";
   conversation.lastReasoning = "";
+  conversation.activeToolArgs = new Map<string, unknown>();
   setBridgeDispatcher(opts.conversationId, (call) => {
+    conversation.activeToolArgs?.set(call.toolCallId, call.args);
     emit({ event: "tool_request", data: call });
   });
   emit({ event: "agent_status", data: { status: "running" } });
