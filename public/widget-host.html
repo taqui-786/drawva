@@ -122,6 +122,18 @@
         var nativeCancelAnimationFrame = window.cancelAnimationFrame.bind(window);
         var nextAnimationFrameId = 1;
 
+        try {
+          var origGetContext = HTMLCanvasElement.prototype.getContext;
+          if (typeof origGetContext === 'function') {
+            HTMLCanvasElement.prototype.getContext = function(type, attrs) {
+              if (type === 'webgl' || type === 'webgl2' || type === 'experimental-webgl') {
+                attrs = Object.assign({}, attrs || {}, { preserveDrawingBuffer: true });
+              }
+              return origGetContext.call(this, type, attrs);
+            };
+          }
+        } catch (e) {}
+
         function scheduleAnimationFrame(id) {
           var callback = pendingAnimationFrames.get(id);
           if (!callback || !runtimeActive || nativeAnimationFrames.has(id)) return;
@@ -226,6 +238,41 @@
           return { w: w, h: h, r: r };
         }
 
+        function bakeSvgComputedStyle(orig, clone) {
+          var origEls = [orig].concat(Array.from(orig.querySelectorAll('*')));
+          var cloneEls = [clone].concat(Array.from(clone.querySelectorAll('*')));
+          var n = Math.min(origEls.length, cloneEls.length);
+          for (var i = 0; i < n; i++) {
+            var el = origEls[i];
+            var out = cloneEls[i];
+            if (out.tagName === 'foreignObject' || out.tagName === 'FORIGNOBJECT') continue;
+            var cs = window.getComputedStyle(el);
+            var transform = cs.transform;
+            if (transform && transform !== 'none') {
+              out.style.transform = transform;
+              out.style.transformOrigin = cs.transformOrigin;
+              out.style.animation = 'none';
+              out.style.transition = 'none';
+            }
+            if (cs.opacity && cs.opacity !== '1') out.setAttribute('opacity', cs.opacity);
+            if (cs.fill && cs.fill !== 'none') out.setAttribute('fill', cs.fill);
+            if (cs.stroke && cs.stroke !== 'none') out.setAttribute('stroke', cs.stroke);
+            if (cs.strokeWidth && cs.strokeWidth !== '0px') out.setAttribute('stroke-width', cs.strokeWidth);
+            if (cs.filter && cs.filter !== 'none') out.style.filter = cs.filter;
+            try {
+              if (el.transform && el.transform.animVal && el.transform.animVal.numberOfItems) {
+                var list = el.transform.animVal;
+                var parts = [];
+                for (var t = 0; t < list.numberOfItems; t++) {
+                  var m = list.getItem(t).matrix;
+                  parts.push('matrix(' + m.a + ' ' + m.b + ' ' + m.c + ' ' + m.d + ' ' + m.e + ' ' + m.f + ')');
+                }
+                if (parts.length) out.setAttribute('transform', parts.join(' '));
+              }
+            } catch (e) {}
+          }
+        }
+
         function cloneLiveSvg(svg) {
           var clone = svg.cloneNode(true);
           clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
@@ -233,6 +280,9 @@
           var nat = svgNaturalSize(svg);
           clone.setAttribute('width', String(nat.w));
           clone.setAttribute('height', String(nat.h));
+          var foreignObjects = Array.from(clone.querySelectorAll('foreignObject'));
+          for (var f = 0; f < foreignObjects.length; f++) foreignObjects[f].remove();
+          bakeSvgComputedStyle(svg, clone);
           var css = Array.from(document.querySelectorAll('style')).map(function(s) { return s.textContent || ''; }).join('\n');
           if (css.trim()) {
             var styleTag = document.createElementNS('http://www.w3.org/2000/svg', 'style');
@@ -343,6 +393,210 @@
           }
         }
 
+        function svgStringToImage(svg) {
+          return new Promise(function(resolve) {
+            try {
+              var blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });
+              var url = URL.createObjectURL(blob);
+              var img = new Image();
+              img.onload = function() { URL.revokeObjectURL(url); resolve(img); };
+              img.onerror = function() { URL.revokeObjectURL(url); resolve(null); };
+              img.src = url;
+            } catch (e) {
+              resolve(null);
+            }
+          });
+        }
+
+        function waitAnimationFrames(count) {
+          return new Promise(function(resolve) {
+            function tick() {
+              if (--count <= 0) resolve();
+              else nativeRequestAnimationFrame(tick);
+            }
+            nativeRequestAnimationFrame(tick);
+          });
+        }
+
+        function parseRadii(value, w, h) {
+          if (!value || value === '0px') return [0, 0];
+          var halves = String(value).split('/');
+          var horiz = halves[0].trim().split(/\s+/);
+          var vert = (halves[1] || halves[0]).trim().split(/\s+/);
+          function toPx(token, axis) {
+            if (!token) return 0;
+            if (token.indexOf('%') >= 0) return (parseFloat(token) / 100) * (axis === 'x' ? w : h);
+            return parseFloat(token) || 0;
+          }
+          return [toPx(horiz[0], 'x'), toPx(vert[0], 'y')];
+        }
+
+        function isVisibleColor(color) {
+          return !!color && color !== 'transparent' && color !== 'rgba(0, 0, 0, 0)' && color !== 'rgba(0,0,0,0)';
+        }
+
+        function isComplexFill(style) {
+          var img = style.backgroundImage;
+          var shadow = style.boxShadow;
+          return (img && img !== 'none') || (shadow && shadow !== 'none');
+        }
+
+        async function rasterizeStyleBox(style, w, h) {
+          w = Math.max(1, Math.ceil(w));
+          h = Math.max(1, Math.ceil(h));
+          function esc(v) {
+            return String(v || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+          }
+          var divStyle = 'width:' + w + 'px;height:' + h + 'px;box-sizing:border-box;' +
+            'background-color:' + esc(style.backgroundColor) + ';' +
+            'background-image:' + esc(style.backgroundImage) + ';' +
+            'background-size:' + esc(style.backgroundSize) + ';' +
+            'background-position:' + esc(style.backgroundPosition) + ';' +
+            'background-repeat:' + esc(style.backgroundRepeat) + ';' +
+            'border-radius:' + esc(style.borderRadius) + ';' +
+            'box-shadow:' + esc(style.boxShadow) + ';' +
+            'border:' + esc(style.border) + ';';
+          var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + w + '" height="' + h + '">' +
+            '<foreignObject width="100%" height="100%">' +
+            '<div xmlns="http://www.w3.org/1999/xhtml" style="' + divStyle + '"></div>' +
+            '</foreignObject></svg>';
+          return svgStringToImage(svg);
+        }
+
+        async function paintBox(ctx2d, r, style) {
+          if (r.width <= 0 || r.height <= 0) return;
+          if (isComplexFill(style)) {
+            var img = await rasterizeStyleBox(style, r.width, r.height);
+            if (img) {
+              ctx2d.save();
+              ctx2d.globalAlpha = parseFloat(style.opacity || '1') || 1;
+              ctx2d.drawImage(img, r.left, r.top, r.width, r.height);
+              ctx2d.restore();
+              return;
+            }
+          }
+          var radii = parseRadii(style.borderRadius, r.width, r.height);
+          if (isVisibleColor(style.backgroundColor)) {
+            ctx2d.fillStyle = style.backgroundColor;
+            ctx2d.beginPath();
+            if (typeof ctx2d.roundRect === 'function') ctx2d.roundRect(r.left, r.top, r.width, r.height, radii);
+            else ctx2d.rect(r.left, r.top, r.width, r.height);
+            ctx2d.fill();
+          }
+          var bw = parseFloat(style.borderTopWidth) || 0;
+          if (bw > 0 && style.borderTopStyle !== 'none' && isVisibleColor(style.borderTopColor)) {
+            ctx2d.strokeStyle = style.borderTopColor;
+            ctx2d.lineWidth = bw;
+            ctx2d.beginPath();
+            var inset = bw / 2;
+            if (typeof ctx2d.roundRect === 'function') {
+              ctx2d.roundRect(r.left + inset, r.top + inset, Math.max(0, r.width - bw), Math.max(0, r.height - bw), radii);
+            } else {
+              ctx2d.rect(r.left + inset, r.top + inset, Math.max(0, r.width - bw), Math.max(0, r.height - bw));
+            }
+            ctx2d.stroke();
+          }
+        }
+
+        function bakeCloneVisuals(origRoot, cloneRoot) {
+          var origEls = origRoot.querySelectorAll('*');
+          var cloneEls = cloneRoot.querySelectorAll('*');
+          var n = Math.min(origEls.length, cloneEls.length);
+          for (var i = 0; i < n; i++) {
+            var cs = window.getComputedStyle(origEls[i]);
+            var st = cloneEls[i].style;
+            if (cs.transform && cs.transform !== 'none') {
+              st.transform = cs.transform;
+              st.transformOrigin = cs.transformOrigin;
+              st.animation = 'none';
+              st.transition = 'none';
+            }
+            if (cs.opacity && cs.opacity !== '1') st.opacity = cs.opacity;
+            if (cs.filter && cs.filter !== 'none') st.filter = cs.filter;
+            if (cs.perspective && cs.perspective !== 'none') st.perspective = cs.perspective;
+            if (cs.perspectiveOrigin) st.perspectiveOrigin = cs.perspectiveOrigin;
+            if (cs.transformStyle && cs.transformStyle !== 'flat') st.transformStyle = cs.transformStyle;
+          }
+        }
+
+        function replaceCanvasesInClone(origRoot, cloneRoot) {
+          var origCanvases = origRoot.querySelectorAll('canvas');
+          var cloneCanvases = cloneRoot.querySelectorAll('canvas');
+          for (var i = 0; i < origCanvases.length && i < cloneCanvases.length; i++) {
+            try {
+              var url = origCanvases[i].toDataURL('image/png');
+              if (!url) continue;
+              var img = cloneRoot.ownerDocument.createElement('img');
+              img.setAttribute('src', url);
+              var cs = window.getComputedStyle(origCanvases[i]);
+              img.setAttribute('style', cloneCanvases[i].getAttribute('style') || '');
+              img.style.width = cs.width;
+              img.style.height = cs.height;
+              img.style.display = cs.display;
+              img.style.position = cs.position;
+              img.style.left = cs.left;
+              img.style.top = cs.top;
+              img.style.maxWidth = 'none';
+              img.style.maxHeight = 'none';
+              cloneCanvases[i].parentNode.replaceChild(img, cloneCanvases[i]);
+            } catch (e) {}
+          }
+        }
+
+        async function rasterizeViaForeignObject() {
+          var page = pageSize();
+          if (page.w < 2 || page.h < 2) return null;
+          var clone = document.documentElement.cloneNode(true);
+          var scripts = clone.querySelectorAll('script');
+          for (var s = 0; s < scripts.length; s++) scripts[s].remove();
+          bakeCloneVisuals(document.documentElement, clone);
+          replaceCanvasesInClone(document.documentElement, clone);
+          clone.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+          var serialized;
+          try {
+            serialized = new XMLSerializer().serializeToString(clone);
+          } catch (e) {
+            return null;
+          }
+          var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="' + page.w + '" height="' + page.h + '">' +
+            '<foreignObject x="0" y="0" width="' + page.w + '" height="' + page.h + '">' + serialized + '</foreignObject></svg>';
+          var img = await svgStringToImage(svg);
+          if (!img) return null;
+          var scale = Math.min(2, 2048 / page.w, 2048 / page.h);
+          var canvas = document.createElement('canvas');
+          canvas.width = Math.max(1, Math.round(page.w * scale));
+          canvas.height = Math.max(1, Math.round(page.h * scale));
+          var ctx2d = canvas.getContext('2d');
+          ctx2d.drawImage(img, 0, 0, canvas.width, canvas.height);
+          return { canvas: canvas, w: page.w, h: page.h };
+        }
+
+        async function overlayLiveMedia(shot) {
+          if (!shot || !shot.canvas || !shot.w || !shot.h) return;
+          var ctx2d = shot.canvas.getContext('2d');
+          var scaleX = shot.canvas.width / shot.w;
+          var scaleY = shot.canvas.height / shot.h;
+          ctx2d.save();
+          ctx2d.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+          var svgs = document.querySelectorAll('svg');
+          for (var s = 0; s < svgs.length; s++) {
+            var svg = svgs[s];
+            if (isInsideSvg(svg)) continue;
+            var r = svg.getBoundingClientRect();
+            if (r.width <= 1 || r.height <= 1) continue;
+            var img = await svgToImage(svg);
+            if (img) ctx2d.drawImage(img, r.left, r.top, r.width, r.height);
+          }
+          var canvases = document.querySelectorAll('canvas');
+          for (var c = 0; c < canvases.length; c++) {
+            var el = canvases[c];
+            var r = el.getBoundingClientRect();
+            if (r.width <= 1 || r.height <= 1) continue;
+            try { ctx2d.drawImage(el, r.left, r.top, r.width, r.height); } catch (e) {}
+          }
+          ctx2d.restore();
+        }
+
         async function rasterizeSingleSvg(svg) {
           var nat = svgNaturalSize(svg);
           var img = await svgToImage(svg);
@@ -368,65 +622,19 @@
           var ctx2d = canvas.getContext('2d');
           ctx2d.scale(scale, scale);
 
-          // 1. Draw backgrounds and borders of containers
+          // 1. Draw backgrounds, gradients, rounded borders, and shadows
           var allEls = document.body ? document.body.querySelectorAll('*') : [];
           for (var eIdx = 0; eIdx < allEls.length; eIdx++) {
             var el = allEls[eIdx];
-            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'SVG' || isInsideSvg(el)) continue;
+            if (el.tagName === 'SCRIPT' || el.tagName === 'STYLE' || el.tagName === 'SVG' || el.tagName === 'CANVAS' || el.tagName === 'IMG' || isInsideSvg(el)) continue;
             var r = el.getBoundingClientRect();
             if (r.width <= 0 || r.height <= 0) continue;
             var style = window.getComputedStyle(el);
-            if (style.display === 'none' || style.visibility === 'hidden') continue;
-
-            var bg = style.backgroundColor;
-            if (bg && bg !== 'transparent' && bg !== 'rgba(0, 0, 0, 0)') {
-              ctx2d.fillStyle = bg;
-              var radius = parseFloat(style.borderRadius) || 0;
-              if (radius > 0 && typeof ctx2d.roundRect === 'function') {
-                ctx2d.beginPath();
-                ctx2d.roundRect(r.left, r.top, r.width, r.height, radius);
-                ctx2d.fill();
-              } else {
-                ctx2d.fillRect(r.left, r.top, r.width, r.height);
-              }
-            }
-
-            var bbW = parseFloat(style.borderBottomWidth) || 0;
-            if (bbW > 0 && style.borderBottomStyle !== 'none') {
-              ctx2d.strokeStyle = style.borderBottomColor || 'rgba(0,0,0,0.1)';
-              ctx2d.lineWidth = bbW;
-              ctx2d.beginPath();
-              ctx2d.moveTo(r.left, r.bottom - bbW / 2);
-              ctx2d.lineTo(r.right, r.bottom - bbW / 2);
-              ctx2d.stroke();
-            }
-            var btW = parseFloat(style.borderTopWidth) || 0;
-            if (btW > 0 && style.borderTopStyle !== 'none') {
-              ctx2d.strokeStyle = style.borderTopColor || 'rgba(0,0,0,0.1)';
-              ctx2d.lineWidth = btW;
-              ctx2d.beginPath();
-              ctx2d.moveTo(r.left, r.top + btW / 2);
-              ctx2d.lineTo(r.right, r.top + btW / 2);
-              ctx2d.stroke();
-            }
-            var blW = parseFloat(style.borderLeftWidth) || 0;
-            if (blW > 0 && style.borderLeftStyle !== 'none') {
-              ctx2d.strokeStyle = style.borderLeftColor || 'rgba(0,0,0,0.1)';
-              ctx2d.lineWidth = blW;
-              ctx2d.beginPath();
-              ctx2d.moveTo(r.left + blW / 2, r.top);
-              ctx2d.lineTo(r.left + blW / 2, r.bottom);
-              ctx2d.stroke();
-            }
-            var brW = parseFloat(style.borderRightWidth) || 0;
-            if (brW > 0 && style.borderRightStyle !== 'none') {
-              ctx2d.strokeStyle = style.borderRightColor || 'rgba(0,0,0,0.1)';
-              ctx2d.lineWidth = brW;
-              ctx2d.beginPath();
-              ctx2d.moveTo(r.right - brW / 2, r.top);
-              ctx2d.lineTo(r.right - brW / 2, r.bottom);
-              ctx2d.stroke();
-            }
+            if (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0') continue;
+            ctx2d.save();
+            ctx2d.globalAlpha = parseFloat(style.opacity || '1') || 1;
+            await paintBox(ctx2d, r, style);
+            ctx2d.restore();
           }
 
           // 2. Draw text nodes with computed typography
@@ -527,13 +735,13 @@
           }
           try {
             if (hooks) await runHook(hooks.beforeSnapshot, 'before');
+            await waitAnimationFrames(2);
             var svgs = document.querySelectorAll('svg');
             var canvases = document.querySelectorAll('canvas');
             var imgs = document.querySelectorAll('img');
             var extra = canvases.length + imgs.length;
             var shot = null;
 
-            // Check if there is text outside the SVG
             var hasOuterText = false;
             if (svgs.length === 1 && document.body) {
               var bodyClone = document.body.cloneNode(true);
@@ -551,11 +759,22 @@
             } else if (svgs.length === 0 && canvases.length === 1 && imgs.length === 0 && !hasOuterText) {
               var el = canvases[0];
               if (el.width > 2 && el.height > 2) {
-                postSnapshotResult(reqId, canvasToDataUrl(el), el.width, el.height);
-                return;
+                var direct = canvasToDataUrl(el);
+                if (direct) {
+                  postSnapshotResult(reqId, direct, el.width, el.height);
+                  return;
+                }
               }
             }
-            if (!shot) shot = await rasterizeDocument();
+            if (!shot) {
+              try { shot = await rasterizeViaForeignObject(); } catch (e) { shot = null; }
+              if (shot) {
+                try { await overlayLiveMedia(shot); } catch (e) {}
+              }
+            }
+            if (!shot) {
+              try { shot = await rasterizeDocument(); } catch (e) { shot = null; }
+            }
             if (!shot || !shot.canvas) {
               postSnapshotResult(reqId, null, 0, 0);
               return;

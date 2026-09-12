@@ -719,6 +719,13 @@ export async function exportPng(
   }
 
   for (const o of objectList) {
+    if (o.kind === "animation") {
+      const live = objects?.animationBitmap(o.id);
+      if (live && live.width > 1 && live.height > 1) {
+        q.drawImage(live, o.x, o.y, o.w, o.h);
+        continue;
+      }
+    }
     if (o.image) {
       q.drawImage(o.image, o.x, o.y, o.w, o.h);
     } else if (o.kind === "text" && o.source) {
@@ -779,7 +786,7 @@ export async function generateCanvasThumbnail(
     const widgetList = widgets.all();
     if (widgetList.length > 0) {
       await Promise.all(
-        widgetList.map((w) => widgets.refreshSnapshot(w.id, 1200))
+        widgetList.map((w) => widgets.refreshSnapshot(w.id, 2000))
       );
     }
   }
@@ -856,31 +863,30 @@ export async function generateCanvasThumbnail(
     if (c) ctx.drawImage(c, tx * TILE, ty * TILE);
   }
 
-  // 8. Draw widgets (with container background card & crisp snapshot)
+  // 8. Draw widgets in playground order (ink below, widgets above)
   const widgetList = widgets ? widgets.all() : [];
   for (const w of widgetList) {
-    // Draw subtle card border and background for the widget so it looks like a real card on canvas
-    ctx.save();
-    ctx.fillStyle = isDark ? "#141720" : "#ffffff";
-    ctx.strokeStyle = isDark ? "rgba(255, 255, 255, 0.12)" : "rgba(0, 0, 0, 0.1)";
-    ctx.lineWidth = 1;
-    if (typeof ctx.roundRect === "function") {
-      ctx.beginPath();
-      ctx.roundRect(w.x, w.y, w.w, w.h, 6);
-      ctx.fill();
-      ctx.stroke();
-    } else {
-      ctx.fillRect(w.x, w.y, w.w, w.h);
-      ctx.strokeRect(w.x, w.y, w.w, w.h);
-    }
-    ctx.restore();
-
     await renderWidgetToContext(w, ctx);
   }
 
-  // 9. Draw objects (text, formula, plot, animation)
+  // 9. Draw objects (text, formula, plot, animation) on top, matching z-index 20 DOM order
   const objectList = objects ? objects.all() : [];
   for (const o of objectList) {
+    if (o.kind === "animation") {
+      const live = objects?.animationBitmap(o.id);
+      if (live && live.width > 1 && live.height > 1) {
+        ctx.drawImage(live, o.x, o.y, o.w, o.h);
+        continue;
+      }
+      if (o.animationScene) {
+        ctx.save();
+        ctx.translate(o.x, o.y);
+        ctx.scale(o.w / o.animationScene.w, o.h / o.animationScene.h);
+        renderAnimationScene(ctx, o.animationScene, o.playheadMs ?? 0);
+        ctx.restore();
+        continue;
+      }
+    }
     if (o.image) {
       ctx.drawImage(o.image, o.x, o.y, o.w, o.h);
     } else if (o.kind === "text" && o.source) {
@@ -911,12 +917,6 @@ export async function generateCanvasThumbnail(
       if (canvas.width > 0 && canvas.height > 0) {
         ctx.drawImage(canvas, o.x, o.y, o.w, o.h);
       }
-    } else if (o.kind === "animation" && o.animationScene) {
-      ctx.save();
-      ctx.translate(o.x, o.y);
-      ctx.scale(o.w / o.animationScene.w, o.h / o.animationScene.h);
-      renderAnimationScene(ctx, o.animationScene, o.playheadMs ?? 0);
-      ctx.restore();
     }
   }
 

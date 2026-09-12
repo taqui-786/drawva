@@ -433,6 +433,10 @@ export class ObjectManager {
     return [...this.items.values()];
   }
 
+  animationBitmap(id: string): HTMLCanvasElement | null {
+    return this.animCanvases.get(id)?.canvas ?? null;
+  }
+
   clear(): void {
     for (const id of [...this.items.keys()]) this.remove(id);
     this.selectedId = null;

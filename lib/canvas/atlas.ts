@@ -49,31 +49,6 @@ export interface AtlasResult {
   latestInput: LatestInputMeta | null;
 }
 
-export function fittedImageRect(
-  imageW: number,
-  imageH: number,
-  box: { x: number; y: number; w: number; h: number }
-): { x: number; y: number; w: number; h: number } {
-  if (imageW < 2 || imageH < 2 || box.w < 2 || box.h < 2) return { x: box.x, y: box.y, w: box.w, h: box.h };
-  const imageAspect = imageW / imageH;
-  const boxAspect = box.w / box.h;
-  if (Math.abs(imageAspect - boxAspect) <= 0.12) return { x: box.x, y: box.y, w: box.w, h: box.h };
-  const scale = Math.min(box.w / imageW, box.h / imageH);
-  const w = imageW * scale;
-  const h = imageH * scale;
-  return { x: box.x + (box.w - w) / 2, y: box.y + (box.h - h) / 2, w, h };
-}
-
-function bitmapSize(img: CanvasImageSource): { w: number; h: number } {
-  if (img instanceof HTMLImageElement) return { w: img.naturalWidth || img.width, h: img.naturalHeight || img.height };
-  if (img instanceof HTMLCanvasElement) return { w: img.width, h: img.height };
-  const anyImg = img as { width?: number; height?: number; naturalWidth?: number; naturalHeight?: number };
-  return {
-    w: Number(anyImg.naturalWidth || anyImg.width) || 0,
-    h: Number(anyImg.naturalHeight || anyImg.height) || 0,
-  };
-}
-
 function drawWidgetBitmap(
   q: CanvasRenderingContext2D,
   img: CanvasImageSource,
@@ -82,9 +57,7 @@ function drawWidgetBitmap(
   w: number,
   h: number
 ): void {
-  const size = bitmapSize(img);
-  const dest = fittedImageRect(size.w, size.h, { x, y, w, h });
-  q.drawImage(img, dest.x, dest.y, dest.w, dest.h);
+  q.drawImage(img, x, y, w, h);
 }
 
 export async function renderWidgetToContext(
@@ -148,7 +121,10 @@ async function renderHtmlToContext(
       `<!doctype html><html><head><meta charset="utf-8"><style>html,body{background:transparent!important;overflow:visible!important;margin:0!important;padding:4px;box-sizing:border-box}::-webkit-scrollbar{display:none!important}</style></head><body>${widget.html}</body></html>`
     );
     doc.close();
-    await new Promise((resolve) => window.setTimeout(resolve, 80));
+    await new Promise((resolve) => window.setTimeout(resolve, 200));
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
+    );
 
     wrapTextNodes(doc.body);
 
@@ -281,6 +257,39 @@ async function renderHtmlToContext(
         await sImg.decode();
         URL.revokeObjectURL(sUrl);
         q.drawImage(sImg, sX, sY, sW, sH);
+      } catch {}
+    }
+
+    const canvases = doc.body.querySelectorAll<HTMLCanvasElement>("canvas");
+    for (let c = 0; c < canvases.length; c++) {
+      const el = canvases[c];
+      const cRect = el.getBoundingClientRect();
+      if (cRect.width <= 1 || cRect.height <= 1) continue;
+      try {
+        q.drawImage(
+          el,
+          cRect.left - rootRect.left,
+          cRect.top - rootRect.top,
+          cRect.width,
+          cRect.height
+        );
+      } catch {}
+    }
+
+    const images = doc.body.querySelectorAll<HTMLImageElement>("img");
+    for (let m = 0; m < images.length; m++) {
+      const el = images[m];
+      if (!el.naturalWidth) continue;
+      const iRect = el.getBoundingClientRect();
+      if (iRect.width <= 1 || iRect.height <= 1) continue;
+      try {
+        q.drawImage(
+          el,
+          iRect.left - rootRect.left,
+          iRect.top - rootRect.top,
+          iRect.width,
+          iRect.height
+        );
       } catch {}
     }
 
