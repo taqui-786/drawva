@@ -22,7 +22,9 @@ import {
   AiMagicIcon,
   PlayIcon,
   ArrowRight01Icon,
+  BubbleChatSparkIcon,
 } from "@hugeicons/core-free-icons";
+import { CustomInstructionDialog } from "./CustomInstructionDialog";
 
 export interface FloatingAiButtonProps {
   isRunning?: boolean;
@@ -159,6 +161,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
 }) => {
   const reduceMotion = useReducedMotion();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [isCustomDialogOpen, setIsCustomDialogOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<NodeJS.Timeout | null>(null);
   const singleTapTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -374,6 +377,46 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
                   </span>
                 </button>
               ))}
+
+              {/* 14th Action: Highlighted Custom instruction button filling the empty slot */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsMenuOpen(false);
+                  setIsCustomDialogOpen(true);
+                }}
+                className={cn(
+                  "group relative flex items-center gap-2 px-2.5 py-1.5 rounded-xl text-left cursor-pointer outline-none",
+                  "bg-primary/[0.08] dark:bg-primary/[0.14]",
+                  "border border-primary/30 hover:border-primary/50 dark:border-primary/40 dark:hover:border-primary/60",
+                  "hover:bg-primary/[0.14] dark:hover:bg-primary/[0.22]",
+                  "shadow-[0_0_12px_rgba(var(--primary),0.08)]",
+                  "transition-all duration-150 active:scale-[0.98]"
+                )}
+              >
+                {/* Highlighted icon badge */}
+                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-xs shadow-primary/30 transition-all duration-150 group-hover:scale-105">
+                  <HugeiconsIcon icon={BubbleChatSparkIcon} className="size-3.5" />
+                </span>
+
+                {/* Text labels */}
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-semibold text-primary transition-colors leading-tight flex items-center gap-1.5">
+                    <span>Custom instruction</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider px-1 py-0.2 rounded bg-primary/20 text-primary">
+                      Custom
+                    </span>
+                  </div>
+                  <div className="text-[10px] text-muted-foreground truncate group-hover:text-foreground/90 transition-colors leading-tight mt-0.5">
+                    Type your own instructions
+                  </div>
+                </div>
+
+                {/* Hover Arrow */}
+                <span className="shrink-0 text-primary opacity-70 group-hover:opacity-100 group-hover:translate-x-0.5 transition-all duration-150">
+                  <HugeiconsIcon icon={ArrowRight01Icon} className="size-3" />
+                </span>
+              </button>
             </div>
           </motion.div>
         )}
@@ -518,6 +561,14 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
           <span>{isRunning ? "Cancel generation" : "Click here for AI Draw"}</span>
         </TooltipContent>
       </Tooltip>
+
+      {/* Full-screen Transparent Background Custom Instruction Dialog */}
+      <CustomInstructionDialog
+        open={isCustomDialogOpen}
+        onClose={() => setIsCustomDialogOpen(false)}
+        onSubmit={(promptText) => onAskAi?.(promptText)}
+        isRunning={isRunning}
+      />
     </div>
   );
 };
