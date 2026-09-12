@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { motion, AnimatePresence, useReducedMotion } from "motion/react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -157,6 +157,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
   className,
   viewMode = false,
 }) => {
+  const reduceMotion = useReducedMotion();
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -309,17 +310,11 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
   };
 
   return (
-    <motion.div
+    <div
       data-guide="ai-button"
       ref={containerRef}
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
-      animate={{ y: [0, -4, 0] }}
-      transition={{
-        duration: 3.5,
-        repeat: Infinity,
-        ease: "easeInOut",
-      }}
       className={cn(
         "fixed z-40 select-none",
         viewMode ? "bottom-2 right-2 sm:bottom-4 sm:right-4" : "bottom-2 right-2.5 sm:bottom-5 sm:right-6",
@@ -333,7 +328,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
             initial={{ opacity: 0, y: 8, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 6, scale: 0.96 }}
-            transition={{ duration: 0.16, ease: "easeOut" }}
+            transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
             className={cn(
               "absolute bottom-[calc(100%+14px)] right-0 z-50 pointer-events-auto",
               "w-[340px] sm:w-[430px] max-w-[calc(100vw-20px)]",
@@ -388,143 +383,131 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
       <Tooltip>
         <TooltipTrigger
           render={
-            <button
+            <motion.button
               type="button"
               onClick={handleMainButtonClick}
+              whileHover={reduceMotion ? undefined : { scale: 1.07 }}
+              whileTap={{ scale: 0.94 }}
+              transition={{ type: "spring", stiffness: 420, damping: 24 }}
               className={cn(
                 "group relative flex size-14 sm:size-15 items-center justify-center rounded-full cursor-pointer outline-none touch-manipulation",
-                "transition-transform duration-300 ease-out",
-                "hover:scale-110 active:scale-95",
-                // Elevated drop shadows with vibrant neon spill
                 isRunning
-                  ? "shadow-[0_12px_32px_rgba(244,63,94,0.4),0_2px_10px_rgba(0,0,0,0.15)] hover:shadow-[0_18px_44px_rgba(244,63,94,0.6),0_0_32px_rgba(244,63,94,0.4)] dark:shadow-[0_12px_36px_rgba(244,63,94,0.5),0_0_24px_rgba(244,63,94,0.3)]"
-                  : "shadow-[0_12px_32px_-6px_rgba(16,185,129,0.35),0_2px_10px_rgba(0,0,0,0.06)] hover:shadow-[0_20px_48px_-6px_rgba(16,185,129,0.5),0_0_36px_oklch(0.841_0.238_128.85/0.45)] dark:shadow-[0_12px_36px_-6px_rgba(0,0,0,0.6),0_0_28px_oklch(0.841_0.238_128.85/0.3)] dark:hover:shadow-[0_20px_48px_-6px_rgba(0,0,0,0.7),0_0_42px_oklch(0.841_0.238_128.85/0.6)]",
+                  ? "shadow-[0_10px_28px_-8px_oklch(0.841_0.238_128.85/0.55)] dark:shadow-[0_10px_32px_-8px_oklch(0.768_0.233_130.85/0.45)]"
+                  : "shadow-[0_10px_28px_-8px_oklch(0.841_0.238_128.85/0.35)] hover:shadow-[0_14px_36px_-8px_oklch(0.841_0.238_128.85/0.5)] dark:shadow-[0_10px_28px_-8px_rgba(0,0,0,0.55)]",
                 "focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
               )}
               aria-label={isRunning ? "Cancel AI generation" : "Ask AI to Draw"}
             >
-              {/* 1. Ambient living aura that blooms and breathes outside the button */}
               <span
                 aria-hidden="true"
                 className={cn(
-                  "absolute -inset-3 sm:-inset-3.5 rounded-full blur-xl pointer-events-none transition-all duration-700",
+                  "absolute -inset-2 rounded-full bg-primary/25 blur-lg pointer-events-none transition-opacity duration-300",
                   isRunning
-                    ? "bg-gradient-to-tr from-rose-600/45 via-amber-500/35 to-red-500/50 opacity-85 animate-pulse"
-                    : "bg-gradient-to-tr from-emerald-500/35 via-primary/45 to-teal-400/35 opacity-55 group-hover:opacity-100 group-hover:scale-130 group-hover:blur-2xl"
+                    ? cn("opacity-80", !reduceMotion && "animate-pulse")
+                    : "opacity-40 group-hover:opacity-70"
                 )}
               />
 
-              {/* 2. Sonar radar pulse ring when running */}
-              {isRunning && (
+              {!reduceMotion && !isRunning && (
                 <span
                   aria-hidden="true"
-                  className="absolute -inset-2.5 rounded-full border-2 border-rose-500/60 animate-ping pointer-events-none opacity-40 duration-1000"
-                />
+                  className="absolute -inset-1.5 rounded-full pointer-events-none animate-[spin_8s_linear_infinite]"
+                >
+                  <span className="absolute top-0 left-1/2 size-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-primary shadow-[0_0_8px_var(--primary)]" />
+                </span>
               )}
 
-              {/* 3. Celestial Orbiting Sparkle Star */}
-              <div
+              <span
                 aria-hidden="true"
-                className={cn(
-                  "absolute -inset-2 rounded-full pointer-events-none",
-                  isRunning
-                    ? "animate-[spin_2s_linear_infinite]"
-                    : "animate-[spin_6s_linear_infinite] group-hover:animate-[spin_3s_linear_infinite]"
-                )}
+                className="absolute inset-0 rounded-full overflow-hidden pointer-events-none p-[1.5px] ring-1 ring-primary/25"
               >
                 <span
                   className={cn(
-                    "absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 size-1.5 rounded-full transition-all duration-500",
-                    isRunning
-                      ? "bg-rose-400 shadow-[0_0_8px_#f43f5e]"
-                      : "bg-white dark:bg-primary shadow-[0_0_8px_#ffffff] dark:shadow-[0_0_10px_oklch(0.841_0.238_128.85)] group-hover:scale-125"
+                    "absolute inset-[1.5px] rounded-full",
+                    "bg-gradient-to-b from-white via-white to-primary/15",
+                    "dark:from-zinc-800 dark:via-zinc-900 dark:to-primary/20",
+                    "shadow-[inset_0_1px_1px_rgba(255,255,255,0.85)] dark:shadow-[inset_0_1px_1px_rgba(255,255,255,0.18)]"
                   )}
                 />
-              </div>
-
-              {/* 4. 360-degree rotating laser border beam */}
-              <div
-                aria-hidden="true"
-                className="absolute inset-0 rounded-full overflow-hidden pointer-events-none p-[1.5px]"
-              >
-                {/* Conic rotating beam that accelerates on hover */}
-                <span
-                  className={cn(
-                    "absolute -inset-[100%] rounded-full transition-opacity duration-500",
-                    isRunning
-                      ? "bg-[conic-gradient(from_0deg,transparent_0_180deg,rgba(244,63,94,0.3)_230deg,#f43f5e_290deg,#fb7185_330deg,#ffffff_360deg)] animate-[spin_1.5s_linear_infinite]"
-                      : "bg-[conic-gradient(from_0deg,transparent_0_180deg,rgba(52,211,153,0.3)_230deg,oklch(0.841_0.238_128.85)_290deg,#6ee7b7_330deg,#ffffff_360deg)] animate-[spin_4s_linear_infinite] group-hover:animate-[spin_1.8s_linear_infinite]"
-                  )}
-                />
-
-                {/* 5. Crystalline glass face cutout (bright, luminous, light & dark adaptive) */}
-                <span
-                  className={cn(
-                    "absolute inset-[1.5px] rounded-full backdrop-blur-2xl transition-all duration-500",
-                    "bg-gradient-to-b from-white/95 via-slate-50/90 to-emerald-50/80 dark:from-zinc-800/95 dark:via-zinc-900/92 dark:to-zinc-950/95",
-                    "shadow-[inset_0_1px_2px_rgba(255,255,255,0.9),inset_0_-1px_2px_rgba(0,0,0,0.05)] dark:shadow-[inset_0_1px_1.5px_rgba(255,255,255,0.25),inset_0_-1px_2px_rgba(0,0,0,0.6)]"
-                  )}
-                />
-              </div>
-
-              {/* 6. Convex glass dome reflection highlight */}
-              <span
-                aria-hidden="true"
-                className="absolute inset-[1.5px] rounded-full pointer-events-none bg-[radial-gradient(circle_at_35%_25%,rgba(255,255,255,0.75)_0%,transparent_55%)] dark:bg-[radial-gradient(circle_at_35%_25%,rgba(255,255,255,0.2)_0%,transparent_60%)]"
-              />
-
-              {/* 7. Inner color glow */}
-              <span
-                aria-hidden="true"
-                className={cn(
-                  "absolute inset-[1.5px] rounded-full pointer-events-none transition-opacity duration-500",
-                  isRunning
-                    ? "bg-[radial-gradient(circle_at_50%_75%,rgba(244,63,94,0.2)_0%,transparent_65%)]"
-                    : "bg-[radial-gradient(circle_at_50%_75%,oklch(0.841_0.238_128.85/0.25)_0%,transparent_65%)] opacity-70 group-hover:opacity-100"
-                )}
-              />
-
-              {/* 8. Diamond sheen sweep on hover */}
-              <span
-                aria-hidden="true"
-                className="absolute inset-[1.5px] rounded-full overflow-hidden pointer-events-none"
-              >
-                <span className="absolute -inset-full top-0 bg-gradient-to-r from-transparent via-white/50 dark:via-white/20 to-transparent -translate-x-[150%] group-hover:translate-x-[150%] transition-transform duration-1000 cubic-bezier(0.16,1,0.3,1)" />
               </span>
 
-              {/* 9. Centered Animated Icon with State Morph Transitions */}
+              <span
+                aria-hidden="true"
+                className="absolute inset-[1.5px] rounded-full pointer-events-none bg-[radial-gradient(circle_at_32%_24%,rgba(255,255,255,0.7)_0%,transparent_52%)] dark:bg-[radial-gradient(circle_at_32%_24%,rgba(255,255,255,0.16)_0%,transparent_55%)]"
+              />
+
+              {!isRunning && (
+                <span
+                  aria-hidden="true"
+                  className="absolute inset-[1.5px] rounded-full overflow-hidden pointer-events-none"
+                >
+                  <span className="absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-white/45 to-transparent -translate-x-full group-hover:translate-x-[220%] transition-transform duration-700 ease-[cubic-bezier(0.16,1,0.3,1)] dark:via-white/15" />
+                </span>
+              )}
+
+              {isRunning && (
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 56 56"
+                  className={cn(
+                    "absolute inset-0 z-10 size-full pointer-events-none text-primary",
+                    !reduceMotion && "animate-[spin_1.15s_linear_infinite]",
+                  )}
+                >
+                  <circle
+                    cx="28"
+                    cy="28"
+                    r="25.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="opacity-20"
+                  />
+                  <circle
+                    cx="28"
+                    cy="28"
+                    r="25.5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeDasharray="40 120"
+                  />
+                </svg>
+              )}
+
               <AnimatePresence mode="wait">
                 {isRunning ? (
                   <motion.div
                     key="running-stop-icon"
-                    initial={{ scale: 0.4, opacity: 0, rotate: -45 }}
-                    animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                    exit={{ scale: 0.4, opacity: 0, rotate: 45 }}
-                    transition={{ type: "spring", stiffness: 450, damping: 22 }}
-                    className="relative z-10 flex items-center justify-center"
+                    initial={reduceMotion ? false : { scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={reduceMotion ? undefined : { scale: 0.6, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 24 }}
+                    className="relative z-20 flex items-center justify-center"
                   >
                     <HugeiconsIcon
                       icon={SquareStopIcon}
-                      className="size-5 sm:size-5.5 text-rose-500 dark:text-rose-400 drop-shadow-[0_0_12px_rgba(244,63,94,0.85)] animate-pulse"
+                      className="size-5 sm:size-5.5 text-primary"
                     />
                   </motion.div>
                 ) : (
                   <motion.div
                     key="idle-sketch-icon"
-                    initial={{ scale: 0.4, opacity: 0, rotate: 30 }}
-                    animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                    exit={{ scale: 0.4, opacity: 0, rotate: -30 }}
-                    transition={{ type: "spring", stiffness: 450, damping: 22 }}
-                    className="relative z-10 flex items-center justify-center transition-transform duration-300 ease-out group-hover:scale-115 group-hover:-rotate-8 group-active:scale-95"
+                    initial={reduceMotion ? false : { scale: 0.6, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    exit={reduceMotion ? undefined : { scale: 0.6, opacity: 0 }}
+                    transition={{ type: "spring", stiffness: 420, damping: 24 }}
+                    className="relative z-20 flex items-center justify-center"
                   >
                     <HugeiconsIcon
                       icon={AiSketchIcon}
-                      className="size-6 sm:size-6.5 text-emerald-600 dark:text-primary drop-shadow-[0_2px_8px_rgba(16,185,129,0.5)] dark:drop-shadow-[0_0_14px_oklch(0.841_0.238_128.85/0.85)] group-hover:drop-shadow-[0_0_20px_oklch(0.841_0.238_128.85/1)]"
+                      className="size-6 sm:size-6.5 text-primary"
                     />
                   </motion.div>
                 )}
               </AnimatePresence>
-            </button>
+            </motion.button>
           }
         />
         <TooltipContent
@@ -535,7 +518,7 @@ export const FloatingAiButton: React.FC<FloatingAiButtonProps> = ({
           <span>{isRunning ? "Cancel generation" : "Click here for AI Draw"}</span>
         </TooltipContent>
       </Tooltip>
-    </motion.div>
+    </div>
   );
 };
 

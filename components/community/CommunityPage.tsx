@@ -7,8 +7,6 @@ import { DravFilters } from "./DravFilters";
 import { DravGrid } from "./DravGrid";
 import { DravGridSkeleton } from "./DravSkeleton";
 import { DravCardData, DravSortOption } from "@/lib/dravs/types";
-import { HugeiconsIcon } from "@hugeicons/react";
-import { SparklesIcon } from "@hugeicons/core-free-icons";
 
 export function CommunityPage() {
   const [selectedCategory, setSelectedCategory] = React.useState("all");
@@ -70,23 +68,21 @@ export function CommunityPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <CommunityHeader />
 
-      <main className="flex-1 container mx-auto px-4 sm:px-6 py-8 space-y-8 max-w-7xl">
-        {/* Community Hero */}
-        <div className="relative overflow-hidden rounded-3xl border border-border/70 bg-gradient-to-br from-card/80 via-card/40 to-background p-6 sm:p-10 shadow-xs">
-          <div className="absolute top-0 right-0 -translate-y-12 translate-x-12 size-96 rounded-full bg-primary/5 blur-3xl pointer-events-none" />
-          <div className="max-w-2xl space-y-3 relative z-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-primary/10 text-primary border border-primary/20">
-              <HugeiconsIcon icon={SparklesIcon} className="size-3.5" />
-              <span>Drawva Community Discovery</span>
-            </div>
-            <h1 className="text-3xl sm:text-4xl font-extrabold tracking-tight text-foreground font-brand">
-              Explore whiteboard canvases & diagrams
-            </h1>
-            <p className="text-sm sm:text-base text-muted-foreground leading-relaxed">
-              Discover interactive canvas Dravs created with Drawva. Inspect architectures, learn from math proofs and flowcharts, comment, and remix any canvas into your personal workspace.
-            </p>
-          </div>
-        </div>
+      <main className="flex-1 container mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8 max-w-7xl">
+        <section className="relative border-b border-border/60 pb-8 sm:pb-10">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute -left-20 -top-10 size-56 rounded-full bg-primary/20 blur-3xl dark:bg-primary/12"
+          />
+          <p className="brand-wordmark relative text-sm sm:text-base">Drawva</p>
+          <h1 className="relative mt-3 max-w-3xl pb-1 font-display text-4xl leading-[1.12] tracking-tight text-foreground sm:text-5xl lg:text-[3.5rem]">
+            Explore people&apos;s{" "}
+            <span className="italic font-normal text-primary">cool</span> Dravs
+          </h1>
+          <p className="relative mt-3 max-w-md font-body text-sm leading-relaxed text-muted-foreground sm:text-base">
+            Published canvases from the community. Open one and remix it.
+          </p>
+        </section>
 
         {/* Filter Controls */}
         <DravFilters
