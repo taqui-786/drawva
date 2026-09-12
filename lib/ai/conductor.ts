@@ -548,7 +548,25 @@ export class Conductor {
           Boolean(turnResult.isTimeout) ||
           elapsed >= 240_000 ||
           /connection to the agent closed/i.test(turnResult.message || "") ||
-          /timeout|timed out|504|gateway/i.test(turnResult.message || "");
+          /timeout|timed out|504|gateway|duration/i.test(turnResult.message || "");
+
+        // Persist assistant message so history preserves partial progress instead of orphaned user prompts
+        const partialText = turnResult.text?.trim() || "";
+        const partialReasoning = turnResult.reasoning?.trim() || "";
+        const toolNote = turnResult.lastToolDraft ? ` [preparing ${turnResult.lastToolDraft}]` : "";
+        let assistantText = partialText;
+        if (!assistantText && partialReasoning) {
+          assistantText = `[Timed out while planning${toolNote}: ${partialReasoning.slice(0, 1500)}]`;
+        } else if (isTimeout) {
+          assistantText = assistantText
+            ? `${assistantText}\n\n[Timed out while generating${toolNote}]`
+            : `[Timed out while generating${toolNote}]`;
+        } else if (!assistantText) {
+          assistantText = `[Interrupted: ${turnResult.message || "Agent turn failed"}]`;
+        }
+        this.messages.push({ role: "assistant", text: assistantText });
+        this.persistConversation();
+
         this.emit({ kind: "turn_end", reason: "error", error: turnResult.message || "Agent turn failed.", isTimeout });
         return;
       }
@@ -565,6 +583,14 @@ export class Conductor {
             : policy.steps > 0
               ? "The model ran tools but never produced a final answer. Retry — the canvas is unchanged."
               : "The AI model returned an empty response with no output. Please try again or switch model in Settings.";
+
+        const partialReasoning = turnResult.reasoning?.trim() || "";
+        const assistantText = partialReasoning
+          ? `[Finished thinking without executing actions: ${partialReasoning.slice(0, 1500)}]`
+          : `[Incomplete response: ${errorMsg}]`;
+        this.messages.push({ role: "assistant", text: assistantText });
+        this.persistConversation();
+
         this.emit({ kind: "turn_end", reason: "error", error: errorMsg });
 
         const config = this.deps.provider() ?? getProviderConfig();
@@ -682,7 +708,7 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[]
-  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> {
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; reasoning?: string; lastToolDraft?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> {
     const config = this.deps.provider() ?? getProviderConfig();
     const model = getActiveModel();
     if (!config || !model) {
@@ -704,7 +730,7 @@ export class Conductor {
       webSearch: getWebSearchEnabled(),
     };
 
-    const attempt = async (): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> => {
+    const attempt = async (): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; reasoning?: string; lastToolDraft?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> => {
       const res = await fetch("/api/canvas/agent/step", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -752,11 +778,11 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[]
-  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> {
+  ): Promise<{ kind: "final" | "cancelled" | "error"; text?: string; reasoning?: string; lastToolDraft?: string; message?: string; reasoningOnly?: boolean; isTimeout?: boolean }> {
     const reader = res.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
-    const sink = { text: "", sawFinal: false, reasoningOnly: false };
+    const sink = { text: "", reasoning: "", lastToolDraft: "", sawFinal: false, reasoningOnly: false };
     const checkLive = () => {
       if (gen !== this.currentGeneration || this.abort?.signal.aborted) throw new TurnAborted();
     };
@@ -771,8 +797,25 @@ export class Conductor {
           const block = buffer.slice(0, sep);
           buffer = buffer.slice(sep + 2);
           const outcome = await this.handleTurnFrame(block, gen, policy, stepsLog, sink);
-          if (outcome === "final") return { kind: "final", text: sink.text, reasoningOnly: sink.reasoningOnly };
-          if (outcome === "error") return { kind: "error", message: this.turnErrorMessage || "Agent turn failed." };
+          if (outcome === "final") {
+            return {
+              kind: "final",
+              text: sink.text,
+              reasoning: sink.reasoning,
+              reasoningOnly: sink.reasoningOnly,
+            };
+          }
+          if (outcome === "error") {
+            const msg = this.turnErrorMessage || "Agent turn failed.";
+            return {
+              kind: "error",
+              message: msg,
+              isTimeout: /timeout|timed out|execution duration/i.test(msg),
+              text: sink.text,
+              reasoning: sink.reasoning,
+              lastToolDraft: sink.lastToolDraft,
+            };
+          }
           sep = buffer.indexOf("\n\n");
         }
       }
@@ -791,16 +834,19 @@ export class Conductor {
     // on every tool_request, so a cut after the last tool call always produced a
     // successful-looking empty string.
     if (!sink.sawFinal) {
-      if (sink.text.trim()) return { kind: "final", text: sink.text };
+      if (sink.text.trim()) return { kind: "final", text: sink.text, reasoning: sink.reasoning };
       return {
         kind: "error",
         message:
           this.turnErrorMessage ||
           "The connection to the agent closed before it finished. Nothing was lost on the canvas — ask again to continue.",
         isTimeout: true,
+        text: sink.text,
+        reasoning: sink.reasoning,
+        lastToolDraft: sink.lastToolDraft,
       };
     }
-    return { kind: "final", text: sink.text, reasoningOnly: sink.reasoningOnly };
+    return { kind: "final", text: sink.text, reasoning: sink.reasoning, reasoningOnly: sink.reasoningOnly };
   }
 
   private async handleTurnFrame(
@@ -808,7 +854,7 @@ export class Conductor {
     gen: number,
     policy: TurnPolicy,
     stepsLog: AiLogStep[],
-    sink: { text: string; sawFinal: boolean; reasoningOnly: boolean }
+    sink: { text: string; reasoning: string; lastToolDraft: string; sawFinal: boolean; reasoningOnly: boolean }
   ): Promise<"continue" | "final" | "error"> {
     const eventName = (/^event: (.+)$/m.exec(block)?.[1] ?? "message").trim();
     const dataLine = (/^data: (.+)$/m.exec(block)?.[1] ?? "").trimEnd();
@@ -829,12 +875,14 @@ export class Conductor {
       (eventName === "reasoning" || eventName === "reasoning_delta") &&
       typeof rec.text === "string"
     ) {
+      sink.reasoning += rec.text;
       this.emit({ kind: "reasoning_delta", text: rec.text });
     } else if (
       (eventName === "tool_start" || eventName === "tool_draft") &&
       typeof rec.name === "string"
     ) {
       const command = typeof rec.command === "string" ? rec.command : undefined;
+      sink.lastToolDraft = command ? `${rec.name} (${command})` : rec.name;
       this.emit({
         kind: "tool_start",
         name: rec.name,
@@ -846,6 +894,8 @@ export class Conductor {
       // Text streamed before a tool call is a preamble ("let me check the board"),
       // never the answer, so it is dropped rather than concatenated onto the reply.
       sink.text = "";
+      sink.reasoning = "";
+      sink.lastToolDraft = rec.name;
       const toolCallId = String(rec.toolCallId || `call-${Date.now()}`);
       this.activeToolCallId = toolCallId;
       const answer = await this.answerToolRequest(String(rec.name), rec.args, toolCallId, gen, policy, stepsLog);
@@ -985,10 +1035,12 @@ export class Conductor {
       if (m.role === "user" && m.text.trim()) {
         out.unshift({ role: "user", text: m.text.slice(0, 2000) });
         chars += m.text.length;
-      } else if (m.role === "assistant" && m.text.trim()) {
+      } else if (m.role === "assistant" && (m.text.trim() || m.toolCall)) {
+        const body = m.text.trim().slice(0, 2000);
         const suffix = m.toolCall ? ` [called ${m.toolCall.name}]` : "";
-        out.unshift({ role: "assistant", text: `${m.text.slice(0, 2000)}${suffix}` });
-        chars += m.text.length;
+        const text = body ? `${body}${suffix}` : suffix.trim();
+        out.unshift({ role: "assistant", text });
+        chars += text.length;
       }
     }
     return out;
