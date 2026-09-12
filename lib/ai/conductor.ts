@@ -256,6 +256,7 @@ export class Conductor {
   private abort: AbortController | null = null;
   private activeToolCallId: string | null = null;
   private ignoredToolCallIds = new Set<string>();
+  private localHandledToolCallIds = new Set<string>();
   private sendQueue: { text: string; attachments?: File[]; options?: { headless?: boolean } }[] = [];
   private images = new Map<string, ActiveImage>();
   private latestSnapshotId: string | null = null;
@@ -829,6 +830,18 @@ export class Conductor {
       typeof rec.text === "string"
     ) {
       this.emit({ kind: "reasoning_delta", text: rec.text });
+    } else if (
+      (eventName === "tool_start" || eventName === "tool_draft") &&
+      typeof rec.name === "string"
+    ) {
+      const command = typeof rec.command === "string" ? rec.command : undefined;
+      this.emit({
+        kind: "tool_start",
+        name: rec.name,
+        command,
+        argsSummary: "preparing…",
+        target: extractToolTarget(rec.name, rec.args),
+      });
     } else if (eventName === "tool_request" && typeof rec.name === "string") {
       // Text streamed before a tool call is a preamble ("let me check the board"),
       // never the answer, so it is dropped rather than concatenated onto the reply.
@@ -843,6 +856,16 @@ export class Conductor {
       }
       await this.postToolResult(toolCallId, answer.result, answer.isError);
     } else if (eventName === "tool_end") {
+      const toolCallId = String(rec.toolCallId || "");
+      if (toolCallId && !this.localHandledToolCallIds.has(toolCallId)) {
+        this.emit({
+          kind: "tool_end",
+          name: typeof rec.name === "string" ? rec.name : "tool",
+          command: typeof rec.command === "string" ? rec.command : undefined,
+          ok: rec.ok === true,
+          summary: typeof rec.summary === "string" ? rec.summary : rec.ok ? "Done" : "Failed",
+        });
+      }
     } else if (eventName === "agent_status") {
     } else if (eventName === "final") {
       sink.sawFinal = true;
@@ -1152,6 +1175,11 @@ export class Conductor {
           images: toolImages,
         });
         this.persistConversation();
+        this.localHandledToolCallIds.add(toolCallId);
+        if (this.localHandledToolCallIds.size > 256) {
+          const oldest = this.localHandledToolCallIds.values().next().value;
+          if (oldest) this.localHandledToolCallIds.delete(oldest);
+        }
         this.emit({
           kind: "tool_end",
           name,

@@ -196,7 +196,13 @@ function canonicalToolChunks(
 
 export async function* admitCanvasAgentDecisionStream(
   upstream: AsyncIterable<StreamChunk>,
-  { availableTools = [] }: { availableTools?: string[] } = {}
+  {
+    availableTools = [],
+    onToolStart,
+  }: {
+    availableTools?: string[];
+    onToolStart?: (name: string, id?: string) => void;
+  } = {}
 ): AsyncIterable<StreamChunk> {
   const assembler = new BlockAssembler();
   const heldToolChunks: StreamChunk[] = [];
@@ -204,6 +210,7 @@ export async function* admitCanvasAgentDecisionStream(
   const seenIndexes = new Set<number>();
   const toolBlockIndexes = new Set<number>();
   let finish: StreamChunk | null = null;
+  let toolStartEmitted = false;
 
   for await (const chunk of upstream) {
     if ("index" in chunk && typeof chunk.index === "number" && Number.isInteger(chunk.index)) {
@@ -220,6 +227,32 @@ export async function* admitCanvasAgentDecisionStream(
     }
     if (chunk.type === "block-start" && chunk.blockType === "tool-call") {
       toolBlockIndexes.add(chunk.index);
+      const name = (chunk as { name?: string }).name;
+      if (name && !toolStartEmitted) {
+        toolStartEmitted = true;
+        try {
+          onToolStart?.(name);
+        } catch {}
+      }
+    }
+    if (chunk.type === "tool-call-delta" && chunk.name && !toolStartEmitted) {
+      toolStartEmitted = true;
+      try {
+        onToolStart?.(chunk.name, String(chunk.id || ""));
+      } catch {}
+    }
+    if (
+      chunk.type === "block-end" &&
+      (chunk.block as { type?: string })?.type === "tool-call" &&
+      !toolStartEmitted
+    ) {
+      const b = chunk.block as { name?: string; id?: string };
+      if (b?.name) {
+        toolStartEmitted = true;
+        try {
+          onToolStart?.(b.name, String(b.id || ""));
+        } catch {}
+      }
     }
     const isToolChunk =
       chunkBlockType(chunk) === "tool-call" ||

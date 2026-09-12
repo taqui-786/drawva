@@ -50,6 +50,7 @@ export interface ToolErrorDetail {
 export type StreamEvent =
   | { event: "text_delta"; data: { text: string } }
   | { event: "reasoning"; data: { text: string } }
+  | { event: "tool_start"; data: { name: string; toolCallId?: string } }
   | { event: "tool_request"; data: { toolCallId: string; name: string; args: unknown } }
   | { event: "tool_end"; data: { toolCallId: string; ok: boolean; error?: ToolErrorDetail; summary?: string } }
   | { event: "usage"; data: { inputTokens: number; outputTokens: number } }
@@ -82,6 +83,7 @@ interface Conversation {
    */
   lastReasoning: string;
   activeToolArgs?: Map<string, unknown>;
+  startedToolCalls?: Set<string>;
   disposers: (() => void)[];
 }
 
@@ -304,6 +306,20 @@ async function createConversation(
         })
       );
       conversation.disposers.push(
+        ctx.on("drawva:tool-start", (targetSessionId: string, name: string, callId?: string) => {
+          if (String(targetSessionId) !== sessionId) return;
+          if (!conversation.emit) return;
+          const key = callId || name;
+          if (!conversation.startedToolCalls) conversation.startedToolCalls = new Set<string>();
+          if (conversation.startedToolCalls.has(key)) return;
+          conversation.startedToolCalls.add(key);
+          conversation.emit({
+            event: "tool_start",
+            data: { name, ...(callId ? { toolCallId: callId } : {}) },
+          });
+        })
+      );
+      conversation.disposers.push(
         ctx.on("agent/error", (event: { error?: unknown; [key: string]: unknown }) => {
           const err = event?.error;
           const msg =
@@ -430,6 +446,17 @@ function projectSessionEvent(conversation: Conversation, event: { type: string; 
       (payload as { arguments?: unknown }).arguments;
     if (callId && callArgs !== undefined) {
       conversation.activeToolArgs?.set(callId, callArgs);
+    }
+    if (callName) {
+      const key = callId || callName;
+      if (!conversation.startedToolCalls) conversation.startedToolCalls = new Set<string>();
+      if (!conversation.startedToolCalls.has(key)) {
+        conversation.startedToolCalls.add(key);
+        emit({
+          event: "tool_start",
+          data: { name: callName, ...(callId ? { toolCallId: callId } : {}) },
+        });
+      }
     }
     return;
   }
@@ -583,6 +610,7 @@ export async function runConversationTurn(
   conversation.lastText = "";
   conversation.lastReasoning = "";
   conversation.activeToolArgs = new Map<string, unknown>();
+  conversation.startedToolCalls = new Set<string>();
   setBridgeDispatcher(opts.conversationId, (call) => {
     conversation.activeToolArgs?.set(call.toolCallId, call.args);
     emit({ event: "tool_request", data: call });

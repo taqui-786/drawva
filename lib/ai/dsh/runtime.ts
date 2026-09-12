@@ -20,6 +20,12 @@ import { join } from "node:path";
 import * as DrawvaCredentials from "./credentials";
 import { admitCanvasAgentDecisionStream } from "./admission";
 
+declare module "@deepseek-ai/cordis" {
+  interface Events {
+    "drawva:tool-start"(sessionId: string, name: string, callId?: string): void;
+  }
+}
+
 const PLUGIN_ALLOWLIST = new Set([
   "timer",
   "drawva-settings",
@@ -80,10 +86,15 @@ async function boot(): Promise<Context> {
   context.on(
     "llm/stream",
     (options, next) => {
-      const opts = options as { purpose?: unknown; tools?: { name?: string }[] };
+      const opts = options as { purpose?: unknown; tools?: { name?: string }[]; sessionId?: string };
       if (!isAgentLoopRequest(options as never) || opts.purpose) return next();
       return admitCanvasAgentDecisionStream(next(), {
         availableTools: (opts.tools || []).map((tool) => String(tool?.name || "")).filter(Boolean),
+        onToolStart: (name, id) => {
+          if (opts.sessionId) {
+            context.emit("drawva:tool-start", String(opts.sessionId), name, id);
+          }
+        },
       });
     },
     { global: true }
