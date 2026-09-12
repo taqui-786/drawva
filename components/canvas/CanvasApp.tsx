@@ -3807,7 +3807,14 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           setSettingsOpen(true);
         }}
       />
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <SettingsDialog
+        open={settingsOpen}
+        onOpenChange={setSettingsOpen}
+        onOpenModelSelect={() => {
+          setSettingsOpen(false);
+          setModelSelectOpen(true);
+        }}
+      />
       <LogsDialog
         open={logsOpen}
         onOpenChange={setLogsOpen}

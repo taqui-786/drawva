@@ -76,6 +76,7 @@ import { getRecentAiUsage, clearAiUsage } from "@/lib/actions/usage";
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onOpenModelSelect?: () => void;
 }
 
 const PROVIDER_METADATA: Record<
@@ -170,7 +171,11 @@ const PROVIDER_METADATA: Record<
   },
 };
 
-export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+export function SettingsDialog({
+  open,
+  onOpenChange,
+  onOpenModelSelect,
+}: SettingsDialogProps) {
   const [currentConfig, setCurrentConfig] = useState<ProviderConfig | null>(() => getProviderConfig());
   const [activeModelName, setActiveModelName] = useState<string | null>(() => getActiveModel());
 
@@ -234,6 +239,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 setActiveModelName(model);
               }}
               onClose={() => onOpenChange(false)}
+              onOpenModelSelect={onOpenModelSelect}
             />
           </TabsContent>
 
@@ -259,9 +265,11 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
 function ProviderTabContent({
   onConfigSaved,
   onClose,
+  onOpenModelSelect,
 }: {
   onConfigSaved: (cfg: ProviderConfig, activeModel: string | null) => void;
   onClose: () => void;
+  onOpenModelSelect?: () => void;
 }) {
   const initial = getProviderConfig();
   const initialKey =
@@ -528,9 +536,10 @@ function ProviderTabContent({
       onConfigSaved(config, nextActive);
 
       toast.success("Connected", {
-        description: `Found ${data.models.length} vision models.`,
+        description: `Found ${data.models.length} vision models. Please select your model.`,
       });
       onClose();
+      onOpenModelSelect?.();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Connection failed.");
     } finally {
