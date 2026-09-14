@@ -25,7 +25,7 @@ export function CommunityHeader() {
 
   return (
     <header className="sticky top-0 z-40 w-full border-b border-border/80 bg-background/90 backdrop-blur-md">
-      <div className="container mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+      <div className="w-full px-4 sm:px-6 md:px-8 h-14 flex items-center justify-between">
         {/* Left: Brand & Navigation */}
         <div className="flex items-center gap-6">
           <Link href="/canvas" className="flex items-center gap-2">

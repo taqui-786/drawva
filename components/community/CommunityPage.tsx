@@ -68,7 +68,7 @@ export function CommunityPage() {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       <CommunityHeader />
 
-      <main className="flex-1 container mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-8 max-w-7xl">
+      <main className="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-6 sm:py-8 space-y-8">
         <section className="relative border-b border-border/60 pb-8 sm:pb-10">
           <div
             aria-hidden

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { HugeiconsIcon } from "@hugeicons/react";
@@ -85,6 +85,10 @@ export function CanvasSidebar({
     };
   }, [open]);
 
+  const sidebarRef = useRef<HTMLElement | null>(null);
+  const touchStartXRef = useRef<number | null>(null);
+  const touchCurrentXRef = useRef<number | null>(null);
+
   // Handle escape key
   useEffect(() => {
     if (!open) return;
@@ -96,6 +100,41 @@ export function CanvasSidebar({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onOpenChange]);
+
+  // Handle outside pointerdown so any tap outside closes the sidebar on touch devices
+  useEffect(() => {
+    if (!open) return;
+    const handleOutsidePointer = (e: PointerEvent) => {
+      if (sidebarRef.current && !sidebarRef.current.contains(e.target as Node)) {
+        onOpenChange(false);
+      }
+    };
+    window.addEventListener("pointerdown", handleOutsidePointer);
+    return () => window.removeEventListener("pointerdown", handleOutsidePointer);
+  }, [open, onOpenChange]);
+
+  // Touch swipe-to-close gesture handling on tablet & mobile
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartXRef.current = e.touches[0].clientX;
+    touchCurrentXRef.current = e.touches[0].clientX;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (touchStartXRef.current === null) return;
+    touchCurrentXRef.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = () => {
+    if (touchStartXRef.current !== null && touchCurrentXRef.current !== null) {
+      const diff = touchCurrentXRef.current - touchStartXRef.current;
+      // Swiped right by > 45px -> dismiss
+      if (diff > 45) {
+        onOpenChange(false);
+      }
+    }
+    touchStartXRef.current = null;
+    touchCurrentXRef.current = null;
+  };
 
   const handleNewCanvas = () => {
     onOpenChange(false);
@@ -147,16 +186,30 @@ export function CanvasSidebar({
       {/* Backdrop */}
       {open && (
         <div
-          className="fixed inset-0 z-40 bg-black/20 backdrop-blur-xs transition-opacity animate-in fade-in duration-200"
+          role="button"
+          tabIndex={0}
+          aria-label="Close canvases menu"
+          className="fixed inset-0 z-40 bg-black/25 backdrop-blur-xs transition-opacity animate-in fade-in duration-200 cursor-pointer touch-none"
           onClick={() => onOpenChange(false)}
+          onPointerDown={(e) => {
+            if (e.target === e.currentTarget) {
+              onOpenChange(false);
+            }
+          }}
         />
       )}
 
       {/* Sidebar Panel */}
       <aside
+        ref={sidebarRef}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
         className={cn(
-          "fixed top-0 right-0 z-50 flex h-full w-84 max-w-[85vw] flex-col border-l border-border bg-background/95 backdrop-blur-md shadow-2xl transition-transform duration-300 ease-in-out",
-          open ? "translate-x-0" : "translate-x-full"
+          "fixed top-0 right-0 z-50 flex h-full w-84 max-w-[85vw] flex-col border-l border-border bg-background/95 backdrop-blur-md shadow-2xl transition-all duration-300 ease-in-out",
+          open
+            ? "translate-x-0 opacity-100 visible pointer-events-auto"
+            : "translate-x-full opacity-0 invisible pointer-events-none"
         )}
       >
         {/* Header */}
@@ -182,10 +235,15 @@ export function CanvasSidebar({
             <Button
               variant="ghost"
               size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-foreground"
+              aria-label="Close sidebar"
+              className="size-8 sm:size-7 text-muted-foreground hover:text-foreground cursor-pointer flex items-center justify-center rounded-md"
               onClick={() => onOpenChange(false)}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                onOpenChange(false);
+              }}
             >
-              <HugeiconsIcon icon={Cancel01Icon} className="h-4 w-4" />
+              <HugeiconsIcon icon={Cancel01Icon} className="size-4" />
             </Button>
           </div>
         </div>

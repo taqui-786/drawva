@@ -120,7 +120,7 @@ function ToolButton({
             }}
             data-icon="true"
             className={cn(
-              "shrink-0 size-8 sm:size-9 p-0 rounded-xl transition-all",
+              "shrink-0 size-8 lg:size-9 p-0 rounded-xl transition-all",
               active && "shadow-xs",
               disabled && "opacity-50 pointer-events-none"
             )}
@@ -253,7 +253,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                   data-icon="true"
                   aria-label="View Canvas only"
                   className={cn(
-                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl transition-all",
+                    "hidden xl:inline-flex shrink-0 size-8 lg:size-9 p-0 rounded-xl transition-all",
                     viewMode && "shadow-xs"
                   )}
                 >
@@ -267,7 +267,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
           </Tooltip>
         )}
 
-        <Separator orientation="vertical" className="mx-0.5 h-5 self-center opacity-50" />
+        <Separator orientation="vertical" className="mx-0.5 h-5 self-center opacity-50 hidden xl:block" />
 
         {/* Hand */}
         <ToolButton
@@ -316,7 +316,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                       data-icon="true"
                       aria-label="Shape tools"
                       className={cn(
-                        "shrink-0 size-8 sm:size-9 p-0 rounded-xl transition-all",
+                        "shrink-0 size-8 lg:size-9 p-0 rounded-xl transition-all",
                         isShapeActive && "shadow-xs",
                         toolsLocked && "opacity-50 pointer-events-none"
                       )}
@@ -363,7 +363,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                       variant="ghost"
                       data-icon="true"
                       aria-label="Color and stroke style"
-                      className="shrink-0 size-8 sm:size-9 p-0 rounded-xl relative"
+                      className="shrink-0 size-8 lg:size-9 p-0 rounded-xl relative"
                     />
                   }
                 >
@@ -442,7 +442,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                   data-icon="true"
                   aria-label="Undo"
                   className={cn(
-                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl",
+                    "shrink-0 size-8 lg:size-9 p-0 rounded-xl",
                     !canUndo && "opacity-40 pointer-events-none"
                   )}
                 >
@@ -468,7 +468,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                   data-icon="true"
                   aria-label="Redo"
                   className={cn(
-                    "shrink-0 size-8 sm:size-9 p-0 rounded-xl",
+                    "shrink-0 size-8 lg:size-9 p-0 rounded-xl",
                     !canRedo && "opacity-40 pointer-events-none"
                   )}
                 >
@@ -493,7 +493,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                   onClick={onToggleGrid}
                   data-icon="true"
                   aria-label="Toggle grid"
-                  className="hidden sm:inline-flex shrink-0 size-8 sm:size-9 p-0 rounded-xl"
+                  className="hidden xl:inline-flex shrink-0 size-8 lg:size-9 p-0 rounded-xl"
                 >
                   <HugeiconsIcon
                     icon={GridTableIcon}
@@ -519,7 +519,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                   onClick={onClear}
                   data-icon="true"
                   aria-label="Clear Board"
-                  className="shrink-0 size-8 sm:size-9 p-0 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+                  className="hidden xl:inline-flex shrink-0 size-8 lg:size-9 p-0 rounded-xl text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
                 >
                   <HugeiconsIcon icon={Delete02Icon} className="size-4" />
                 </Button>
@@ -540,7 +540,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                 variant="ghost"
                 data-icon="true"
                 aria-label="More actions"
-                className="shrink-0 size-8 sm:size-9 p-0 rounded-xl"
+                className="shrink-0 size-8 lg:size-9 p-0 rounded-xl"
               >
                 <HugeiconsIcon icon={MoreHorizontalIcon} className="size-4" />
               </Button>
@@ -606,10 +606,22 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                   <span>Insert Image</span>
                 </DropdownMenuItem>
               )}
+              {onToggleViewMode && (
+                <DropdownMenuItem onClick={onToggleViewMode} className="cursor-pointer gap-2 xl:hidden">
+                  <HugeiconsIcon icon={ViewIcon} className="size-4" />
+                  <span>{viewMode ? "Exit View Mode" : "View Canvas Only"}</span>
+                </DropdownMenuItem>
+              )}
               {onToggleGrid && (
-                <DropdownMenuItem onClick={onToggleGrid} className="cursor-pointer gap-2 sm:hidden">
+                <DropdownMenuItem onClick={onToggleGrid} className="cursor-pointer gap-2 xl:hidden">
                   <HugeiconsIcon icon={GridTableIcon} className="size-4" />
                   <span>{gridVisible ? "Hide canvas grid" : "Show canvas grid"}</span>
+                </DropdownMenuItem>
+              )}
+              {onClear && (
+                <DropdownMenuItem onClick={onClear} className="cursor-pointer gap-2 text-destructive focus:text-destructive">
+                  <HugeiconsIcon icon={Delete02Icon} className="size-4" />
+                  <span>Clear Canvas</span>
                 </DropdownMenuItem>
               )}
             </DropdownMenuGroup>

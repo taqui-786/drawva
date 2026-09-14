@@ -142,7 +142,7 @@ export function CanvasHeader({
     <header
       className={cn(
         "fixed top-0 left-0 right-0 z-40 flex items-center justify-between",
-        "h-10 sm:h-11 px-2.5 sm:px-4",
+        "h-10 sm:h-11 px-2 sm:px-3 lg:px-4",
         "border-b border-border/80 bg-background/95 backdrop-blur-md shadow-2xs select-none",
       )}
     >
@@ -156,22 +156,22 @@ export function CanvasHeader({
         </Link>
 
         {/* Navlinks */}
-        <nav className="flex items-center gap-0.5 sm:gap-1 ml-1.5 sm:ml-3 pl-1.5 sm:pl-3 border-l border-border/60">
+        <nav className="flex items-center gap-0.5 sm:gap-1 ml-1 sm:ml-2.5 pl-1 sm:pl-2.5 border-l border-border/60">
           <Link
             href="/community"
             title="Explore Community Dravs"
-            className="flex items-center gap-1 sm:gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            className="flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
           >
             <HugeiconsIcon icon={Compass01Icon} className="size-3.5" />
-            <span className="hidden sm:inline">Community</span>
+            <span className="hidden lg:inline">Community</span>
           </Link>
           <Link
             href="/manual"
             title="Drawva User Manual"
-            className="flex items-center gap-1 sm:gap-1.5 px-2 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
+            className="flex items-center gap-1 sm:gap-1.5 px-1.5 sm:px-2 py-1 rounded-md text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors"
           >
             <HugeiconsIcon icon={BookOpen01Icon} className="size-3.5" />
-            <span className="hidden sm:inline">Manual</span>
+            <span className="hidden lg:inline">Manual</span>
           </Link>
         </nav>
 
@@ -200,8 +200,8 @@ export function CanvasHeader({
         )}
       </div>
 
-      {/* Center: Canvas Coordinates (plain text, no interaction) */}
-      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:flex items-center gap-1.5 pointer-events-none select-none font-mono text-[11px] tabular-nums text-muted-foreground/70">
+      {/* Center: Canvas Coordinates (plain text, only visible on xl desktops to prevent collision with right side controls) */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden xl:flex items-center gap-1.5 pointer-events-none select-none font-mono text-[11px] tabular-nums text-muted-foreground/70">
         <span className="text-[10px] uppercase font-sans tracking-wider font-semibold text-muted-foreground/50">
           Center
         </span>
@@ -218,10 +218,11 @@ export function CanvasHeader({
               variant="outline"
               size="xs"
               render={<Link href="/admin" />}
-              className="h-6 px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans mr-0.5"
+              className="h-6 px-1.5 sm:px-2 text-[11px] gap-1 text-primary border-primary/30 hover:bg-primary/10 font-sans mr-0.5"
+              title="Admin Console"
             >
               <HugeiconsIcon icon={Shield01Icon} className="h-3 w-3" />
-              <span>Admin</span>
+              <span className="hidden md:inline">Admin</span>
             </Button>
           )}
 
@@ -529,7 +530,7 @@ export function CanvasHeader({
                         className="h-7 gap-1.5 px-2 text-xs font-medium shrink-0 border-primary/30 text-primary hover:bg-primary/10 hover:text-primary cursor-pointer"
                       >
                         <HugeiconsIcon icon={Share07Icon} className="size-3.5" />
-                        <span className="hidden sm:inline">Share</span>
+                        <span className="hidden md:inline">Share</span>
                       </Button>
                     }
                   />
@@ -538,7 +539,7 @@ export function CanvasHeader({
               )}
 
               {/* Thinking / Reasoning Effort Selector */}
-              <div data-guide="reasoning" className="hidden sm:block shrink-0">
+              <div data-guide="reasoning" className="hidden md:block shrink-0">
                 <Select
                   value={reasoningEffort}
                   onValueChange={(val) =>
@@ -589,7 +590,7 @@ export function CanvasHeader({
               </div>
 
               {/* Auto AI Switch */}
-              <label data-guide="auto-ai" className="hidden md:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none shrink-0">
+              <label data-guide="auto-ai" className="hidden lg:flex cursor-pointer items-center gap-1.5 rounded-md px-1 text-xs text-muted-foreground select-none shrink-0">
                 <Switch
                   size="sm"
                   checked={autoOn}

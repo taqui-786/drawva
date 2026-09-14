@@ -45,8 +45,8 @@ export const CanvasZoomBar: React.FC<CanvasZoomBarProps> = ({
       role="toolbar"
       aria-label="Canvas Zoom and Navigation Controls"
       className={cn(
-        "fixed z-40 select-none transition-all duration-300",
-        viewMode ? "bottom-2 left-2 sm:bottom-3 sm:left-3" : "bottom-2 left-2 sm:bottom-5 sm:left-5",
+        "fixed z-40 select-none transition-all duration-300 hidden sm:block",
+        viewMode ? "bottom-2 left-2 sm:bottom-3 sm:left-3" : "bottom-2 left-2 sm:bottom-5 sm:left-4",
         className
       )}
     >
@@ -126,7 +126,7 @@ export const CanvasZoomBar: React.FC<CanvasZoomBarProps> = ({
         {/* Re-center Viewport Action */}
         {onReset && (
           <>
-            <Separator orientation="vertical" className="mx-0.5 h-3.5 self-center opacity-40" />
+            <Separator orientation="vertical" className="mx-0.5 h-3.5 self-center opacity-40 hidden xl:block" />
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -136,7 +136,7 @@ export const CanvasZoomBar: React.FC<CanvasZoomBarProps> = ({
                     onClick={onReset}
                     aria-label="Re-center canvas"
                     data-icon="true"
-                    className="size-6 sm:size-6.5 p-0 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
+                    className="hidden xl:flex size-6 sm:size-6.5 p-0 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground cursor-pointer transition-colors"
                   >
                     <HugeiconsIcon icon={Target02Icon} className="size-3 sm:size-3.5" />
                   </Button>
