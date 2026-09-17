@@ -92,7 +92,6 @@ export async function POST(req: Request) {
       try {
         const headers: Record<string, string> = {
           accept: "application/json",
-          "User-Agent": "claude-cli/0.2.29 (external, cli)",
           "X-Stainless-Lang": "js",
           "X-Stainless-Package-Version": "0.2.29",
           "X-Stainless-OS": "MacOS",
