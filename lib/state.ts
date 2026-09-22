@@ -10,7 +10,7 @@ export const appState = proxy({
   zoom: 100,
   center: { x: 0, y: 0 },
   aiStatus: "idle" as AiStatus,
-  autoOn: false,
+  autoOn: true,
   viewMode: false,
   gridVisible: true,
 });
@@ -52,6 +52,14 @@ export function setAiStatus(status: AiStatus): void {
   appState.aiStatus = status;
 }
 
-export function setAutoOn(on: boolean): void {
+export function setAutoOn(on: boolean, userId?: string | null): void {
   appState.autoOn = on;
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem("drawva.autoOn", String(on));
+      if (userId) {
+        localStorage.setItem(`drawva.autoOn:${userId}`, String(on));
+      }
+    } catch {}
+  }
 }

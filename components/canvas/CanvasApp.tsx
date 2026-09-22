@@ -344,6 +344,19 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     if (currentUserId && currentUserId !== lastUserIdRef.current) {
       const newSessionId = createAndStoreSession(currentUserId);
       conductorRef.current?.setSessionId(newSessionId);
+
+      try {
+        const userKey = `drawva.autoOn:${currentUserId}`;
+        const userPref = localStorage.getItem(userKey);
+        if (userPref !== null) {
+          setAutoOn(userPref === "true", currentUserId);
+        } else {
+          // Default to true/ON on new user signin
+          setAutoOn(true, currentUserId);
+        }
+      } catch {
+        setAutoOn(true, currentUserId);
+      }
     }
     lastUserIdRef.current = currentUserId;
   }, [session?.user?.id]);
@@ -1805,7 +1818,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           if (!item) return;
           const prompt = `Refine the widget titled "${item.title}" (ID: ${item.id}) using any surrounding marks, notes, or instructions around it.`;
           void conductorRef.current?.send(prompt);
-          setAutoOn(false);
+          setAutoOn(false, userIdRef.current);
         },
       },
     });
@@ -2871,6 +2884,12 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       const stored = localStorage.getItem("drawva.gridVisible");
       if (stored !== null) {
         setGridVisible(stored === "true");
+      }
+      const storedAuto = localStorage.getItem("drawva.autoOn");
+      if (storedAuto !== null) {
+        setAutoOn(storedAuto === "true");
+      } else {
+        setAutoOn(true);
       }
     } catch {}
   }, []);
@@ -4010,7 +4029,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           aiStatus={aiStatus}
           aiRun={aiRun}
           autoOn={autoOn}
-          onAutoChange={setAutoOn}
+          onAutoChange={(on) => setAutoOn(on, session?.user?.id)}
           onAskAi={handleAskAi}
           agentRunning={agentRunning}
           onCancelAi={() => {
