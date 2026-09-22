@@ -118,7 +118,15 @@ import {
   pasteDataUrl,
   captureRegion,
   pasteRegion,
+  snapshotToDataUrl,
 } from "@/lib/canvas/selection";
+import {
+  parseClipboardEvent,
+  parseTextPayload,
+  setInternalClipboard,
+  getInternalClipboard,
+  type ClipboardPayload,
+} from "@/lib/canvas/clipboard";
 import {
   buildRefinementManifest,
   validateRefinementTarget,
@@ -3123,6 +3131,318 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     }
   }, [engine, textAnchor]);
 
+  const lastPointerPosRef = useRef<Point | null>(null);
+
+  const clientToWorld = useCallback(
+    (clientX: number, clientY: number): Point | null => {
+      if (!engine) return null;
+      try {
+        const screen = engine.canvas("screen");
+        if (!screen) return null;
+        const rect = screen.getBoundingClientRect();
+        return engine.camera.screenToWorld(
+          clientX - rect.left,
+          clientY - rect.top,
+        );
+      } catch {
+        return null;
+      }
+    },
+    [engine],
+  );
+
+  const screenToWorld = useCallback(
+    (e: React.PointerEvent): Point => {
+      return clientToWorld(e.clientX, e.clientY) ?? { x: 0, y: 0 };
+    },
+    [clientToWorld],
+  );
+
+  const handlePastePayload = useCallback(
+    async (payload: ClipboardPayload, targetWorld?: Point) => {
+      if (!engine) return;
+      const world =
+        targetWorld ??
+        lastPointerPosRef.current ??
+        engine.camera.screenToWorld(
+          engine.cssWidth / 2,
+          engine.cssHeight / 2,
+        );
+
+      if (payload.kind === "image") {
+        try {
+          const placed = await placeImageAt(engine, payload.blob, world);
+          history.current?.commit();
+          syncManager.current?.broadcast({
+            type: "SYNC_INK_MOVE",
+            from: { x: placed.x, y: placed.y, w: 0, h: 0 },
+            x: placed.x,
+            y: placed.y,
+            w: placed.w,
+            h: placed.h,
+            dataUrl: placed.dataUrl,
+          });
+          afterBoardChangeRef.current();
+          setMode("select");
+          toast.success("Image pasted");
+        } catch (err) {
+          console.error("Paste image failed:", err);
+          toast.error("Could not paste image");
+        }
+        return;
+      }
+
+      if (payload.kind === "internal") {
+        const d = payload.data;
+        if (d.type === "drawva_object") {
+          const orig = d.item;
+          const newId = nextLocalObjectId(orig.kind);
+          const targetX = Math.round(world.x === orig.x ? orig.x + 32 : world.x);
+          const targetY = Math.round(world.y === orig.y ? orig.y + 32 : world.y);
+          orig.x = targetX;
+          orig.y = targetY;
+          const cloned: ObjectItem = {
+            ...orig,
+            id: newId,
+            x: targetX,
+            y: targetY,
+            status: "accepted",
+          };
+          history.current?.recordObjects();
+          addObjectRef.current(cloned);
+          history.current?.commit();
+          afterBoardChangeRef.current();
+          objects.current?.setSelected(newId);
+          setMode("select");
+          toast.success("Item duplicated");
+          return;
+        }
+        if (d.type === "drawva_widget") {
+          const orig = d.item;
+          const newId = nextLocalObjectId("widget");
+          const targetX = Math.round(world.x === orig.x ? orig.x + 32 : world.x);
+          const targetY = Math.round(world.y === orig.y ? orig.y + 32 : world.y);
+          orig.x = targetX;
+          orig.y = targetY;
+          const cloned: WidgetItem = {
+            ...orig,
+            id: newId,
+            x: targetX,
+            y: targetY,
+            status: "accepted",
+          };
+          history.current?.recordWidgets();
+          widgets.current?.add(cloned);
+          syncManager.current?.broadcast({
+            type: "SYNC_WIDGET_ADD",
+            widget: compactWidgetForSync(cloned),
+          });
+          history.current?.commit();
+          afterBoardChangeRef.current();
+          widgets.current?.setSelected(newId);
+          setMode("select");
+          toast.success("Widget duplicated");
+          return;
+        }
+        if (d.type === "drawva_ink") {
+          pasteRegion(engine, d.snapshot, world.x, world.y);
+          history.current?.commit();
+          const dataUrl = snapshotToDataUrl(d.snapshot);
+          syncManager.current?.broadcast({
+            type: "SYNC_INK_MOVE",
+            from: { x: world.x, y: world.y, w: 0, h: 0 },
+            x: world.x,
+            y: world.y,
+            w: d.w,
+            h: d.h,
+            dataUrl,
+          });
+          afterBoardChangeRef.current();
+          setMode("select");
+          toast.success("Ink pasted");
+          return;
+        }
+      }
+
+      if (payload.kind === "diagram") {
+        try {
+          const res = await diagramDocument(
+            payload.format,
+            payload.source,
+            undefined,
+            payload.title,
+          );
+          const html = typeof res === "string" ? res : res.html;
+          const fromDoc = typeof res === "object" && res ? res : null;
+          const initialW = Math.round(fromDoc?.width || 540);
+          const initialH = Math.round(fromDoc?.height || 360);
+          const item: WidgetItem = {
+            id: nextLocalObjectId("diagram"),
+            kind: "diagram",
+            pluginId: payload.format,
+            sourceFormat: payload.format,
+            x: Math.max(0, Math.round(world.x - initialW / 2)),
+            y: Math.max(0, Math.round(world.y - initialH / 2)),
+            w: initialW,
+            h: initialH,
+            contentW: initialW,
+            contentH: initialH,
+            title: payload.title || `${payload.format.toUpperCase()} Diagram`,
+            html,
+            copyText: payload.source,
+            copyLabel: copyLabel(payload.format),
+            status: "accepted",
+            userResized: false,
+          };
+          history.current?.recordWidgets();
+          widgets.current?.add(item);
+          objects.current?.setSelected(null);
+          widgets.current?.setSelected(item.id);
+          syncManager.current?.broadcast({
+            type: "SYNC_WIDGET_ADD",
+            widget: compactWidgetForSync(item),
+          });
+          history.current?.commit();
+          afterBoardChangeRef.current();
+          setMode("select");
+          toast.success(`${payload.format.toUpperCase()} diagram pasted`);
+        } catch (err) {
+          console.error("Paste diagram failed:", err);
+          toast.error("Could not render diagram");
+        }
+        return;
+      }
+
+      if (payload.kind === "formula") {
+        try {
+          const rendered = await renderFormula(payload.latex, 24, color);
+          if (rendered.canvas.width > 0 && rendered.canvas.height > 0) {
+            const formulaId = nextLocalObjectId("formula");
+            const item: ObjectItem = {
+              id: formulaId,
+              kind: "formula",
+              x: Math.max(0, Math.round(world.x - rendered.canvas.width / 2)),
+              y: Math.max(0, Math.round(world.y - rendered.canvas.height / 2)),
+              w: rendered.canvas.width,
+              h: rendered.canvas.height,
+              contentW: rendered.canvas.width,
+              contentH: rendered.canvas.height,
+              source: payload.latex,
+              color,
+              fontSize: 24,
+              status: "accepted",
+              image: rendered.canvas,
+            };
+            history.current?.recordObjects();
+            addObjectRef.current(item);
+            history.current?.commit();
+            afterBoardChangeRef.current();
+            objects.current?.setSelected(formulaId);
+            setMode("select");
+            toast.success("Formula pasted");
+          }
+        } catch (err) {
+          console.error("Paste formula failed:", err);
+          toast.error("Could not render formula");
+        }
+        return;
+      }
+
+      if (payload.kind === "text") {
+        const scale = Math.max(0.01, engine.camera.scale);
+        const screenFontSize = 18;
+        const fontSize = Math.max(12, Math.round(screenFontSize / scale));
+        const screenMaxWidth = 540;
+        const maxWidth = Math.max(
+          fontSize * 4,
+          Math.round(screenMaxWidth / scale),
+        );
+        const block = renderTextBlock(payload.text, color, fontSize, maxWidth);
+        const textId = nextLocalObjectId("text");
+        const item: ObjectItem = {
+          id: textId,
+          kind: "text",
+          x: Math.max(0, Math.round(world.x - block.w / 2)),
+          y: Math.max(0, Math.round(world.y - block.h / 2)),
+          w: block.w,
+          h: block.h,
+          contentW: block.w,
+          contentH: block.h,
+          source: payload.text,
+          color,
+          fontSize,
+          maxWidth,
+          status: "accepted",
+          image: block.canvas,
+        };
+        history.current?.recordObjects();
+        addObjectRef.current(item);
+        history.current?.commit();
+        afterBoardChangeRef.current();
+        objects.current?.setSelected(textId);
+        setMode("select");
+        toast.success("Text pasted");
+      }
+    },
+    [engine, color],
+  );
+
+  const onCanvasDrop = useCallback(
+    async (e: React.DragEvent) => {
+      if (!engine) return;
+      const dropWorld =
+        clientToWorld(e.clientX, e.clientY) ??
+        engine.camera.screenToWorld(
+          engine.cssWidth / 2,
+          engine.cssHeight / 2,
+        );
+
+      const files = Array.from(e.dataTransfer.files || []);
+      const imageFiles = files.filter((f) => f.type.startsWith("image/"));
+      if (imageFiles.length > 0) {
+        for (let i = 0; i < imageFiles.length; i++) {
+          const f = imageFiles[i];
+          const offsetWorld = {
+            x: dropWorld.x + i * 32,
+            y: dropWorld.y + i * 32,
+          };
+          try {
+            const placed = await placeImageAt(engine, f, offsetWorld);
+            history.current?.commit();
+            syncManager.current?.broadcast({
+              type: "SYNC_INK_MOVE",
+              from: { x: placed.x, y: placed.y, w: 0, h: 0 },
+              x: placed.x,
+              y: placed.y,
+              w: placed.w,
+              h: placed.h,
+              dataUrl: placed.dataUrl,
+            });
+          } catch (err) {
+            console.error("Drop image error:", err);
+          }
+        }
+        afterBoardChangeRef.current();
+        setMode("select");
+        toast.success(
+          imageFiles.length === 1
+            ? "Image dropped"
+            : `${imageFiles.length} images dropped`,
+        );
+        return;
+      }
+
+      const text = e.dataTransfer.getData("text/plain");
+      if (text) {
+        const payload = await parseTextPayload(text);
+        if (payload) {
+          void handlePastePayload(payload, dropWorld);
+        }
+      }
+    },
+    [engine, clientToWorld, handlePastePayload],
+  );
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = (e.target as HTMLElement)?.tagName;
@@ -3153,6 +3473,80 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       } else if ((e.ctrlKey || e.metaKey) && k === "y") {
         redoRef.current();
         e.preventDefault();
+      } else if ((e.ctrlKey || e.metaKey) && (k === "c" || k === "x")) {
+        const tm = tools.current;
+        const sel = tm?.selection.currentSelection;
+        const wid = widgets.current?.getSelectedId();
+        const oid = objects.current?.getSelectedId();
+        const isCut = k === "x";
+
+        if (sel) {
+          setInternalClipboard({
+            type: "drawva_ink",
+            snapshot: sel.snapshot,
+            w: sel.rect.w,
+            h: sel.rect.h,
+          });
+          try {
+            sel.snapshot.toBlob((blob) => {
+              if (blob && typeof ClipboardItem !== "undefined") {
+                void navigator.clipboard
+                  ?.write([new ClipboardItem({ "image/png": blob })])
+                  .catch(() => {});
+              }
+            }, "image/png");
+          } catch {}
+          if (isCut) {
+            tm?.deleteSelection();
+            afterBoardChangeRef.current();
+          }
+          toast.success(isCut ? "Ink cut" : "Ink copied");
+          e.preventDefault();
+        } else if (oid) {
+          const item = objects.current?.get(oid);
+          if (item) {
+            setInternalClipboard({
+              type: "drawva_object",
+              item: { ...item },
+            });
+            void navigator.clipboard?.writeText(item.source).catch(() => {});
+            if (isCut) {
+              history.current?.recordObjects();
+              objects.current?.remove(oid);
+              syncManager.current?.broadcast({
+                type: "SYNC_OBJECT_REMOVE",
+                id: oid,
+              });
+              history.current?.commit();
+              afterBoardChangeRef.current();
+            }
+            toast.success(isCut ? "Item cut" : "Item copied");
+            e.preventDefault();
+          }
+        } else if (wid) {
+          const item = widgets.current?.get(wid);
+          if (item) {
+            setInternalClipboard({
+              type: "drawva_widget",
+              item: { ...item },
+            });
+            void navigator.clipboard
+              ?.writeText(item.copyText || item.html)
+              .catch(() => {});
+            if (isCut) {
+              history.current?.recordWidgets();
+              widgets.current?.remove(wid);
+              syncManager.current?.broadcast({
+                type: "SYNC_WIDGET_REMOVE",
+                id: wid,
+              });
+              history.current?.commit();
+              afterBoardChangeRef.current();
+            }
+            toast.success(isCut ? "Widget cut" : "Widget copied");
+            e.preventDefault();
+          }
+        }
       } else if (k === "delete" || k === "backspace") {
         const tm = tools.current;
         if (tm?.selection.hasSelection) {
@@ -3186,17 +3580,53 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         cancelText();
       }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [cancelText]);
 
-  const screenToWorld = (e: React.PointerEvent): Point => {
-    const rect = engine!.canvas("screen").getBoundingClientRect();
-    return engine!.camera.screenToWorld(
-      e.clientX - rect.left,
-      e.clientY - rect.top,
-    );
-  };
+    const onPointerMoveWindow = (e: PointerEvent) => {
+      const pt = clientToWorld(e.clientX, e.clientY);
+      if (pt) lastPointerPosRef.current = pt;
+    };
+
+    const onPaste = (e: ClipboardEvent) => {
+      const activeEl = document.activeElement as HTMLElement | null;
+      const t = activeEl?.tagName;
+      if (t === "TEXTAREA" || t === "INPUT" || activeEl?.isContentEditable) return;
+      if (refineStateRef.current === "loading" || appState.viewMode) return;
+
+      void (async () => {
+        const payload = await parseClipboardEvent(e);
+        if (payload) {
+          e.preventDefault();
+          void handlePastePayload(payload);
+          return;
+        }
+        const internal = getInternalClipboard();
+        if (internal) {
+          e.preventDefault();
+          void handlePastePayload({ kind: "internal", data: internal });
+        }
+      })();
+    };
+
+    const onPreventWindowDrop = (e: DragEvent) => {
+      if (e.dataTransfer?.types?.includes("Files")) {
+        e.preventDefault();
+      }
+    };
+
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("paste", onPaste);
+    window.addEventListener("pointermove", onPointerMoveWindow, { passive: true });
+    window.addEventListener("dragover", onPreventWindowDrop);
+    window.addEventListener("drop", onPreventWindowDrop);
+
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("paste", onPaste);
+      window.removeEventListener("pointermove", onPointerMoveWindow);
+      window.removeEventListener("dragover", onPreventWindowDrop);
+      window.removeEventListener("drop", onPreventWindowDrop);
+    };
+  }, [cancelText, clientToWorld, handlePastePayload]);
 
   const gestureEvent = (e: React.PointerEvent): ToolGestureEvent => {
     const rect = engine!.canvas("screen").getBoundingClientRect();
@@ -3629,6 +4059,16 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
           onWheel={onWheel}
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            e.dataTransfer.dropEffect = "copy";
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            void onCanvasDrop(e);
+          }}
           style={{
             position: "absolute",
             inset: 0,

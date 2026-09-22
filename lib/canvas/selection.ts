@@ -427,6 +427,10 @@ export class SelectionController {
     return this.selection ? { ...this.selection.rect } : null;
   }
 
+  get currentSelection(): { rect: Rect; snapshot: HTMLCanvasElement } | null {
+    return this.selection ? { rect: { ...this.selection.rect }, snapshot: this.selection.snapshot } : null;
+  }
+
   hitTest(point: Point, tolerance = 12): boolean {
     if (!this.selection) return false;
     const s = this.selection.rect;
