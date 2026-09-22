@@ -1809,6 +1809,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         },
       },
     });
+    wm.setViewMode(appState.viewMode);
     widgets.current = wm;
 
     const om = new ObjectManager({
@@ -1924,6 +1925,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         onMerge: (id) => mergeObjectToInkRef.current(id),
       },
     });
+    om.setViewMode(appState.viewMode);
     objects.current = om;
 
     const boardHistory = new BoardHistory();
@@ -2856,6 +2858,8 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
 
   useEffect(() => {
     tools.current?.setViewMode(viewMode);
+    widgets.current?.setViewMode(viewMode);
+    objects.current?.setViewMode(viewMode);
     if (viewMode) {
       widgets.current?.setSelected(null);
       objects.current?.setSelected(null);
@@ -3389,7 +3393,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
 
   const onCanvasDrop = useCallback(
     async (e: React.DragEvent) => {
-      if (!engine) return;
+      if (!engine || appState.viewMode) return;
       const dropWorld =
         clientToWorld(e.clientX, e.clientY) ??
         engine.camera.screenToWorld(

@@ -87,11 +87,13 @@ export class ObjectManager {
   private style: HTMLStyleElement;
   private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
+  private viewMode = false;
   private animRafId: number | null = null;
   private animCanvases = new Map<string, { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D }>();
   private styleSizeKey = new Map<string, string>();
 
   private onPointerMove = (e: PointerEvent) => {
+    if (this.viewMode) return;
     const cb = this.opts.callbacks;
     if (!cb) return;
     for (const id of this.items.keys()) {
@@ -101,6 +103,7 @@ export class ObjectManager {
   };
 
   private onPointerUp = () => {
+    if (this.viewMode) return;
     const cb = this.opts.callbacks;
     if (!cb) return;
     for (const id of this.items.keys()) {
@@ -157,8 +160,20 @@ export class ObjectManager {
       }
       .drawva-object-host:not([data-mode="select"]) .drawva-object-chrome,
       .drawva-object-host:not([data-mode="select"]) .drawva-object-resize,
-      .drawva-object-host:not([data-mode="select"]) .drawva-object-side-actions {
+      .drawva-object-host:not([data-mode="select"]) .drawva-object-side-actions,
+      .drawva-object-host[data-view-mode="true"] .drawva-object-chrome,
+      .drawva-object-host[data-view-mode="true"] .drawva-object-resize,
+      .drawva-object-host[data-view-mode="true"] .drawva-object-side-actions,
+      .drawva-object-host[data-view-mode="true"] .drawva-object-drag,
+      .drawva-object-host[data-view-mode="true"] .drawva-object-btn {
         display: none !important;
+        pointer-events: none !important;
+      }
+      .drawva-object-host[data-view-mode="true"] .drawva-object-shell {
+        border-color: transparent !important;
+        border-style: none !important;
+        box-shadow: none !important;
+        cursor: default !important;
         pointer-events: none !important;
       }
       .drawva-object-side-actions {
@@ -353,7 +368,7 @@ export class ObjectManager {
 
   setSelected(id: string | null): void {
     if (this.selectedId === id) return;
-    if (id && this.mode !== "select") return;
+    if (id && (this.viewMode || this.mode !== "select")) return;
     const prev = this.selectedId;
     this.selectedId = id;
     if (prev) this.applyMode(prev);
@@ -382,8 +397,19 @@ export class ObjectManager {
   setMode(mode: CanvasMode): void {
     this.mode = mode;
     this.hostRoot.dataset.mode = mode;
-    if (mode !== "select") {
+    if (mode !== "select" || this.viewMode) {
       this.selectedId = null;
+    }
+    for (const id of this.toolbars.keys()) this.applyMode(id);
+  }
+
+  setViewMode(viewMode: boolean): void {
+    this.viewMode = viewMode;
+    if (viewMode) {
+      this.hostRoot.dataset.viewMode = "true";
+      this.selectedId = null;
+    } else {
+      delete this.hostRoot.dataset.viewMode;
     }
     for (const id of this.toolbars.keys()) this.applyMode(id);
   }
@@ -403,30 +429,30 @@ export class ObjectManager {
     const { chrome, dragBar, resizeHandle, resizeWidth, resizeHeight, sideActions, acceptBtn } = tb;
     const shell = this.shells.get(id);
     const item = this.items.get(id);
-    const select = this.mode === "select";
+    const select = !this.viewMode && this.mode === "select";
     const isSelected = select && this.selectedId === id;
-    const isDraft = item?.status === "draft";
+    const isDraft = !this.viewMode && item?.status === "draft";
     const active = select && (isSelected || isDraft);
     this.hostRoot.style.zIndex = select ? "40" : "20";
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
-      shell.style.pointerEvents = select ? "auto" : "none";
+      shell.style.pointerEvents = this.viewMode ? "none" : select ? "auto" : "none";
       shell.style.cursor = "default";
       shell.style.borderColor = active ? "var(--primary)" : "transparent";
       shell.style.borderStyle = active ? "dotted" : "none";
       shell.style.borderWidth = "2px";
       shell.style.boxShadow = "none";
     }
-    if (chrome) chrome.style.display = select ? (active ? "flex" : "") : "none";
+    if (chrome) chrome.style.display = this.viewMode ? "none" : select ? (active ? "flex" : "") : "none";
     if (sideActions) {
       const isNarrow = shell?.dataset.narrow === "true";
-      sideActions.style.display = select && active && isNarrow ? "flex" : "none";
+      sideActions.style.display = !this.viewMode && select && active && isNarrow ? "flex" : "none";
     }
-    if (dragBar) dragBar.style.display = select ? "inline-flex" : "none";
-    if (resizeHandle) resizeHandle.style.display = select && active ? "inline-flex" : "none";
-    if (resizeWidth) resizeWidth.style.display = select && active ? "inline-flex" : "none";
-    if (resizeHeight) resizeHeight.style.display = select && active ? "inline-flex" : "none";
-    if (acceptBtn) acceptBtn.style.display = select && isDraft ? "inline-flex" : "none";
+    if (dragBar) dragBar.style.display = !this.viewMode && select ? "inline-flex" : "none";
+    if (resizeHandle) resizeHandle.style.display = !this.viewMode && select && active ? "inline-flex" : "none";
+    if (resizeWidth) resizeWidth.style.display = !this.viewMode && select && active ? "inline-flex" : "none";
+    if (resizeHeight) resizeHeight.style.display = !this.viewMode && select && active ? "inline-flex" : "none";
+    if (acceptBtn) acceptBtn.style.display = !this.viewMode && select && isDraft ? "inline-flex" : "none";
   }
 
   all(): ObjectItem[] {
@@ -707,15 +733,17 @@ export class ObjectManager {
     if (sideActions) shell.append(sideActions);
 
     shell.addEventListener("pointerenter", () => {
+      if (this.viewMode) return;
       shell.dataset.hovered = "true";
       this.applyMode(item.id);
     });
     shell.addEventListener("pointerleave", () => {
+      if (this.viewMode) return;
       shell.dataset.hovered = "false";
       this.applyMode(item.id);
     });
     shell.addEventListener("pointerdown", (e) => {
-      if (this.mode !== "select") return;
+      if (this.viewMode || this.mode !== "select") return;
       const target = e.target as HTMLElement | null;
       if (!target?.closest(".drawva-object-btn") && !target?.closest(".drawva-object-resize")) {
         e.stopPropagation();
@@ -725,14 +753,16 @@ export class ObjectManager {
 
     const cb = this.opts.callbacks ?? {};
     const beginDrag = (e: PointerEvent) => {
+      if (this.viewMode || this.mode !== "select") return;
       e.stopPropagation();
-      if (this.mode === "select") this.setSelected(item.id);
+      this.setSelected(item.id);
       dragBar.setPointerCapture?.(e.pointerId);
       cb.onDragStart?.(item.id, e);
     };
     const beginResize = (mode: ObjectResizeMode) => (e: PointerEvent) => {
+      if (this.viewMode || this.mode !== "select") return;
       e.stopPropagation();
-      if (this.mode === "select") this.setSelected(item.id);
+      this.setSelected(item.id);
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
       cb.onResizeStart?.(item.id, mode, e);
     };

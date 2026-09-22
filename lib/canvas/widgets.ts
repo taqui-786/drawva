@@ -90,6 +90,7 @@ export class WidgetManager {
   private style: HTMLStyleElement;
   private mode: CanvasMode = "hand";
   private selectedId: string | null = null;
+  private viewMode = false;
   private snapshotWaiters = new Map<
     string,
     Array<(img: HTMLImageElement | HTMLCanvasElement | null) => void>
@@ -103,6 +104,7 @@ export class WidgetManager {
   >();
 
   private onPointerMove = (e: PointerEvent) => {
+    if (this.viewMode) return;
     const cb = this.opts.callbacks;
     if (!cb) return;
     for (const id of this.widgets.keys()) {
@@ -113,6 +115,7 @@ export class WidgetManager {
   };
 
   private onPointerUp = () => {
+    if (this.viewMode) return;
     const cb = this.opts.callbacks;
     if (!cb) return;
     for (const id of this.widgets.keys()) {
@@ -169,8 +172,20 @@ export class WidgetManager {
       }
       .drawva-widget-host:not([data-mode="select"]) .drawva-widget-chrome,
       .drawva-widget-host:not([data-mode="select"]) .drawva-widget-resize,
-      .drawva-widget-host:not([data-mode="select"]) .drawva-widget-side-actions {
+      .drawva-widget-host:not([data-mode="select"]) .drawva-widget-side-actions,
+      .drawva-widget-host[data-view-mode="true"] .drawva-widget-chrome,
+      .drawva-widget-host[data-view-mode="true"] .drawva-widget-resize,
+      .drawva-widget-host[data-view-mode="true"] .drawva-widget-side-actions,
+      .drawva-widget-host[data-view-mode="true"] .drawva-widget-drag,
+      .drawva-widget-host[data-view-mode="true"] .drawva-widget-btn {
         display: none !important;
+        pointer-events: none !important;
+      }
+      .drawva-widget-host[data-view-mode="true"] .drawva-widget-shell {
+        border-color: transparent !important;
+        border-style: none !important;
+        box-shadow: none !important;
+        cursor: default !important;
         pointer-events: none !important;
       }
       .drawva-widget-side-actions {
@@ -420,7 +435,7 @@ export class WidgetManager {
 
   setSelected(id: string | null): void {
     if (this.selectedId === id) return;
-    if (id && this.mode !== "select") return;
+    if (id && (this.viewMode || this.mode !== "select")) return;
     const prev = this.selectedId;
     this.selectedId = id;
     if (prev) this.applyMode(prev);
@@ -454,15 +469,26 @@ export class WidgetManager {
     if (shell) shell.dataset.status = status;
     const tb = this.toolbars.get(id);
     if (tb?.overlay)
-      tb.overlay.style.display = status === "draft" ? "block" : "none";
+      tb.overlay.style.display = !this.viewMode && status === "draft" ? "block" : "none";
     this.applyMode(id);
   }
 
   setMode(mode: CanvasMode): void {
     this.mode = mode;
     this.hostRoot.dataset.mode = mode;
-    if (mode !== "select") {
+    if (mode !== "select" || this.viewMode) {
       this.selectedId = null;
+    }
+    for (const id of this.toolbars.keys()) this.applyMode(id);
+  }
+
+  setViewMode(viewMode: boolean): void {
+    this.viewMode = viewMode;
+    if (viewMode) {
+      this.hostRoot.dataset.viewMode = "true";
+      this.selectedId = null;
+    } else {
+      delete this.hostRoot.dataset.viewMode;
     }
     for (const id of this.toolbars.keys()) this.applyMode(id);
   }
@@ -482,11 +508,11 @@ export class WidgetManager {
       acceptBtn,
     } = tb;
     const shell = this.shells.get(id);
-    const hand = this.mode === "hand";
-    const select = this.mode === "select";
+    const hand = !this.viewMode && this.mode === "hand";
+    const select = !this.viewMode && this.mode === "select";
     const isSelected = select && this.selectedId === id;
     const widget = this.widgets.get(id);
-    const isDraft = widget?.status === "draft";
+    const isDraft = !this.viewMode && widget?.status === "draft";
     const active = select && (isDraft || isSelected);
     const frame = shell?.querySelector("iframe") as HTMLIFrameElement | null;
 
@@ -494,8 +520,8 @@ export class WidgetManager {
 
     if (shell) {
       shell.dataset.selected = isSelected ? "true" : "false";
-      shell.style.pointerEvents = select ? "auto" : "none";
-      shell.style.cursor = select ? "grab" : "default";
+      shell.style.pointerEvents = this.viewMode ? "none" : select ? "auto" : "none";
+      shell.style.cursor = this.viewMode ? "default" : select ? "grab" : "default";
       shell.style.borderColor = active ? "var(--primary)" : "transparent";
       shell.style.borderStyle = active ? "dotted" : "none";
       shell.style.borderWidth = "2px";
@@ -503,33 +529,33 @@ export class WidgetManager {
     }
 
     if (frame) {
-      frame.style.pointerEvents = select || hand ? "auto" : "none";
+      frame.style.pointerEvents = !this.viewMode && (select || hand) ? "auto" : "none";
     }
 
     if (chrome) {
-      chrome.style.display = select ? (active ? "flex" : "") : "none";
+      chrome.style.display = this.viewMode ? "none" : select ? (active ? "flex" : "") : "none";
     }
     if (sideActions) {
       const isNarrow = shell?.dataset.narrow === "true";
       sideActions.style.display =
-        select && active && isNarrow ? "flex" : "none";
+        !this.viewMode && select && active && isNarrow ? "flex" : "none";
     }
     if (dragBar) {
-      dragBar.style.display = select ? "inline-flex" : "none";
+      dragBar.style.display = !this.viewMode && select ? "inline-flex" : "none";
     }
     if (acceptBtn) {
-      acceptBtn.style.display = select && isDraft ? "inline-flex" : "none";
+      acceptBtn.style.display = !this.viewMode && select && isDraft ? "inline-flex" : "none";
     }
     if (resizeHandle) {
-      resizeHandle.style.display = select && active ? "inline-flex" : "none";
+      resizeHandle.style.display = !this.viewMode && select && active ? "inline-flex" : "none";
     }
-    resizeWidth.style.display = select && active ? "inline-flex" : "none";
-    resizeHeight.style.display = select && active ? "inline-flex" : "none";
+    resizeWidth.style.display = !this.viewMode && select && active ? "inline-flex" : "none";
+    resizeHeight.style.display = !this.viewMode && select && active ? "inline-flex" : "none";
     if (refine) {
-      refine.style.display = select && active ? "inline-flex" : "none";
+      refine.style.display = !this.viewMode && select && active ? "inline-flex" : "none";
     }
     if (overlay) {
-      overlay.style.display = isDraft ? "block" : "none";
+      overlay.style.display = !this.viewMode && isDraft ? "block" : "none";
     }
   }
 
@@ -888,7 +914,7 @@ export class WidgetManager {
     );
 
     shell.addEventListener("pointerdown", (e) => {
-      if (this.mode !== "select") return;
+      if (this.viewMode || this.mode !== "select") return;
       const target = e.target as HTMLElement | null;
       if (
         !target?.closest(".drawva-widget-btn") &&
@@ -902,7 +928,7 @@ export class WidgetManager {
     shell.addEventListener(
       "wheel",
       (e) => {
-        if (this.mode !== "hand") return;
+        if (this.viewMode || this.mode !== "hand") return;
         e.preventDefault();
         window.postMessage(
           {
@@ -924,14 +950,16 @@ export class WidgetManager {
 
     const cb = this.opts.callbacks ?? {};
     const beginDrag = (e: PointerEvent) => {
+      if (this.viewMode || this.mode !== "select") return;
       e.stopPropagation();
-      if (this.mode === "select") this.setSelected(widget.id);
+      this.setSelected(widget.id);
       dragBar.setPointerCapture?.(e.pointerId);
       cb.onDragStart?.(widget.id, e);
     };
     const beginResize = (mode: WidgetResizeMode) => (e: PointerEvent) => {
+      if (this.viewMode || this.mode !== "select") return;
       e.stopPropagation();
-      if (this.mode === "select") this.setSelected(widget.id);
+      this.setSelected(widget.id);
       (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
       cb.onResizeStart?.(widget.id, mode, e);
     };
