@@ -492,6 +492,27 @@ function rescueCollision(
   ) {
     return box;
   }
+
+  // If the box is substantially contained inside a multi-stroke anchor (e.g., prompt + arrow + container box),
+  // do not eject it out to the side if the caller didn't explicitly request a relative side like "below" or "right".
+  const isContainedInAnchor =
+    box.x >= anchor.x - 24 &&
+    box.y >= anchor.y - 24 &&
+    box.x + box.w <= anchor.x + anchor.w + 24 &&
+    box.y + box.h <= anchor.y + anchor.h + 24 &&
+    box.w * box.h < anchor.w * anchor.h * 0.9 &&
+    anchor.h > 200;
+
+  if (
+    isContainedInAnchor &&
+    placement !== "below" &&
+    placement !== "right" &&
+    placement !== "left" &&
+    placement !== "top"
+  ) {
+    return box;
+  }
+
   const pad = scaleAwareGap(source.scale, source.visibleRect);
   if (!overlaps(box, anchor, pad)) return box;
   const blockers = occupancy(source.changedBox, source.sceneItems, source.visibleRect);
@@ -562,7 +583,12 @@ export function fitWidgetGeometry(
     placement === "target_box" ||
     placement === "at_target" ||
     placement === "match_sketch" ||
-    placement === "overlay";
+    placement === "overlay" ||
+    Boolean(targetBox);
+
+  if (Boolean(targetBox) && !cmd.placement) {
+    cmd.placement = "inside_target";
+  }
 
   const explicitTarget = matchedTarget || widgetEditBox;
   const isTargetExplicit = Boolean(cmd.targetId) || Boolean(widgetEditBox);
@@ -588,12 +614,28 @@ export function fitWidgetGeometry(
   if (hasExplicitCoords) {
     if (!Number.isFinite(rawW) || rawW <= 0) rawW = DEFAULT_WIDGET_WIDTH;
     if (!Number.isFinite(rawH) || rawH <= 0) rawH = DEFAULT_WIDGET_HEIGHT;
+
+    let targetX = Number(rawCmdX);
+    let targetY = Number(rawCmdY);
+    let targetW = rawW;
+    let targetH = rawH;
+
+    // Apply 20px safety margin when targeting a container so the widget
+    // sits comfortably inside hand-drawn strokes without overlapping the ink.
+    if (isTargetPlacement && targetW > 80 && targetH > 80) {
+      const margin = 20;
+      targetX += margin;
+      targetY += margin;
+      targetW = Math.max(40, targetW - 2 * margin);
+      targetH = Math.max(40, targetH - 2 * margin);
+    }
+
     const box = sanitizeWidgetGeometry(
       {
-        x: Number(rawCmdX),
-        y: Number(rawCmdY),
-        w: rawW,
-        h: rawH,
+        x: targetX,
+        y: targetY,
+        w: targetW,
+        h: targetH,
       },
       widgetGeometry
     );
@@ -608,7 +650,7 @@ export function fitWidgetGeometry(
       Number.isFinite(rawW) && Number.isFinite(rawH) && rawW > 0 && rawH > 0
         ? rawW / rawH
         : changedBox.w / Math.max(1, changedBox.h);
-    const inscribed = largestInscribedRect(changedBox, aspect);
+    const inscribed = largestInscribedRect(changedBox, aspect, 20);
     const containerGeom = {
       max: {
         w: Math.min(widgetGeometry?.max?.w ?? Infinity, changedBox.w),

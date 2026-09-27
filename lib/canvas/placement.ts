@@ -292,12 +292,23 @@ const inscribedCache = new Map<string, Box>();
  */
 export function largestInscribedRect(
   polygon: Point[] | Box,
-  targetAspect: number
+  targetAspect: number,
+  margin = 0
 ): Box {
   let poly: Point[];
   let polyBox: Box;
   if (!Array.isArray(polygon)) {
-    polyBox = polygon;
+    const rawBox = polygon;
+    const safeMargin = Math.min(
+      Math.max(0, margin),
+      Math.floor(Math.min(rawBox.w, rawBox.h) * 0.15)
+    );
+    polyBox = {
+      x: rawBox.x + safeMargin,
+      y: rawBox.y + safeMargin,
+      w: Math.max(1, rawBox.w - 2 * safeMargin),
+      h: Math.max(1, rawBox.h - 2 * safeMargin),
+    };
     const aspect = targetAspect > 0 ? targetAspect : polyBox.w / polyBox.h;
     let w: number;
     let h: number;
@@ -323,7 +334,18 @@ export function largestInscribedRect(
       if (p.y < minY) minY = p.y;
       if (p.y > maxY) maxY = p.y;
     }
-    polyBox = { x: minX, y: minY, w: Math.max(1, maxX - minX), h: Math.max(1, maxY - minY) };
+    const rawW = Math.max(1, maxX - minX);
+    const rawH = Math.max(1, maxY - minY);
+    const safeMargin = Math.min(
+      Math.max(0, margin),
+      Math.floor(Math.min(rawW, rawH) * 0.15)
+    );
+    polyBox = {
+      x: minX + safeMargin,
+      y: minY + safeMargin,
+      w: Math.max(1, rawW - 2 * safeMargin),
+      h: Math.max(1, rawH - 2 * safeMargin),
+    };
   }
 
   const aspect = targetAspect > 0 ? targetAspect : polyBox.w / polyBox.h;
