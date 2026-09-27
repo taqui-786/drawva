@@ -65,22 +65,37 @@ export async function createCloudCanvas(
   snapshot: ProjectSnapshot,
   title?: string,
   signal?: AbortSignal
-): Promise<{ success: boolean; canvas?: CloudCanvasResult }> {
+): Promise<{ success: boolean; canvas?: CloudCanvasResult; error?: string }> {
   try {
     const res = await fetch("/api/canvas/cloud", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ snapshot, title }),
-      signal: signal || AbortSignal.timeout(15000),
+      signal: signal || AbortSignal.timeout(30000),
     });
-    if (!res.ok) return { success: false };
-    const json = (await res.json()) as { success: boolean; canvas?: CloudCanvasResult };
-    return { success: !!json.success, canvas: json.canvas };
-  } catch (err) {
-    if ((err as Error)?.name !== "AbortError") {
-      console.warn("createCloudCanvas:", err);
+    if (!res.ok) {
+      let errMsg = `Server returned status ${res.status}`;
+      try {
+        const errJson = (await res.json()) as { error?: string };
+        if (errJson?.error) errMsg = errJson.error;
+      } catch {
+        // ignore json parse error
+      }
+      if (res.status === 413) {
+        errMsg = "Canvas payload exceeds server limit (413). Try downloading with Export JSON.";
+      } else if (res.status === 401) {
+        errMsg = "Please sign in to save your canvas to the cloud.";
+      }
+      console.warn("createCloudCanvas error:", res.status, errMsg);
+      return { success: false, error: errMsg };
     }
-    return { success: false };
+    const json = (await res.json()) as { success: boolean; canvas?: CloudCanvasResult; error?: string };
+    return { success: !!json.success, canvas: json.canvas, error: json.error };
+  } catch (err) {
+    const isAbort = (err as Error)?.name === "AbortError";
+    const msg = isAbort ? "Request timed out while saving canvas (30s)" : (err as Error)?.message || "Network error";
+    console.warn("createCloudCanvas:", msg, err);
+    return { success: false, error: msg };
   }
 }
 
@@ -89,22 +104,37 @@ export async function updateCloudCanvas(
   snapshot?: ProjectSnapshot,
   title?: string,
   signal?: AbortSignal
-): Promise<{ success: boolean; savedAt?: number }> {
+): Promise<{ success: boolean; savedAt?: number; error?: string }> {
   try {
     const res = await fetch("/api/canvas/cloud", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id, snapshot, title }),
-      signal: signal || AbortSignal.timeout(15000),
+      signal: signal || AbortSignal.timeout(30000),
     });
-    if (!res.ok) return { success: false };
-    const json = (await res.json()) as { success: boolean; savedAt?: number };
-    return { success: !!json.success, savedAt: json.savedAt };
-  } catch (err) {
-    if ((err as Error)?.name !== "AbortError") {
-      console.warn("updateCloudCanvas:", err);
+    if (!res.ok) {
+      let errMsg = `Server returned status ${res.status}`;
+      try {
+        const errJson = (await res.json()) as { error?: string };
+        if (errJson?.error) errMsg = errJson.error;
+      } catch {
+        // ignore
+      }
+      if (res.status === 413) {
+        errMsg = "Canvas payload exceeds server limit (413).";
+      } else if (res.status === 401) {
+        errMsg = "Please sign in to update canvas in the cloud.";
+      }
+      console.warn("updateCloudCanvas error:", res.status, errMsg);
+      return { success: false, error: errMsg };
     }
-    return { success: false };
+    const json = (await res.json()) as { success: boolean; savedAt?: number; error?: string };
+    return { success: !!json.success, savedAt: json.savedAt, error: json.error };
+  } catch (err) {
+    const isAbort = (err as Error)?.name === "AbortError";
+    const msg = isAbort ? "Request timed out while updating canvas (30s)" : (err as Error)?.message || "Network error";
+    console.warn("updateCloudCanvas:", msg, err);
+    return { success: false, error: msg };
   }
 }
 

@@ -2,6 +2,21 @@ import { SIZE, TILE } from "./constants";
 import type { Rect } from "./types";
 import { tileKey } from "./types";
 
+function isCanvasBlank(canvas: HTMLCanvasElement): boolean {
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return true;
+  try {
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const buf = new Uint32Array(imgData.data.buffer);
+    for (let i = 0; i < buf.length; i++) {
+      if (buf[i] !== 0) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export class TileCache {
   private tiles = new Map<string, HTMLCanvasElement>();
   private dataUrlCache = new Map<string, string>();
@@ -32,12 +47,25 @@ export class TileCache {
     const [tx, ty] = k.split(",").map(Number);
     const c = this.get(tx, ty);
     if (!c) return null;
+    if (isCanvasBlank(c)) {
+      this.delete(k);
+      return null;
+    }
     try {
-      const url = c.toDataURL("image/png");
+      let url = c.toDataURL("image/webp", 0.82);
+      if (!url || !url.startsWith("data:image/webp")) {
+        url = c.toDataURL("image/png");
+      }
       this.dataUrlCache.set(k, url);
       return url;
     } catch {
-      return null;
+      try {
+        const url = c.toDataURL("image/png");
+        this.dataUrlCache.set(k, url);
+        return url;
+      } catch {
+        return null;
+      }
     }
   }
 

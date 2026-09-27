@@ -318,8 +318,9 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
       window.history.replaceState(null, "", `/canvas/${res.canvas.id}`);
       return res.canvas.id;
     } else {
-      toast.error("Failed to save canvas to cloud");
-      throw new Error("Failed to save canvas");
+      const errMsg = res.error || "Failed to save canvas to cloud";
+      toast.error(errMsg);
+      throw new Error(errMsg);
     }
   };
 
