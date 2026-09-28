@@ -503,9 +503,35 @@ async function execApply(args: Record<string, unknown>, deps: ConductorToolDeps)
   const watchedBefore = trackedSceneSignature(deps.widgets, deps.objects, watched);
   deps.history.recordObjects();
   deps.history.recordWidgets();
-  deps.draft.setPending(commands);
+
+  // Harness guarantee:
+  // 1. If an in-place widget was requested but the model forgot the erase command, auto-synthesize it.
+  const hasErase = commands.some((c) => c.tool === "erase");
+  const inPlaceWidget = commands.find(
+    (c) =>
+      (c.tool === "html_widget" || c.tool === "diagram_source") &&
+      (c.placement === "in_place" || c.placement === "match_sketch")
+  ) as (CanvasCommand & { x: number; y: number; w: number; h: number; targetId?: string }) | undefined;
+
+  const executionCommands: CanvasCommand[] = [...commands];
+  if (inPlaceWidget && !hasErase && !inPlaceWidget.targetId) {
+    const pad = 14;
+    executionCommands.unshift({
+      tool: "erase",
+      mode: "rect",
+      x: Math.round(inPlaceWidget.x - pad),
+      y: Math.round(inPlaceWidget.y - pad),
+      w: Math.round(inPlaceWidget.w + pad * 2),
+      h: Math.round(inPlaceWidget.h + pad * 2),
+    });
+  }
+
+  // 2. Strictly sort all erase commands first so old ink is cleanly wiped before any new items mount
+  executionCommands.sort((a, b) => (a.tool === "erase" ? -1 : b.tool === "erase" ? 1 : 0));
+
+  deps.draft.setPending(executionCommands);
   try {
-    for (const c of commands) {
+    for (const c of executionCommands) {
       if (c.tool === "draw" || c.tool === "erase") {
         const box = commandInkBox(c);
         if (box && box.w > 0 && box.h > 0) deps.history.captureRect(box);
