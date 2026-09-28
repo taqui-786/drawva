@@ -17,6 +17,10 @@
 
 <br />
 
+<img src="./public/demo/drawva-demo-two-webpformat.webp" alt="Drawva Multimodal AI Whiteboard Demo" width="100%" />
+
+<br />
+
 </div>
 
 ---
