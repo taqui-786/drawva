@@ -18,7 +18,7 @@ recommended-refresh-seconds: 900
 Use for current weather, temperature, humidity, wind, and short forecasts.
 
 ## Output contract
-Return one html_widget command ({ tool: "html_widget", pluginId: "weather", title, x, y, w, h, html, refreshSeconds: 900 }). Transparent layout, responsive typography, no card shadow.
+Return one html_widget command ({ tool: "html_widget", pluginId: "weather", title, x, y, w, h, html, refreshSeconds: 900 }). Strictly transparent layout across all containers, daily forecast columns, and cards (`background: transparent`). Do NOT paint solid white or tinted card backgrounds (#fff, #ffffff, #f1f5f9) — the whiteboard canvas grid must show through all elements. Use clean 1px borders and high-contrast typography for structure, no card shadow.
 Collaborative ink layout: when user ink already states the location/subject (e.g. "Todays weather of Ranchi"), do NOT duplicate "Ranchi" as a prominent title banner. Start directly with current conditions/temperature and 5-day forecast cards, using subtle secondary location/time metadata ("Jharkhand · Updated 12:00 PM").
 
 ## Data contract

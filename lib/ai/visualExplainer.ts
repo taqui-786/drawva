@@ -17,19 +17,18 @@ Do not decorate first. Rank the information, then pick the structure that carrie
   * Omit the redundant title banner and start immediately with the category framing / subtitle (if helpful), primary diagram, reaction formulas, or core cards.
   * Position the explainer directly below the user's ink so the handwriting naturally crowns the infographic. Include an <h1> Hero Title only if the canvas had no written title.
 - ZERO WINDOW BACKGROUND: html, body, #stage, and outer wrapper divs MUST have background: transparent !important. Never paint a solid white or dark rectangle across the whole canvas viewport. The infinite canvas grid must show through.
+- MODULE STYLING: Individual diagram boxes, cards, and chips use clean, crisp vector borders (e.g. border: 1.5px solid rgba(0,0,0,0.12) in light mode or rgba(255,255,255,0.15) in dark mode, border-radius: 8px..12px) and transparent backgrounds (background: transparent !important). The infinite canvas grid must show through every module. Never paint opaque, semi-opaque, or white card fills.
 - ZERO BOX SHADOW: Never use box-shadow on the container, outer window, or modules. Drop shadows create artificial card elevation that breaks whiteboard immersion.
-- MODULE STYLING: Individual diagram boxes, cards, and chips use clean, crisp vector borders (e.g. border: 1.5px solid rgba(0,0,0,0.12) in light mode or rgba(255,255,255,0.15) in dark mode, border-radius: 8px..12px) and subtle translucent tinted fills (background: rgba(248, 250, 252, 0.7) or rgba(..., 0.04)), never heavy opaque cards.
-
-## 2. NOTEBOOK-PAGE TYPOGRAPHY & SCALE (NEVER TOO SMALL)
-Canvas-world units are larger than desktop websites! Standard web text (11px-14px) is microscopic and completely unreadable on the canvas. Use large, bold, crisp typography:
-- Hero / Infographic Title: 52px – 64px, font-weight 700, tracking -0.02em (omit when user ink already provides the title).
-- Subtitle / Framing: 28px – 34px, font-weight 500, muted color.
-- Section Headings: 34px – 42px, font-weight 600.
-- Panel Titles / Key Concept Badges: 28px – 32px, font-weight 600.
-- Body Text (Theory & Explanations): 24px – 28px, line-height 1.45 – 1.55.
-- Data Values & Metrics: 36px – 56px, bold, aligned with units.
-- Diagram Node Labels, Flowchart Text, Chips: 20px – 26px.
-- Footnotes & Meta Tags: 18px – 20px. Never drop below 18px anywhere!
+## 2. NOTEBOOK-PAGE TYPOGRAPHY & SCALE (DESIGN FOR 20%–25% ZOOM)
+Canvas-world units are larger than desktop websites! Standard web text (11px-14px) is microscopic and completely unreadable on the canvas at 20%–25% overview zoom. Use large, bold, crisp typography:
+- Hero / Infographic Title: 56px – 68px, font-weight 700, tracking -0.02em (omit when user ink already provides the title).
+- Subtitle / Framing: 30px – 36px, font-weight 500, muted color.
+- Section Headings: 38px – 48px, font-weight 600.
+- Panel Titles / Key Concept Badges: 32px – 38px, font-weight 600.
+- Body Text (Theory & Explanations): 28px – 34px, line-height 1.45 – 1.55.
+- Data Values & Metrics: 48px – 68px, bold display numbers aligned with units.
+- Diagram Node Labels, Flowchart Text, Chips: 24px – 30px.
+- Footnotes & Meta Tags: 22px – 26px. Never drop below 22px anywhere!
 
 ## 3. ZERO WASTED SPACE (COMPACT NOTEBOOK PAGE)
 - Treat the visual like a masterclass technical notebook page: dense, balanced, and purposeful.

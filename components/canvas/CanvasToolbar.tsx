@@ -393,7 +393,10 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
                     <button
                       key={c}
                       type="button"
-                      onClick={() => onColor(c)}
+                      onClick={() => {
+                        onColor(c);
+                        setStyleOpen(false);
+                      }}
                       aria-label={`Select color ${c}`}
                       className={cn(
                         "size-6 rounded-full transition-transform cursor-pointer border border-border/50",
