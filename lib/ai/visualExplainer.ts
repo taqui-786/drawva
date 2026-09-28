@@ -12,13 +12,17 @@ Do not decorate first. Rank the information, then pick the structure that carrie
 
 ## 1. CANVAS INTEGRATION (IRONCLAD: NO BOX SHADOW, NO WINDOW BACKGROUND)
 - The infographic MUST feel like it is directly drawn onto the whiteboard canvas alongside ink, NOT an external floating card, modal, or desktop window.
+- COLLABORATIVE TITLE CO-AUTHORSHIP (ZERO HEADING DUPLICATION):
+  * When the user has written or drawn the subject/title on the canvas (e.g. "Photosynthesis", "Quantum Computing"): DO NOT generate a duplicate <h1> or hero title banner! The user's handwritten ink already serves as the title of the visual explainer.
+  * Omit the redundant title banner and start immediately with the category framing / subtitle (if helpful), primary diagram, reaction formulas, or core cards.
+  * Position the explainer directly below the user's ink so the handwriting naturally crowns the infographic. Include an <h1> Hero Title only if the canvas had no written title.
 - ZERO WINDOW BACKGROUND: html, body, #stage, and outer wrapper divs MUST have background: transparent !important. Never paint a solid white or dark rectangle across the whole canvas viewport. The infinite canvas grid must show through.
 - ZERO BOX SHADOW: Never use box-shadow on the container, outer window, or modules. Drop shadows create artificial card elevation that breaks whiteboard immersion.
 - MODULE STYLING: Individual diagram boxes, cards, and chips use clean, crisp vector borders (e.g. border: 1.5px solid rgba(0,0,0,0.12) in light mode or rgba(255,255,255,0.15) in dark mode, border-radius: 8px..12px) and subtle translucent tinted fills (background: rgba(248, 250, 252, 0.7) or rgba(..., 0.04)), never heavy opaque cards.
 
 ## 2. NOTEBOOK-PAGE TYPOGRAPHY & SCALE (NEVER TOO SMALL)
 Canvas-world units are larger than desktop websites! Standard web text (11px-14px) is microscopic and completely unreadable on the canvas. Use large, bold, crisp typography:
-- Hero / Infographic Title: 52px – 64px, font-weight 700, tracking -0.02em.
+- Hero / Infographic Title: 52px – 64px, font-weight 700, tracking -0.02em (omit when user ink already provides the title).
 - Subtitle / Framing: 28px – 34px, font-weight 500, muted color.
 - Section Headings: 34px – 42px, font-weight 600.
 - Panel Titles / Key Concept Badges: 28px – 32px, font-weight 600.
@@ -34,7 +38,7 @@ Canvas-world units are larger than desktop websites! Standard web text (11px-14p
 - Choose compact dimensions that tightly wrap the content: e.g. 1400×900 for focused explainers, 1600×1000 for standard landscape, 1800×1100 for multi-panel systems, or 1200×1600 for vertical timelines/articles.
 
 ## 4. THE 6 INFOGRAPHIC LAYOUT ARCHETYPES
-Pick the one archetype from the layout cheat sheet that naturally fits the topic:
+Pick the one archetype from the layout cheat sheet that naturally fits the topic (omit the top headline banner when user ink is already the title, flowing immediately into the core diagram or criteria):
 
 1. Useful Bait (Key Points & Core Takeaways)
    - Layout: Top headline banner → Primary hero diagram box (~40-50% height) → 2×2 grid of key takeaways cards → Large callout / feature block with side-by-side visual + text description → 3 bottom highlight cards.

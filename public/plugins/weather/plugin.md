@@ -19,6 +19,7 @@ Use for current weather, temperature, humidity, wind, and short forecasts.
 
 ## Output contract
 Return one html_widget command ({ tool: "html_widget", pluginId: "weather", title, x, y, w, h, html, refreshSeconds: 900 }). Transparent layout, responsive typography, no card shadow.
+Collaborative ink layout: when user ink already states the location/subject (e.g. "Todays weather of Ranchi"), do NOT duplicate "Ranchi" as a prominent title banner. Start directly with current conditions/temperature and 5-day forecast cards, using subtle secondary location/time metadata ("Jharkhand · Updated 12:00 PM").
 
 ## Data contract
 1. Geocode: GET https://geocoding-api.open-meteo.com/v1/search?name={encodedPlace}&count=1&format=json

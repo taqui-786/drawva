@@ -17,7 +17,7 @@ Use for current geomagnetic conditions, Kp history, or a broad aurora activity s
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"space-weather"`. Place it where the user indicates or in nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:300`. Generate the responsive HTML yourself. Make the latest Kp value and qualitative activity level dominant, with a large 24-hour trend. Keep text highly readable and the outer layout transparent with no card background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"space-weather"`. Place it where the user indicates or in nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:300`. Generate the responsive HTML yourself. Make the latest Kp value and qualitative activity level dominant, with a large 24-hour trend. Collaborative ink layout: when user ink states the prompt/question, do not duplicate it as a title header; make the Kp index, activity level, and trend dominant. Keep text highly readable and the outer layout transparent with no card background, border, or shadow.
 
 ## Data contract
 

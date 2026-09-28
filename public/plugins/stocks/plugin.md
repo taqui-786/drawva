@@ -17,7 +17,7 @@ Use for a named or coded stock ticker (e.g. Shanghai/Shenzhen A-shares, Hong Kon
 
 ## Output contract
 
-Return exactly one `html_widget` command and no prose, with `pluginId:"stocks"`. Place it at the user's arrow/box destination or nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:60`. Generate the responsive HTML yourself. Make name, code, latest price, and change dominant; draw a large daily close/candlestick trend with readable axes and concise fundamentals. Keep the outer layout transparent with no card background, border, or shadow.
+Return exactly one `html_widget` command and no prose, with `pluginId:"stocks"`. Place it at the user's arrow/box destination or nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:60`. Generate the responsive HTML yourself. Make latest price, change, and daily close/candlestick trend dominant with readable axes and concise fundamentals. Collaborative ink layout: when user ink already names the ticker/stock (e.g. 'NVDA daily chart'), do not generate a huge redundant title banner; flow directly into price, change, candlestick chart, and fundamentals. Keep the outer layout transparent with no card background, border, or shadow.
 
 ## Data contract
 

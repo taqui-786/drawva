@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  allowedDevOrigins: ["10.34.199.40"],
+  allowedDevOrigins: ["10.103.18.40"],
   serverExternalPackages: ["@deepseek-ai/cordis", "@deepseek-ai/dsh-*", "@earendil-works/pi-ai", "sharp"],
   async headers() {
     return [

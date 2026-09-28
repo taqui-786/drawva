@@ -25,7 +25,7 @@ Prefer returning `diagram_source` with `pluginId:"flowchart"` when one of the 7 
 - `cytoscape-json`: pathways and node-link networks.
 - `geojson`: geographical map features.
 
-For formats not directly rendered locally (PlantUML, DBML, D2, SPICE, KiCad), return `html_widget` with `pluginId:"flowchart"`, complete HTML rendering, and full reusable source in `copyText` with `copyLabel:"Copy <format>"`.
+For formats not directly rendered locally (PlantUML, DBML, D2, SPICE, KiCad), return `html_widget` with `pluginId:"flowchart"`, complete HTML rendering, and full reusable source in `copyText` with `copyLabel:"Copy <format>"`. Collaborative ink layout: when user ink already provides the title or label for the diagram, do not add an extra redundant title card/node; let user ink crown the diagram.
 
 ## Runtime rules
 

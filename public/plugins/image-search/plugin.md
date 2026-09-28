@@ -19,7 +19,7 @@ recommended-refresh-seconds: 86400
 Use when the user explicitly requests real photos or online illustrations.
 
 ## Output contract
-Two steps, one tool call per step. Step 1: call `image_search` with `{ query, count }`. Step 2: return one html_widget command ({ tool: "html_widget", pluginId: "image-search", title, x, y, w, h, html, refreshSeconds: 86400 }) embedding the returned `thumbUrl`/`fullUrl` directly in `<img>` tags with title + artist attribution. Default to 1 photo unless user requests more (max 5). Do not provide copyText.
+Two steps, one tool call per step. Step 1: call `image_search` with `{ query, count }`. Step 2: return one html_widget command ({ tool: "html_widget", pluginId: "image-search", title, x, y, w, h, html, refreshSeconds: 86400 }) embedding the returned `thumbUrl`/`fullUrl` directly in `<img>` tags with title + artist attribution. Default to 1 photo unless user requests more (max 5). Do not provide copyText. Collaborative ink layout: when user ink states the photo subject, place the photo cleanly below the handwriting without an extra redundant title card.
 
 ## Data contract
 - Resolve URLs with the `image_search` tool only. Never fetch a photo API from inside widget HTML/JS: the sandboxed iframe has no same-origin access, third-party CORS and anonymous rate limits fail there, and the board renders blank.
