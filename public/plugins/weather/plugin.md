@@ -18,8 +18,13 @@ recommended-refresh-seconds: 900
 Use for current weather, temperature, humidity, wind, and short forecasts.
 
 ## Output contract
-Return one html_widget command ({ tool: "html_widget", pluginId: "weather", title, x, y, w, h, html, refreshSeconds: 900 }). Strictly transparent layout across all containers, daily forecast columns, and cards (`background: transparent`). Do NOT paint solid white or tinted card backgrounds (#fff, #ffffff, #f1f5f9) — the whiteboard canvas grid must show through all elements. Use clean 1px borders and high-contrast typography for structure, no card shadow.
+Return one html_widget command ({ tool: "html_widget", pluginId: "weather", title, x, y, w, h, html, refreshSeconds: 900 }). Strictly transparent layout across all containers, daily forecast columns, and cards (`background: transparent !important`). Do NOT paint solid white or tinted card backgrounds (#fff, #ffffff, #f1f5f9) — the whiteboard canvas grid must show through all elements. Use clean borders and high-contrast typography for structure, no card shadow.
 Collaborative ink layout: when user ink already states the location/subject (e.g. "Todays weather of Ranchi"), do NOT duplicate "Ranchi" as a prominent title banner. Start directly with current conditions/temperature and 5-day forecast cards, using subtle secondary location/time metadata ("Jharkhand · Updated 12:00 PM").
+Wireframe & compartment fitting: When placed inside a user's hand-drawn partitioned box or layout grid (e.g. top header space + bottom-left and bottom-right columns), do NOT erase the ink. Structure the HTML widget into matching transparent compartments:
+- Top section: current temperature, weather icon, condition, local time.
+- Bottom-left section: atmospheric stats (Humidity, Feels Like, Wind).
+- Bottom-right section: forecast cards/outlook.
+Ensure `background: transparent !important` on all inner sections and cards so the user's hand-drawn lines act as the visible frame and dividers!
 
 ## Data contract
 1. Geocode: GET https://geocoding-api.open-meteo.com/v1/search?name={encodedPlace}&count=1&format=json

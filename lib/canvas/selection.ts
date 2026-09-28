@@ -68,7 +68,7 @@ export function eraseRegion(engine: CanvasEngine, rect: Rect): void {
   engine.requestRender();
 }
 
-export function eraseContainedInk(engine: CanvasEngine, rect: Rect): void {
+export function eraseContainedInk(engine: CanvasEngine, rect: Rect, fallbackToRegion = false): void {
   const pad = 32;
   const extRect = clipRect({
     x: rect.x - pad,
@@ -145,9 +145,18 @@ export function eraseContainedInk(engine: CanvasEngine, rect: Rect): void {
         }
       }
 
-      const isInner = compInside > 0 && (compOutside === 0 || (compOutside <= 15 && compOutside / queue.length < 0.1));
+      const isInner =
+        compInside > 0 &&
+        (compOutside === 0 ||
+          compInside / queue.length >= 0.55 ||
+          (compOutside <= 40 && compOutside / queue.length < 0.2));
 
       if (isInner) {
+        hasAnyInnerErase = true;
+        for (let i = 0; i < queue.length; i++) {
+          toErase[queue[i]] = 1;
+        }
+      } else if (fallbackToRegion && compInside > 0 && compOutside / queue.length < 0.8) {
         hasAnyInnerErase = true;
         for (let i = 0; i < queue.length; i++) {
           const idx = queue[i];
@@ -162,6 +171,9 @@ export function eraseContainedInk(engine: CanvasEngine, rect: Rect): void {
   }
 
   if (!hasAnyInnerErase) {
+    if (fallbackToRegion) {
+      eraseRegion(engine, rect);
+    }
     return;
   }
 

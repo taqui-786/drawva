@@ -2095,7 +2095,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         (ec.w > 0 || ec.h > 0)
       ) {
         const rect = { x: ec.x, y: ec.y, w: ec.w, h: ec.h };
-        eraseRegion(_eng, rect);
+        eraseContainedInk(_eng, rect, true);
         draft.notifyInkErase(rect);
         syncManager.current?.broadcast({ type: "SYNC_INK_ERASE", ...rect });
 
