@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { useSnapshot } from "valtio";
 import {
@@ -58,6 +59,7 @@ import {
   restoreSnapshot,
   saveAutosave,
   loadAutosave,
+  clearCanvasIndexedDB,
   exportPng,
   exportJson,
   importJson,
@@ -239,6 +241,8 @@ type RefineResult =
 const INK_COALESCE_MS = 25_000;
 
 export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}) {
+  const router = useRouter();
+  const pathname = usePathname();
   const { engine, mountRef } = useCanvas();
   const { mode, color, pen, aiStatus, autoOn, viewMode, gridVisible } = useSnapshot(appState);
   const eraser = 18;
@@ -1605,6 +1609,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
 
   function clearBoard() {
     if (!engine) return;
+    void clearCanvasIndexedDB(canvasIdRef.current);
     const newSessionId = createAndStoreSession(session?.user?.id);
     conductorRef.current?.setSessionId(newSessionId);
     conductorRef.current?.cancel();
@@ -1628,6 +1633,17 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     setIsCanvasEmpty(true);
     afterBoardChange();
   }
+
+  const handleCreateNewCanvas = useCallback(async () => {
+    await clearCanvasIndexedDB(activeCanvasId);
+    clearBoard();
+    setCreatedCanvasId(null);
+    setCreatedCanvasTitle(null);
+    canvasLoadedIdRef.current = undefined;
+    if (pathname !== "/canvas") {
+      router.push("/canvas");
+    }
+  }, [activeCanvasId, pathname, router]);
 
   function doExportPng() {
     if (engine) void exportPng(engine, widgets.current, objects.current);
@@ -4363,6 +4379,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
         onOpenSettings={() => setSettingsOpen(true)}
         onOpenModelSelect={() => setModelSelectOpen(true)}
         activeModelName={activeModel || undefined}
+        onNewCanvas={handleCreateNewCanvas}
       />
 
       <SaveCanvasDialog

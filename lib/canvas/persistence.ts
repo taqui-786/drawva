@@ -504,6 +504,21 @@ export async function clearAgentSession(canvasId?: string): Promise<void> {
   } catch {}
 }
 
+export async function clearCanvasIndexedDB(canvasId?: string | null): Promise<void> {
+  if (typeof window === "undefined" || !window.indexedDB) return;
+  try {
+    await deleteAutosave(canvasId);
+    await clearAgentSession(canvasId ?? undefined);
+    if (canvasId) {
+      await deleteAutosave(null);
+      await clearAgentSession();
+    }
+  } catch (err) {
+    console.error("[persistence] clearCanvasIndexedDB failed:", err);
+  }
+}
+
+
 const AGENT_LOGS_KEY = "agentLogs";
 const AGENT_LOGS_MAX = 50;
 

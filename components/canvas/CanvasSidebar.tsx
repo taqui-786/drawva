@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useSession, signOut } from "@/lib/auth-client";
 import { fetchCanvasList, deleteCloudCanvas, type CanvasListItem } from "@/lib/canvas/cloudSync";
-import { deleteAutosave } from "@/lib/canvas/persistence";
+import { clearCanvasIndexedDB } from "@/lib/canvas/persistence";
 import { DeleteCanvasDialog } from "./DeleteCanvasDialog";
 import { cn } from "@/lib/utils";
 
@@ -36,6 +36,7 @@ interface CanvasSidebarProps {
   onOpenSettings: () => void;
   onOpenModelSelect: () => void;
   activeModelName?: string;
+  onNewCanvas?: () => void;
 }
 
 function formatRelativeTime(ts: number): string {
@@ -62,6 +63,7 @@ export function CanvasSidebar({
   onOpenSettings,
   onOpenModelSelect,
   activeModelName = "Default Model",
+  onNewCanvas,
 }: CanvasSidebarProps) {
   const router = useRouter();
   const { data: session } = useSession();
@@ -136,9 +138,14 @@ export function CanvasSidebar({
     touchCurrentXRef.current = null;
   };
 
-  const handleNewCanvas = () => {
+  const handleNewCanvas = async () => {
     onOpenChange(false);
-    router.push("/canvas");
+    await clearCanvasIndexedDB(currentCanvasId);
+    if (onNewCanvas) {
+      onNewCanvas();
+    } else {
+      router.push("/canvas");
+    }
   };
 
   const handleSelectCanvas = (id: string) => {
@@ -165,10 +172,14 @@ export function CanvasSidebar({
       const res = await deleteCloudCanvas(id);
       if (res.success) {
         toast.success("Canvas deleted");
-        await deleteAutosave(id);
+        await clearCanvasIndexedDB(id);
         setCanvases((prev) => (prev ? prev.filter((c) => c.id !== id) : null));
         if (currentCanvasId === id) {
-          router.push("/canvas");
+          if (onNewCanvas) {
+            onNewCanvas();
+          } else {
+            router.push("/canvas");
+          }
         }
       } else {
         toast.error("Failed to delete canvas");
