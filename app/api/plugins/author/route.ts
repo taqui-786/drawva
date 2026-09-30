@@ -34,7 +34,6 @@ export async function POST(req: Request) {
         { status: 400 }
       );
     }
-    console.log("Plugin creation called");
     
     const llm = resolveLlmConfig({
       providerType: providerType || "custom",
