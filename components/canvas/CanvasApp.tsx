@@ -1607,7 +1607,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     redoRef.current = redo;
   });
 
-  function clearBoard() {
+  const clearBoard = useCallback(() => {
     if (!engine) return;
     void clearCanvasIndexedDB(canvasIdRef.current);
     const newSessionId = createAndStoreSession(session?.user?.id);
@@ -1631,8 +1631,8 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     });
     syncManager.current?.broadcast({ type: "SYNC_CLEAR" });
     setIsCanvasEmpty(true);
-    afterBoardChange();
-  }
+    afterBoardChangeRef.current();
+  }, [engine, session?.user?.id]);
 
   const handleCreateNewCanvas = useCallback(async () => {
     await clearCanvasIndexedDB(activeCanvasId);
@@ -1643,7 +1643,7 @@ export function CanvasApp({ canvasId = null }: { canvasId?: string | null } = {}
     if (pathname !== "/canvas") {
       router.push("/canvas");
     }
-  }, [activeCanvasId, pathname, router]);
+  }, [activeCanvasId, clearBoard, pathname, router]);
 
   function doExportPng() {
     if (engine) void exportPng(engine, widgets.current, objects.current);
