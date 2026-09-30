@@ -12,21 +12,19 @@ recommended-refresh-seconds: 900
 ---
 
 # Natural Events
-
-Use for current natural events worldwide or in a named region. Do not present results as emergency instructions.
+Use for current worldwide/regional natural events, not emergency instructions.
 
 ## Output contract
-
-Return exactly one `html_widget` command and no prose, with `pluginId:"natural-events"`. Use the destination indicated by writing, arrow, or box; otherwise choose nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:900`. Generate the responsive HTML yourself. Emphasize event names, category, recency, and location with large text and a restrained list or coordinate view. Collaborative ink layout: when user ink states the topic/question, omit redundant title banners and start directly with the event cards and category/location details. Keep the outer layout transparent with no card background, border, or shadow.
+One `html_widget` in `canvas_apply`, `pluginId:"natural-events", refreshSeconds:900`; default 720×480, target/maxWidgetSize wins. Writing/arrow/box destination or below ink; large event names/category/recency/location in a restrained list/coordinate view. No duplicate topic/question banner; transparent outer layout, no card background/border/shadow.
 
 ## Data contract
-
-Fetch JSON `GET https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=20`. Optional query parameters include `category`, `days`, `start`, `end`, and `bbox=minLon,minLat,maxLon,maxLat`. Response `events[]` provides `id`, `title`, `description`, `closed`, `categories[]`, `sources[]`, and chronological `geometry[]`. Each geometry has `date`, `type`, `coordinates`, and sometimes `magnitudeValue` and `magnitudeUnit`. Use the latest geometry for current position and say when location is approximate. Display NASA EONET attribution.
+GET https://eonet.gsfc.nasa.gov/api/v3/events?status=open&limit=20
+Optional `category`, `days`, `start`, `end`, `bbox=minLon,minLat,maxLon,maxLat`.
+Read `events[]`: `id`, `title`, `description`, `closed`, `categories[]`, `sources[]`, chronological `geometry[]`. Geometry: `date`, `type`, `coordinates`, optional `magnitudeValue`/`magnitudeUnit`. Use latest geometry for current position; respect its type and label approximate location. Display NASA EONET attribution. Open events are reported activity, not proof of an eruption at this instant; preserve source/date context.
 
 ## Runtime rules
-
-Fetch only the declared origin with `credentials:"omit"`. The HTML owns fetching and its timer. Do not use external assets, current-frame navigation, forms, cookies, storage, or secrets. Show loading/error states and last successful update. After every render call `window.parent.postMessage({type:"drawva-widget-updated"}, "*")`.
+HTML owns fetch/900-second timer. Declared origin, `credentials:"omit"`, `response.ok`; loading/empty/error, last successful update. No external assets, navigation, forms, cookies, storage, secrets. After render: `window.parent.postMessage({type:"drawva-widget-updated"},"*")`.
 
 ## One-shot example
-
-User writes `What active volcanoes are erupting right now?` with an arrow. Produce one `html_widget` at the arrow destination listing recent open volcano events, dates, coordinates, and NASA EONET attribution.
+`What active volcanoes are erupting right now?` + arrow → one `html_widget` at tip listing recent open volcano events, dates, coordinates, NASA EONET attribution.
+"Wildfires near this region" → filter by supported category/bbox; no results means none in that response, not proof the region is safe.

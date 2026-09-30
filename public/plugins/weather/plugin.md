@@ -13,25 +13,21 @@ recommended-refresh-seconds: 900
 ---
 
 # Weather
-
-## Use
-Use for current weather, temperature, humidity, wind, and short forecasts.
+Use for current weather, temperature, humidity, wind, short forecasts.
 
 ## Output contract
-Return one html_widget command ({ tool: "html_widget", pluginId: "weather", title, x, y, w, h, html, refreshSeconds: 900 }). Strictly transparent layout across all containers, daily forecast columns, and cards (`background: transparent !important`). Do NOT paint solid white or tinted card backgrounds (#fff, #ffffff, #f1f5f9) — the whiteboard canvas grid must show through all elements. Use clean borders and high-contrast typography for structure, no card shadow.
-Collaborative ink layout: when user ink already states the location/subject (e.g. "Todays weather of Ranchi"), do NOT duplicate "Ranchi" as a prominent title banner. Start directly with current conditions/temperature and 5-day forecast cards, using subtle secondary location/time metadata ("Jharkhand · Updated 12:00 PM").
-Wireframe & compartment fitting: When placed inside a user's hand-drawn partitioned box or layout grid (e.g. top header space + bottom-left and bottom-right columns), do NOT erase the ink. Structure the HTML widget into matching transparent compartments:
-- Top section: current temperature, weather icon, condition, local time.
-- Bottom-left section: atmospheric stats (Humidity, Feels Like, Wind).
-- Bottom-right section: forecast cards/outlook.
-Ensure `background: transparent !important` on all inner sections and cards so the user's hand-drawn lines act as the visible frame and dividers!
+One `html_widget` command inside `canvas_apply`: `pluginId:"weather", title, x,y,w,h,html, refreshSeconds:900`. Start with temperature/conditions and 5-day forecast; no duplicate "Ranchi" banner for "Todays weather of Ranchi". Secondary metadata example: "Jharkhand · Updated 12:00 PM" (use actual region/time).
+Transparent containers/cards/forecast columns (`background:transparent !important`), dark readable type, clean borders, no shadows or #fff/#ffffff/#f1f5f9 fills.
+Preserve partitioned ink: top = temperature/icon/condition/local time; bottom-left = Humidity/Feels Like/Wind; bottom-right = forecast/outlook. Match compartments, no outer borders, 20-unit inset, `placement:"inside_target"`; leave 35–40 units below handwritten title. Stack portrait content vertically. Show Feels Like only if returned; never substitute temperature silently.
 
 ## Data contract
-1. Geocode: GET https://geocoding-api.open-meteo.com/v1/search?name={encodedPlace}&count=1&format=json
-2. Forecast: GET https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto
+1. GET https://geocoding-api.open-meteo.com/v1/search?name={encodedPlace}&count=1&format=json → `results[0]` latitude/longitude/name/timezone. Empty results → location not found, no invented coordinates.
+2. GET https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current=temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m&daily=weather_code,temperature_2m_max,temperature_2m_min&timezone=auto
+Read `current`, `current_units`, `daily.time` and matching daily arrays; take five days. Use returned units/timezone and weather-code conditions, not guessed units/local device time.
 
 ## Runtime rules
-Fetch with credentials: "omit". Show loading/error states. Call window.parent.postMessage({ type: "drawva-widget-updated" }, "*").
+HTML owns initial fetch/900-second refresh. Declared origins only, `credentials:"omit"`; check `response.ok`, loading/empty/error states, source/data time. After render: `window.parent.postMessage({type:"drawva-widget-updated"},"*")`.
 
 ## One-shot example
-User writes "Tokyo Weather": emit html_widget showing current temp, conditions, and 5-day forecast for Tokyo.
+"Tokyo Weather" → `html_widget` with Tokyo current temp, conditions, 5-day forecast below ink.
+"Weather" in a top-header/two-column sketch → same data in matching transparent compartments; preserve every divider, no duplicate heading or erase.

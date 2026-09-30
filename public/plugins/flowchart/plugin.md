@@ -11,26 +11,25 @@ recommended-refresh-seconds: 60
 ---
 
 # Professional Diagrams
-
-Use whenever the user requests flowcharts, sequence diagrams, network topologies, architecture diagrams, charts, chemical molecular structures, BPMN business workflows, or geographic maps.
+Use for flowcharts, sequence/network/architecture diagrams, charts, chemical molecules, BPMN workflows, geographic maps. A request like "Draw user authentication flow" is professional notation, not a freehand doodle.
 
 ## Output contract
-
-Prefer returning `diagram_source` with `pluginId:"flowchart"` when one of the 7 built-in formats fits:
-- `mermaid`: flowcharts, sequence, class, state, ER, mind maps, Gantt.
-- `dot`: Graphviz DOT architecture and dependency networks.
-- `vega-lite`: statistical, comparative, and time-series charts.
-- `smiles`: 2D chemical molecular structures (raw SMILES string).
-- `bpmn-xml`: business process workflows (BPMN 2.0 XML).
-- `cytoscape-json`: pathways and node-link networks.
-- `geojson`: geographical map features.
-
-For formats not directly rendered locally (PlantUML, DBML, D2, SPICE, KiCad), return `html_widget` with `pluginId:"flowchart"`, complete HTML rendering, and full reusable source in `copyText` with `copyLabel:"Copy <format>"`. Collaborative ink layout: when user ink already provides the title or label for the diagram, do not add an extra redundant title card/node; let user ink crown the diagram.
+Prefer `diagram_source` inside `canvas_apply`, `pluginId:"flowchart"`:
+| sourceFormat | Use |
+|---|---|
+| mermaid | flowchart, sequence, class, state, ER, mind maps, Gantt |
+| dot | Graphviz architecture/dependency networks |
+| vega-lite | statistical/comparative/time-series charts |
+| smiles | 2D chemical structures, raw SMILES |
+| bpmn-xml | BPMN 2.0 XML workflows |
+| cytoscape-json | pathways/node-link networks |
+| geojson | geographic features |
+Unsupported local formats (PlantUML, DBML, D2, SPICE, KiCad): `html_widget`, same pluginId, complete HTML rendering plus full reusable source in `copyText`, `copyLabel:"Copy <format>"`. Do not claim raw source alone is a rendered diagram.
+Ink supplies title: no duplicate title card/node.
 
 ## Runtime rules
-
-Diagram source must be complete and valid. Keep layouts transparent. For in-place editing (`placement:"in_place"`), return one complete replacement preserving the format and pluginId.
+Complete valid source, transparent layout. Prefer read→patch for surgical edits; full in-place replacement of an EXISTING widget uses targetId, preserves sourceFormat/pluginId. Do not use in_place on new overlays of user ink: executor may erase it.
 
 ## One-shot example
-
-User writes `Draw user authentication flow` with an arrow. Return one `diagram_source` command with `sourceFormat:"mermaid"` containing the complete flowchart.
+`Draw user authentication flow` + arrow → one `diagram_source` at destination with `sourceFormat:"mermaid"`, complete flowchart.
+`Export this architecture as D2` → `html_widget` rendering and full D2 copyText, not an unsupported sourceFormat:"d2" command.

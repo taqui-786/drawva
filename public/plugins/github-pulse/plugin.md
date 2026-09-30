@@ -12,21 +12,19 @@ recommended-refresh-seconds: 600
 ---
 
 # GitHub Pulse
-
-Use when the user names a public GitHub `owner/repo` and asks for project status or popularity. Never request or embed a token.
+Use for public `owner/repo` status/popularity. Never request/embed a token.
 
 ## Output contract
-
-Return exactly one `html_widget` command and no prose, with `pluginId:"github-pulse"`. Place it at the indicated destination or nearby blank area. Prefer `w:720`, `h:480`, `refreshSeconds:600`. Generate the complete responsive HTML yourself. Make repository stars and freshness prominent; use large text and concise secondary metrics. Collaborative ink layout: when user ink states the repository/query, avoid redundant title banners; display repository stats, stars, forks, and freshness directly. Keep the outer layout transparent with no card background, border, or shadow.
+One `html_widget` in `canvas_apply`, `pluginId:"github-pulse", refreshSeconds:600`; default 720×480, target/maxWidgetSize wins. Indicated destination or below ink; large stars/freshness, concise secondary stats. Repository/query ink supplies title. Transparent outer layout, no card background/border/shadow.
 
 ## Data contract
-
-Fetch JSON `GET https://api.github.com/repos/{owner}/{repo}`. Available fields include `full_name`, `description`, `stargazers_count`, `forks_count`, `open_issues_count`, `subscribers_count`, `language`, `license.spdx_id`, `topics`, `created_at`, `updated_at`, `pushed_at`, `archived`, and `default_branch`. Optionally fetch `GET /repos/{owner}/{repo}/releases/latest`; treat 404 as no release. Anonymous GitHub REST access is limited to 60 requests per user IP per hour, so make no more than these two requests per refresh. Display GitHub attribution and the remaining quota from response headers when available.
+GET https://api.github.com/repos/{owner}/{repo}
+Fields: `full_name`, `description`, `stargazers_count`, `forks_count`, `open_issues_count`, `subscribers_count`, `language`, `license.spdx_id`, `topics`, `created_at`, `updated_at`, `pushed_at`, `archived`, `default_branch`.
+Optional GET https://api.github.com/repos/{owner}/{repo}/releases/latest; 404 = no release (not repository failure). Anonymous quota: 60 requests/IP/hour; no more than these TWO requests per refresh. GitHub attribution; remaining quota from headers when available. Missing license/language/release is unavailable, never invented.
 
 ## Runtime rules
-
-Fetch only the declared origin with `credentials:"omit"`. The HTML owns fetching and its timer. Do not use external assets, current-frame navigation, forms, cookies, storage, Authorization headers, or secrets. Show loading/error states and last successful update. After every render call `window.parent.postMessage({type:"drawva-widget-updated"}, "*")`.
+HTML owns fetch/600-second timer. Declared origin, `credentials:"omit"`, `response.ok`; loading/empty/error, last successful update. No external assets, navigation, forms, cookies, storage, Authorization headers, secrets. On quota exhaustion show state/reset time if available; no rapid retries. After render: `window.parent.postMessage({type:"drawva-widget-updated"},"*")`.
 
 ## One-shot example
-
-User writes `vercel/next.js project stats` and points right. Produce one `html_widget` there showing repository summary, stars, forks, issues, language, latest activity/release, and GitHub attribution.
+`vercel/next.js project stats` + right arrow → one `html_widget` there: summary/stars/forks/issues/language/latest activity/release, GitHub attribution.
+Repository succeeds but latest release is 404 → retain repository stats, show "No published release"; do not fail the entire widget.

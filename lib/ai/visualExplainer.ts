@@ -6,79 +6,34 @@ export function isVisualExplainer(sourceFormat?: string, frameworkVersion?: stri
 }
 
 export const VISUAL_EXPLAINER_CONTRACT = `== VISUAL EXPLAINER ==
-Default path for understand / explain / learn / analyze / organize / plan — even if the user never says "infographic". One coordinated, canvas-native infographic on the board combining theory + diagrams like a high-density illustrated notebook page. Yields when the job is only to edit existing ink, or when the defining result is interaction, simulation, live data, a small applet, or a professional diagram.
+Default for understand/explain/learn/analyze/organize/plan, even without "infographic": ONE coordinated canvas-native notebook page combining theory + diagrams. For beginner requests, this is the central lesson in a nearby teaching group—not permission to cram every fact into one dense card. Yield to existing-ink edits, explicit sketchnotes, interaction/simulation/live data/applets, or professional notation. Rank information before choosing structure/decorating.
 
-Do not decorate first. Rank the information, then pick the structure that carries it.
+## Integration
+- Directly on whiteboard, not a floating card/modal/desktop window. "Photosynthesis" / "Quantum Computing" ink IS the title: omit duplicate <h1>/hero banner; start with category framing/subtitle, primary diagram, reaction formulas, or core cards below ink. Hero title only when no written title exists.
+- Beginner lesson structure: plain-language hook → definition → labeled mechanism → worked example → practical use/trade-off → recap/check. Define unfamiliar terms before use and show a concrete numeric transformation when the subject has one. Example "Explain quantization": FP32/INT8 bucket visual + Q(x)=round(x/S)+Z legend + x=1.37 worked mapping + 32/8=4× memory arithmetic with hardware caveat; never claim universal latency gains.
+- html/body/#stage/outer wrappers AND modules/cards/chips: background:transparent !important; no opaque/semi-opaque/white/dark window fills, no box-shadow anywhere. Grid visible through every module.
+- Crisp vector borders, e.g. 1.5px solid rgba(0,0,0,0.12) (light) or rgba(255,255,255,0.15) (dark), radius 8–12px. Drawn-layout compartments remain borderless per agent placement rules.
 
-## 1. CANVAS INTEGRATION (IRONCLAD: NO BOX SHADOW, NO WINDOW BACKGROUND)
-- The infographic MUST feel like it is directly drawn onto the whiteboard canvas alongside ink, NOT an external floating card, modal, or desktop window.
-- COLLABORATIVE TITLE CO-AUTHORSHIP (ZERO HEADING DUPLICATION):
-  * When the user has written or drawn the subject/title on the canvas (e.g. "Photosynthesis", "Quantum Computing"): DO NOT generate a duplicate <h1> or hero title banner! The user's handwritten ink already serves as the title of the visual explainer.
-  * Omit the redundant title banner and start immediately with the category framing / subtitle (if helpful), primary diagram, reaction formulas, or core cards.
-  * Position the explainer directly below the user's ink so the handwriting naturally crowns the infographic. Include an <h1> Hero Title only if the canvas had no written title.
-- ZERO WINDOW BACKGROUND: html, body, #stage, and outer wrapper divs MUST have background: transparent !important. Never paint a solid white or dark rectangle across the whole canvas viewport. The infinite canvas grid must show through.
-- MODULE STYLING: Individual diagram boxes, cards, and chips use clean, crisp vector borders (e.g. border: 1.5px solid rgba(0,0,0,0.12) in light mode or rgba(255,255,255,0.15) in dark mode, border-radius: 8px..12px) and transparent backgrounds (background: transparent !important). The infinite canvas grid must show through every module. Never paint opaque, semi-opaque, or white card fills.
-- ZERO BOX SHADOW: Never use box-shadow on the container, outer window, or modules. Drop shadows create artificial card elevation that breaks whiteboard immersion.
-## 2. NOTEBOOK-PAGE TYPOGRAPHY & SCALE (DESIGN FOR 20%–25% ZOOM)
-Canvas-world units are larger than desktop websites! Standard web text (11px-14px) is microscopic and completely unreadable on the canvas at 20%–25% overview zoom. Use large, bold, crisp typography:
-- Hero / Infographic Title: 56px – 68px, font-weight 700, tracking -0.02em (omit when user ink already provides the title).
-- Subtitle / Framing: 30px – 36px, font-weight 500, muted color.
-- Section Headings: 38px – 48px, font-weight 600.
-- Panel Titles / Key Concept Badges: 32px – 38px, font-weight 600.
-- Body Text (Theory & Explanations): 28px – 34px, line-height 1.45 – 1.55.
-- Data Values & Metrics: 48px – 68px, bold display numbers aligned with units.
-- Diagram Node Labels, Flowchart Text, Chips: 24px – 30px.
-- Footnotes & Meta Tags: 22px – 26px. Never drop below 22px anywhere!
+## Notebook typography (20%–25% zoom; not microscopic 11–14px web text)
+Hero 56–68px/700, tracking -0.02em (omit duplicate title); framing 30–36px/500, muted readable color; section headings 38–48px/600; panel titles/key-concept badges 32–38px/600; body theory 28–34px, line-height 1.45–1.55; metrics 48–68px bold aligned with units; diagram/flowchart/chip labels 24–30px; footnotes/meta 22–26px. Never below 22px. This explainer-specific scale overrides applet type defaults.
+Dense, balanced, purposeful: theory beside/above its corresponding diagram, no giant bottom void. Content-fitting aspect examples: 1400×900 focused, 1600×1000 landscape, 1800×1100 multi-panel, 1200×1600 vertical timeline/article. Fit these to maxWidgetSize rather than requesting an oversized frame.
 
-## 3. ZERO WASTED SPACE (COMPACT NOTEBOOK PAGE)
-- Treat the visual like a masterclass technical notebook page: dense, balanced, and purposeful.
-- Every pixel has a reason to exist. Never leave giant empty voids or unused vertical space at the bottom.
-- Flow theory paragraphs directly next to or above corresponding visual diagram components.
-- Choose compact dimensions that tightly wrap the content: e.g. 1400×900 for focused explainers, 1600×1000 for standard landscape, 1800×1100 for multi-panel systems, or 1200×1600 for vertical timelines/articles.
+## Six layout archetypes (omit any headline already supplied by ink)
+1. Useful Bait / Key Points: headline → hero diagram (~40–50% height) → 2×2 takeaway cards → large side-by-side visual/text callout → 3 bottom highlights. Concept summaries, feature overviews, executive briefs, essential facts.
+2. Versus / Comparison: title+criteria → balanced Option A/Option B columns with parallel points → central criteria spine/matrix → comparative summary → bottom badges/radar/indicator chips. REST vs GraphQL, Docker vs VM, pros/cons, trade-offs, before/after.
+3. Heavy Data: title → conceptual network hub/radial data chips → connected horizontal metrics (percentages/benchmarks/throughput) → detailed breakdown, 48px+ stats, comparative bar meters. Performance benchmarks, data-intensive topics, statistical reports, telemetry, quantitative comparisons.
+4. Road Map: title → winding serpentine/S-curve SVG through sequential stages → milestone boxes with step numbers/icons/diagrams/theory → destination/outcome. Step-by-step processes, workflows, development roadmaps, algorithmic execution stages, user journeys.
+5. Timeline: title → thick vertical spine/milestone dots → alternating left/right cards → circular date/version badges + theory/change notes → base summary chips. Technology history, version progression, project milestones, sequential causal chains.
+6. Visualized Article: editorial headline/subtitle → left data chart/architectural SVG + right theory narrative → central spotlight circle/bullets → bottom multi-column analysis + takeaway. "Explain LLM", "How Transformers Work": extensive theory with multi-stage diagrams.
 
-## 4. THE 6 INFOGRAPHIC LAYOUT ARCHETYPES
-Pick the one archetype from the layout cheat sheet that naturally fits the topic (omit the top headline banner when user ink is already the title, flowing immediately into the core diagram or criteria):
-
-1. Useful Bait (Key Points & Core Takeaways)
-   - Layout: Top headline banner → Primary hero diagram box (~40-50% height) → 2×2 grid of key takeaways cards → Large callout / feature block with side-by-side visual + text description → 3 bottom highlight cards.
-   - Best for: Concept summaries, feature overviews, executive briefs, essential facts.
-
-2. Versus / Comparison (Side-by-Side Analysis)
-   - Layout: Header title + criteria → Two balanced side-by-side vertical columns (Option A vs Option B) with parallel structured points → Central comparison criteria spine or matrix → Comparative summary text → Bottom comparative badges / radar / indicator chips.
-   - Best for: Contrasting technologies (e.g. REST vs GraphQL, Docker vs VM), pros & cons, trade-offs, before vs after.
-
-3. Heavy Data (Numbers & System Metrics)
-   - Layout: Header title → Central conceptual network hub with connected radial data chips → Connected horizontal metric flow chips (percentages, benchmarks, throughput) → Detailed breakdown cards with large stat callouts (48px+) and comparative bar meters.
-   - Best for: Performance benchmarks, data-intensive topics, statistical reports, telemetry, quantitative comparisons.
-
-4. Road Map (Process Journey & Winding Steps)
-   - Layout: Top title → Serpentine / winding S-curve connecting path (SVG stroke) through sequential stages → Milestone node boxes with step numbers, icons/diagrams, and explanatory theory → Final destination / outcome card.
-   - Best for: Step-by-step processes, workflows, development roadmaps, algorithmic execution stages, user journeys.
-
-5. Timeline (Chronological Evolution)
-   - Layout: Header title → Central vertical timeline spine (thick line with milestone dots) → Alternating left-and-right milestone cards → Circular date/version badges → Accompanying theory bullets and change notes → Milestone summary chips at the base.
-   - Best for: History of a technology, version progression, project milestones, sequential causal chains.
-
-6. Visualized Article (In-Depth Technical Deep Dive)
-   - Layout: Editorial headline with subtitle → Left-column data chart / architectural SVG diagram + Right-column core theoretical narrative → Central spotlight concept callout circle with bulleted notes → Bottom multi-column analytical breakdown columns with summary takeaway.
-   - Best for: Deep conceptual explanations (e.g. "Explain LLM", "How Transformers Work"), combining extensive theory with multi-stage diagrams.
-
-## 5. Visual Grammar & Palette
-- Clean technical illustration: Crisp inline SVG vectors for diagrams, arrows, and schemas.
-- Purposeful semantic colors:
-  * Blue (#2563eb / #3b82f6): Inputs, foundations, user space.
-  * Teal / Cyan (#0891b2 / #06b6d4): Transformations, data processing.
-  * Green (#16a34a / #22c55e): Outputs, verified state, success, stable results.
-  * Amber / Orange (#d97706 / #f59e0b): Core mechanism, attention, compute, latency.
-  * Purple (#7c3aed / #8b5cf6): Rules, algorithms, parameters, edge cases.
-  * Red (#dc2626 / #ef4444): Risks, bottlenecks, constraints.
-- Real SVG paths and shapes with labeled nodes, never blank placeholders or fake diagrams.
+## Visual grammar
+Real labeled inline SVG paths/shapes/arrows/schemas, never fake diagrams/blank placeholders.
+- If companion native notes/diagrams are created by a neighboring canvas_apply, do not repeat them in the HTML. Leave clear local anchors for them and let labeled arrows express the learning order.
+Semantic palette: blue #2563eb/#3b82f6 = inputs/foundations/user space; teal/cyan #0891b2/#06b6d4 = transformation/processing; green #16a34a/#22c55e = outputs/verified/success/stable; amber/orange #d97706/#f59e0b = mechanism/attention/compute/latency; purple #7c3aed/#8b5cf6 = rules/algorithms/parameters/edge cases; red #dc2626/#ef4444 = risks/bottlenecks/constraints.
 
 ## Invocation
-Call the visual_explainer tool once this turn with one complete HTML document (inline CSS/SVG, only the JS that helps). First paint must already be useful with JS off. Markers are stamped for you: sourceFormat ${VISUAL_EXPLAINER_SOURCE_FORMAT}, frameworkVersion ${VISUAL_EXPLAINER_FRAMEWORK_VERSION}, pluginId general, refreshSeconds 0. Omit copyText. Do not minify. Stable multiline HTML for later canvas_patch_widget.
-
-On an empty board, pick finite w/h and place it. Otherwise canvas_scan with plannedWidget, then pass that x,y,w,h. One visual_explainer per user turn; refine with canvas_patch_widget on widget.html. If the HTML would take ~a minute, ship a runnable scaffold at final size, then fill sections with patches. After render, postMessage {type:"drawva-widget-updated"}. Call window.drawvaWidgetReady() after a scientific Manim scene settles.
-
-For mathematics or physics, call load_visual_skill with math-2d, physics-2d, or math-3d before authoring. Put exactly one <meta name="drawva-visual-skill" content="…"> in the HTML. Import Manim-Web only as https://cdn.jsdelivr.net/npm/manim-web@0.3.24/dist/manim-web.browser.js inside an inline script type=module (Drawva rewrites it to the local 0.3.24 bundle, including its MathJax chunk). Static SVG first; Manim explains motion. 3-D scenes pass beforeSnapshot/afterSnapshot to window.drawvaWidgetReady so capture resets the camera. Do not load a skill for unrelated subjects.
-
-Do not use write_text as the main answer for a substantial explanation. Do not use ordinary html_widget (that is behavior-first). Do not use diagram_source unless the deliverable is professional notation.`;
+TOP-LEVEL visual_explainer, once per turn, complete HTML with inline CSS/SVG and only helpful JS. First paint useful with JS off. Host stamps sourceFormat ${VISUAL_EXPLAINER_SOURCE_FORMAT}, frameworkVersion ${VISUAL_EXPLAINER_FRAMEWORK_VERSION}, pluginId general, refreshSeconds 0. Omit copyText; stable multiline HTML, never minify.
+Clear target/current state → finite w/h and place directly; crowded/uncertain target → canvas_scan plannedWidget, then use proposed x/y/w/h and placement. Refine only via canvas_patch_widget on widget.html. If authoring would take ~a minute, create a useful runnable scaffold at final size, then fill sections with patches. After render: postMessage {type:"drawva-widget-updated"}.
+Math/physics: load_visual_skill math-2d/physics-2d/math-3d BEFORE authoring, not for unrelated subjects. Exactly one <meta name="drawva-visual-skill" content="…">. Manim-Web import ONLY https://cdn.jsdelivr.net/npm/manim-web@0.3.24/dist/manim-web.browser.js in inline script type=module; host rewrites to local 0.3.24 bundle/MathJax chunk. Static SVG first, Manim for motion. Call window.drawvaWidgetReady() after scene settles; 3-D supplies beforeSnapshot/afterSnapshot to reset camera for capture.
+Examples: "REST vs GraphQL" → parallel criteria, concrete trade-offs, comparison diagram; "How Transformers Work" → labeled attention/data flow beside theory, not a wall of text; "Quantum Computing" already in ink → begin at qubit diagram, not another hero title.
+Never use write_text as the substantial answer, ordinary html_widget for explanation-only work, or diagram_source unless the result is professional notation.`;

@@ -14,19 +14,18 @@ recommended-refresh-seconds: 86400
 ---
 
 # Show Real Photos Online
-
-## Use
-Use when the user explicitly requests real photos or online illustrations.
+Use for explicit real photos/online illustrations.
 
 ## Output contract
-Two steps, one tool call per step. Step 1: call `image_search` with `{ query, count }`. Step 2: return one html_widget command ({ tool: "html_widget", pluginId: "image-search", title, x, y, w, h, html, refreshSeconds: 86400 }) embedding the returned `thumbUrl`/`fullUrl` directly in `<img>` tags with title + artist attribution. Default to 1 photo unless user requests more (max 5). Do not provide copyText. Keep outer layout transparent with no card background or shadow. Collaborative ink layout: when user ink states the photo subject, place the photo cleanly below the handwriting without an extra redundant title card.
+After loading this contract, sequential steps: `image_search {query,count}` → `canvas_apply` containing one `html_widget` with `pluginId:"image-search",title,x,y,w,h,html,refreshSeconds:86400`. One call per step. Default 1 photo, max 5; embed returned thumbUrl/fullUrl, title/artist attribution, omit copyText. Below subject ink, no duplicate title card; transparent outer layout, no background/shadow.
 
 ## Data contract
-- Resolve URLs with the `image_search` tool only. Never fetch a photo API from inside widget HTML/JS: the sandboxed iframe has no same-origin access, third-party CORS and anonymous rate limits fail there, and the board renders blank.
-- Prefer results without `hotlinkRisk`. Render `<img src="thumbUrl">` linking to `fullUrl`, with `referrerpolicy="no-referrer"`, a descriptive `alt`, an `onerror` fallback that swaps to `fullUrl` once, and a visible text caption so the answer reads even if the host is down.
+Resolve ONLY through image_search; if unavailable, report limitation, never fabricate photo URLs. No widget-side photo API fetch: sandbox CORS/anonymous rate limits can leave blank content.
+Prefer no `hotlinkRisk`. `<img src="thumbUrl">` links to fullUrl; descriptive alt, `referrerpolicy="no-referrer"`, onerror swaps once to fullUrl, then visible failure caption. Retain artist/license/source attribution from tool results; never invent licensing.
 
 ## Runtime rules
-Do not use `crossorigin="anonymous"` on images unless you need canvas readback; plain `<img>` without CORS loads more hosts. Call window.parent.postMessage({ type: "drawva-widget-updated" }, "*") after load and after error.
+Avoid `crossorigin="anonymous"` unless canvas readback requires it; ordinary images load more hosts without CORS. On load/error: `window.parent.postMessage({type:"drawva-widget-updated"},"*")`.
 
 ## One-shot example
-User writes "photo of Golden Gate Bridge": call image_search first, then emit html_widget with the returned photo URL and attribution.
+"photo of Golden Gate Bridge" → image_search first → `html_widget` embedding returned URL and attribution.
+Thumbnail and fullUrl both fail → stop retrying and show caption/source link, never leave a blank success or fetch another photo API.

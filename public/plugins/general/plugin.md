@@ -11,45 +11,29 @@ recommended-refresh-seconds: 60
 ---
 
 # General HTML
-
-This plugin is the behavior-first path. Do not use it for ordinary notes, math, or a static explanation that native board tools already handle.
+Behavior-first; not ordinary notes/math/static explanations handled by native tools.
 
 ## Choose a path
-
-Pick one primary path. Do not emit a second speculative version of the same answer.
-
-- Native board: `write_text`, `draw_formula`, `plot_function`, `draw`, `animate_scene`. Short notes, equations, simple sketches, single-variable plots, and motion that rides existing ink.
-- Visual Explainer: the `visual_explainer` tool when the job is to understand, explain, learn, analyze, organize, or plan through one coordinated visual. A Transformer explainer, restructured notes, itinerary, or readable schedule belongs there. For math or physics, `load_visual_skill` first (`math-2d`, `physics-2d`, or `math-3d`).
-- Professional Diagrams: `diagram_source` with `pluginId:"flowchart"` when the artifact is notation — Mermaid, DOT, Vega-Lite, SMILES, BPMN, Cytoscape, GeoJSON. Unsupported professional formats still go through that plugin as `html_widget` plus `copyText`.
-- General HTML (this plugin): interaction that changes data or views, simulation, animation, a live display, a small browser tool, a freeform overlay, or a custom illustration that those paths cannot render.
-
-An attention simulator is General HTML. An editable C4 model is Professional Diagrams. Hover, reflow, or wanting extra layout control is not enough to pick this plugin.
+Pick ONE, never a second speculative version:
+- Native `write_text`, `draw_formula`, `plot_function`, `draw`, `animate_scene`: short notes/equations/simple sketches/single-variable plots/motion riding ink.
+- TOP-LEVEL `visual_explainer`: understand/explain/learn/analyze/organize/plan. Transformer explainer, restructured notes, itinerary, readable schedule. Math/physics → load_visual_skill math-2d/physics-2d/math-3d first.
+- Professional `diagram_source`, pluginId flowchart: Mermaid/DOT/Vega-Lite/SMILES/BPMN/Cytoscape/GeoJSON; unsupported formats → that plugin's html_widget + copyText.
+- General HTML: interaction changing data/views, simulation, animation, live display, small browser tool, freeform overlay/custom visual those paths cannot render. Explicit draw/sketch requests still use native draw.
+Attention simulator → General HTML; editable C4 model → Professional Diagrams. Hover/reflow/layout control alone is not an applet requirement.
 
 ## Output contract
-
-Return exactly one `html_widget` command (`pluginId:"general"`) and no prose. Generate one complete HTML document with inline CSS and JavaScript. Choose `x,y,w,h` for the request; omit `w,h` only to take the engine default. Use `refreshSeconds:0` unless a live public source needs a bounded interval.
-
-HTML is the source. Omit `copyText` and `copyLabel`. Do not minify. Keep major HTML, CSS, and JavaScript on separate lines so later `canvas_patch_widget` diffs stay small. Prefer lines under 160 characters. Never hard-wrap strings, URLs, or literals.
-
-The widget must answer visually. Do not make JSON, XML, YAML, source, or a `<pre>` dump the primary view unless the user asked to inspect raw data.
-
-Place the widget where it solves the problem. Overlay a transparent SVG on existing ink when annotating or animating it — draw only the new path, projectile, or effect; never redraw the figures underneath. Use nearby blank space only for a standalone visual.
-
-Keep `html`, `body`, all containers, cards, panels, the canvas, and SVG root completely transparent (`background: transparent !important`). NEVER add an outer card background, opaque panel fills, or box-shadow. The infinite canvas grid must always show through every part of the interactive element. Structure modules with clean 1px vector borders and high-contrast typography, never opaque background boxes.
-Canvas component architecture: design for 20%–25% overview zoom, not a desktop webpage. Use large, chunky typography (key metrics & readouts 48–72px bold, section headers 38–48px, body 30–38px, secondary labels 24–28px). Interactive controls & buttons must be touch-friendly (min-height 52–64px, font-size 28–34px bold, padding 12px 20px, radius 10–14px). Draggable handles/vertices 38–48px, strokes 4–6px. 100% space utilization: fill allocated width/height generously without dead vertical void; never crowd tiny controls in a corner. Zero heading redundancy: when user ink already provides the title, treat the ink as the header and flow directly into the component. Structure visual explainers with theory + diagrams and zero useless empty space.
-
-Establish our config `--color-primary` (Lime: `oklch(0.841 0.238 128.85)` / `#9ae600` in light mode, `oklch(0.768 0.233 130.85)` / `#7ccf00` in dark mode) as the primary brand/accent color. High-contrast readability is mandatory: on transparent/light canvas backgrounds, headings and text must use crisp deep dark colors (`#0f172a`, `#1e293b`), never white, off-white, or pale gray matching the canvas playground background. Use minimal secondary colors reserved for semantic states such as success, warning, and error in the html_widget.
-
-Prefer compact inline SVG. Use canvas or a third-party library only when SVG cannot do the job. For motion, prefer SVG with CSS, SMIL, or JavaScript.
+One complete inline HTML/CSS/JS `html_widget` inside canvas_apply, pluginId general; x/y/w/h for target (omit w/h only for engine default), refreshSeconds:0 unless live documented source needs bounded refresh. No prose during tool steps; short closing bubble afterwards.
+HTML is source: omit copyText/copyLabel, no minification. Separate major HTML/CSS/JS lines, prefer <160 chars, never hard-wrap literals/URLs/strings. Primary view is visual, not JSON/XML/YAML/source/<pre> unless explicitly requested.
+Delta-only transparent SVG overlay at referenced ink: new path/projectile/effect, never redraw figures. Use placement:"overlay" to preserve ink; in_place is for explicit replacement. Blank space only for standalone visuals.
+All html/body/containers/cards/panels/canvas/SVG transparent !important, no opaque fills/shadows; clean 1px structure borders, dark typography. Ink supplies heading. Design at 20%–25% zoom: metrics 48–72px bold, headers 38–48px, body 30–38px, secondary 24–28px; buttons 52–64px high, font 28–34px bold, padding 12px 20px, radius 10–14px; handles 38–48px, strokes 4–6px. Fill space, no tiny corner controls/dead voids; theory accompanies diagrams in the explainer path.
+--color-primary Lime: oklch(0.841 0.238 128.85)/#9ae600; dark oklch(0.768 0.233 130.85)/#7ccf00. Text #0f172a/#1e293b, never white/off-white/pale gray on light board. Minimal secondary success/warning/error colors.
+Prefer inline SVG; canvas/library only when SVG insufficient. Motion via CSS/SMIL/JS.
 
 ## Runtime rules
-
-Public HTTPS resources are allowed when they improve the result. Use version-pinned libraries and endpoints that need no secrets. Fetch with `fetch(url,{credentials:"omit"})`, encode user-derived URL parameters, check `response.ok`, and show loading and error states.
-
-Never include secrets, authorization headers, cookies, private endpoints, or user data that was not given for that destination. Do not use forms, storage, `sendBeacon`, or current-frame navigation. Useful source links: `<a target="_blank" rel="noopener noreferrer">`.
-
-For multi-part SVG, use a wrapping CSS layout or a `ResizeObserver`; do not stretch one fixed viewBox with `width:100%;height:100%`. Aim 3D cameras at the subject after resize. After first render and meaningful layout or state changes, call `window.parent.postMessage({type:"drawva-widget-updated"}, "*")` — not every animation frame.
+Public HTTPS assets/version-pinned libraries may improve output; no secrets. Prefer a matching live plugin; otherwise resolve/verify the public source through tools before authoring live fetches. No invented endpoints or widget-side photo/search APIs. Use credentials:"omit", encoded URL params, response.ok, loading/error states; tool-resolved static media/data is allowed.
+No authorization headers, cookies, private endpoints, unrelated user data, forms, storage, sendBeacon, current-frame navigation. Source links: <a target="_blank" rel="noopener noreferrer">.
+Multi-part SVG: wrapping CSS/ResizeObserver, never stretch fixed viewBox with width:100%;height:100%. Aim 3D camera at subject after resize. First render/meaningful changes → window.parent.postMessage({type:"drawva-widget-updated"},"*"), not every animation frame.
 
 ## One-shot example
-
-User writes `colorful clock showing the current time` and points right. Produce one `html_widget` there with a large colorful clock, local date and seconds, a one-second timer, responsive layout, no network requests, and no prose outside the command.
+`colorful clock showing the current time` + right arrow → one html_widget there: large colorful clock, local date/seconds, one-second timer, responsive layout, no network, no prose outside tool call during execution.
+"Make them throw a ball" with two ink figures → prefer native animate_scene; if genuine controls are requested, transparent delta-only overlay between their measured hands, not duplicated figures.

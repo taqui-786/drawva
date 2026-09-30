@@ -12,21 +12,21 @@ recommended-refresh-seconds: 86400
 ---
 
 # Exchange Rates
-
-Use for fiat exchange rates, currency conversion, or recent daily trends. Explain that rates are reference values, not executable bank quotes.
+Use for fiat conversion, reference rates, daily trends—not executable bank quotes.
 
 ## Output contract
-
-Return exactly one `html_widget` command and no prose, with `pluginId:"exchange-rates"`. Place it at the requested destination or nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:86400`. Generate the responsive HTML yourself. Make the requested converted amount or current rate dominant, show units clearly, and use a large simple trend if requested. Collaborative ink layout: when user ink already states the conversion (e.g. 'Convert 100 USD to EUR'), do not repeat a large title banner; make the converted amount, exchange rate, and units immediately prominent. Keep the outer layout transparent with no card background, border, or shadow.
+One `html_widget` in `canvas_apply`, `pluginId:"exchange-rates", refreshSeconds:86400`; default 720×480, target/maxWidgetSize wins. Requested destination or below ink; dominant converted amount/rate, explicit units, large trend if requested. "Convert 100 USD to EUR" needs no repeated banner. Transparent outer layout, no card background/border/shadow.
 
 ## Data contract
-
-For latest data fetch JSON `GET https://api.frankfurter.dev/v1/latest?base={BASE}&symbols={QUOTE1,QUOTE2}`. Response fields are `amount`, `base`, `date`, and `rates`. For history fetch `GET https://api.frankfurter.dev/v1/{start}..{end}?base={BASE}&symbols={QUOTE}`; `rates` is keyed by ISO date. Use ISO 4217 uppercase codes and calculate conversions in the browser. Data update on business days and may retain the previous date on weekends or holidays. Display the data date and Frankfurter attribution.
+| Purpose | GET |
+|---|---|
+| Latest | https://api.frankfurter.dev/v1/latest?base={BASE}&symbols={QUOTE1,QUOTE2} |
+| History | https://api.frankfurter.dev/v1/{start}..{end}?base={BASE}&symbols={QUOTE} |
+Latest fields: `amount`, `base`, `date`, `rates`; history `rates` keyed by ISO date. Uppercase ISO 4217 codes; compute conversion in browser from returned rate/amount. Rates update on business days: weekends/holidays may retain a prior date. Display data date and Frankfurter attribution, distinct from fetch time.
 
 ## Runtime rules
-
-Fetch only the declared origin with `credentials:"omit"`. The HTML owns fetching and its daily timer. Do not use external assets, current-frame navigation, forms, cookies, storage, or secrets. Show loading/error states and last successful update. After every render call `window.parent.postMessage({type:"drawva-widget-updated"}, "*")`.
+HTML owns fetch/daily timer. Declared origin, `credentials:"omit"`, `response.ok`; loading/empty/error, last successful update. No external assets, navigation, forms, cookies, storage, secrets. After render: `window.parent.postMessage({type:"drawva-widget-updated"},"*")`.
 
 ## One-shot example
-
-User writes `Convert 100 USD to EUR` and points below. Produce one `html_widget` below with the USD/EUR rate, converted amount, data date, and Frankfurter attribution.
+`Convert 100 USD to EUR` + downward arrow → one `html_widget` below with USD/EUR rate, converted amount, data date, Frankfurter attribution.
+"USD to EUR this weekend" → show returned business-day date, never relabel the rate as today's live bank quote.

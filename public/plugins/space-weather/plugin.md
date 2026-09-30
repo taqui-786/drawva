@@ -12,21 +12,18 @@ recommended-refresh-seconds: 300
 ---
 
 # Space Weather
-
-Use for current geomagnetic conditions, Kp history, or a broad aurora activity signal. Do not promise aurora visibility or replace local forecasts.
+Use for current geomagnetic conditions, Kp history, broad aurora signal. Never promise visibility or replace local forecasts.
 
 ## Output contract
-
-Return exactly one `html_widget` command and no prose, with `pluginId:"space-weather"`. Place it where the user indicates or in nearby blank space. Prefer `w:720`, `h:480`, `refreshSeconds:300`. Generate the responsive HTML yourself. Make the latest Kp value and qualitative activity level dominant, with a large 24-hour trend. Collaborative ink layout: when user ink states the prompt/question, do not duplicate it as a title header; make the Kp index, activity level, and trend dominant. Keep text highly readable and the outer layout transparent with no card background, border, or shadow.
+One `html_widget` in `canvas_apply`, `pluginId:"space-weather", refreshSeconds:300`; default 720×480, target/maxWidgetSize wins. Indicated destination or below ink; latest Kp/activity level and large 24-hour trend, not a duplicate question/title banner. Large readable text, transparent outer layout, no card background/border/shadow.
 
 ## Data contract
-
-Fetch JSON `GET https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json`. The first row is a header; later rows contain `time_tag`, `Kp`, `a_running`, and `station_count`. Convert numeric strings, reject invalid rows, sort chronologically, and use the latest row. Interpret Kp below 4 as quiet/unsettled, 4 as active, 5 as G1, 6 as G2, 7 as G3, 8 as G4, and 9 as G5. State that Kp is planetary-scale and aurora visibility also depends on location, darkness, and clouds. Display NOAA SWPC attribution.
+GET https://services.swpc.noaa.gov/products/noaa-planetary-k-index.json
+First row = headers; later rows `time_tag`, `Kp`, `a_running`, `station_count`. Parse numeric strings, reject invalid rows, sort chronologically, select latest. Kp below 4 = quiet/unsettled; 4 = active; 5 = G1; 6 = G2; 7 = G3; 8 = G4; 9 = G5. Fractional Kp: use lower threshold reached, not rounding up. Planetary-scale signal: visibility also depends on location, darkness, clouds. NOAA SWPC attribution.
 
 ## Runtime rules
-
-Fetch only the declared origin with `credentials:"omit"`. The HTML owns its initial fetch and timer. Do not use external assets, current-frame navigation, forms, cookies, storage, or secrets. Show loading/error states and last successful update. After every render call `window.parent.postMessage({type:"drawva-widget-updated"}, "*")`.
+HTML owns initial fetch/300-second timer. Declared origin, `credentials:"omit"`, `response.ok`; loading/empty/error, last successful update. No external assets, navigation, forms, cookies, storage, secrets. After render: `window.parent.postMessage({type:"drawva-widget-updated"},"*")`.
 
 ## One-shot example
-
-User writes `Is there aurora activity right now?` and points below. Produce one `html_widget` below showing latest Kp, activity level, trend, caveat, and NOAA attribution.
+`Is there aurora activity right now?` + downward arrow → one `html_widget` below: latest Kp/activity/trend/caveat, NOAA attribution.
+Kp 4.67 → active, not G1; missing data → unavailable, not a synthetic zero/quiet reading.
